@@ -1,0 +1,41 @@
+/* ==========================================================================
+   AARINAT SYSTEM - PARISH ONBOARDING & LICENSING ENGINE STYLE SHEETS
+   ========================================================================== */
+
+/* 1. SCROLLBAR CUSTOMIZATION (Slate Console Theme) */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: #090d16; /* deep slate dark */
+    border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #1e293b; /* slate-800 */
+    border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #334155; /* slate-700 */
+}
+
+/* 2. MOBILE INPUT OPTIMIZATION */
+@media (max-width: 768px) {
+    /* Ensures buttons and dropdown inputs have comfortable touch targets on phone screens */
+    input, select, button {
+        min-height: 44px;
+    }
+}
+
+/* 3. TRANSITION HELPERS */
+input, select, button {
+    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+/* Focused state shadow helpers for dark theme inputs */
+input:focus, select:focus {
+    box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2); /* transparent yellow-400 */
+}
