@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CELESTIAL CHURCH OF CHRIST - PARISH PORTAL</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Supabase JS Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Link to external styles -->
+    <link rel="stylesheet" href="styles.css">
+    <!-- Link to external app logic -->
+    <script src="app.js" defer></script>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800 transition-colors duration-200">
+
+    <!-- LANDING / LOGIN PAGE -->
+    <div id="landingPage" class="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 text-white p-6 overflow-y-auto">
+        <div class="max-w-md mx-auto my-auto w-full bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 shadow-2xl">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 mx-auto mb-4 bg-white rounded-full flex items-center justify-center shadow-lg p-1 text-blue-900 font-extrabold text-xs">
+                    CCC
+                </div>
+                <h1 class="text-lg font-black uppercase tracking-wider text-yellow-400">CELESTIAL CHURCH OF CHRIST</h1>
+                <p class="text-xs tracking-widest text-gray-300 font-semibold uppercase">Parish Administration Portal</p>
+            </div>
+
+            <!-- Access Gate Structure -->
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Select Parish Database</label>
+                    <select id="entranceSelector" class="w-full bg-white/20 text-slate-800 px-3 py-3 rounded-lg focus:outline-none text-xs font-bold border border-white/10">
+                        <option value="new_parish">+ Register New Parish</option>
+                    </select>
+                </div>
+
+                <!-- Registration Fields -->
+                <div id="parishRegFields" class="hidden space-y-3 bg-black/20 p-3.5 rounded-lg border border-white/5">
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">New Parish Name</label>
+                        <input type="text" id="regName" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="e.g. Grace Parish, Lagos">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">Set Parish Admin Password</label>
+                        <input type="password" id="regPassword" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="Set password">
+                    </div>
+                    <button onclick="createNewParish()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold uppercase tracking-wider transition">
+                        Submit License Request
+                    </button>
+                </div>
+
+                <!-- Passcode Input Box -->
+                <div id="passwordFieldContainer" class="hidden">
+                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Entrance Passcode</label>
+                    <input type="password" id="adminPasswordInput" class="w-full bg-white/20 text-white pl-4 pr-10 py-3 rounded-lg focus:outline-none border border-white/10 placeholder-gray-400 text-sm" placeholder="Enter password">
+                </div>
+
+                <button id="accessBtn" onclick="attemptLogin()" class="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-blue-950 font-bold rounded-lg transition uppercase tracking-wider text-xs shadow-md">
+                    Access Database
+                </button>
+            </div>
+        </div>
+        <div class="text-center text-[10px] text-gray-400 mt-4 leading-relaxed">
+            <p>Licensed for Celestial Church of Christ Parishes Worldwide</p>
+            <p class="text-gray-500 font-semibold">© 2026 Celestial Church of Christ. Powered by Aarinat Company Limited</p>
+        </div>
+    </div>
+
+    <!-- MAIN APP WRAPPER -->
+    <div id="mainApp" class="hidden min-h-screen flex flex-col md:flex-row">
+        
+        <!-- SIDEBAR NAVIGATION -->
+        <aside class="w-full md:w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col justify-between border-r border-slate-800 shadow-xl">
+            <div>
+                <div class="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-3">
+                    <div class="w-9 h-9 bg-white rounded-full flex items-center justify-center text-blue-900 font-extrabold text-[10px]">CCC</div>
+                    <div>
+                        <h2 class="text-xs font-black text-yellow-400 uppercase leading-none">PARISH DATA</h2>
+                        <p id="dashParishName" class="text-[10px] text-gray-400 italic truncate max-w-[140px] mt-1">Parish Name</p>
+                    </div>
+                </div>
+
+                <nav class="p-2 space-y-1 text-xs">
+                    <button onclick="showSection('dashboard')" id="nav-dashboard" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-chart-line text-blue-400 w-4"></i> Dashboard</button>
+                    <button onclick="showSection('members')" id="nav-members" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-users text-emerald-400 w-4"></i> Members Directory</button>
+                    <button onclick="showSection('attendance')" id="nav-attendance" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance Ledger</button>
+                    <button onclick="showSection('finance')" id="nav-finance" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Financial Ledger</button>
+                    <button onclick="showSection('circulars')" id="nav-circulars" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-bullhorn text-indigo-400 w-4"></i> HQ Circulars</button>
+                </nav>
+            </div>
+
+            <div class="p-3 border-t border-slate-800 bg-slate-950 space-y-2">
+                <button onclick="logout()" class="w-full py-2 bg-rose-600/25 hover:bg-rose-600/50 hover:text-white border border-rose-500/20 rounded text-xs font-semibold flex justify-center items-center gap-1.5 transition">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i> Lock Session
+                </button>
+                <div class="text-center text-[8px] text-slate-500">© 2026 CCC Parish System • Aarinat</div>
+            </div>
+        </aside>
+
+        <!-- MAIN WORKSPACE -->
+        <main class="flex-1 flex flex-col overflow-hidden">
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+                
+                <!-- Tab 1: DASHBOARD -->
+                <section id="section-dashboard" class="space-y-6">
+                    <div class="bg-gradient-to-r from-blue-900 to-indigo-800 text-white p-6 rounded-xl shadow-md">
+                        <h2 class="text-xl font-bold">Shalom Parish Administrator!</h2>
+                        <p class="text-xs text-blue-200 mt-1">Manage, capture, and update your local registries cleanly.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
+                            <div class="p-2.5 bg-blue-100 text-blue-600 rounded-lg"><i class="fa-solid fa-users text-lg"></i></div>
+                            <div>
+                                <p class="text-gray-500 uppercase tracking-wider font-semibold text-[10px]">Total Congregation</p>
+                                <p id="metricMembers" class="text-xl font-bold">0</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab 2: MEMBERS & CLERGY DIRECTORY -->
+                <section id="section-members" class="space-y-4 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800">Members & Clergy Registry</h2>
+                            <p class="text-xs text-gray-500">Complete church demographic ledger.</p>
+                        </div>
+                        <button onclick="openAddModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-xs font-semibold shadow transition">
+                            <i class="fa-solid fa-plus mr-1"></i> Register Member
+                        </button>
+                    </div>
+                    <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
+                                <tr>
+                                    <th class="p-3">Name</th>
+                                    <th class="p-3">ID</th>
+                                    <th class="p-3">Classification</th>
+                                    <th class="p-3">Rank</th>
+                                    <th class="p-3">Phone</th>
+                                </tr>
+                            </thead>
+                            <tbody id="membersTable" class="divide-y"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Tab 3: ATTENDANCE LEDGER -->
+                <section id="section-attendance" class="space-y-4 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800">Service Attendance</h2>
+                            <p class="text-xs text-gray-500">Record metrics based on service liturgies.</p>
+                        </div>
+                        <button onclick="openAttendanceModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-xs font-semibold shadow transition">
+                            <i class="fa-solid fa-calendar-plus mr-1"></i> Record Attendance
+                        </button>
+                    </div>
+                    <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
+                                <tr>
+                                    <th class="p-3">Service Date</th>
+                                    <th class="p-3">Service Type</th>
+                                    <th class="p-3">Attendee Headcount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="attendanceTable" class="divide-y text-gray-700"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Tab 4: FINANCIAL CONTRIBUTIONS -->
+                <section id="section-finance" class="space-y-4 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800">Financial contributions</h2>
+                            <p class="text-xs text-gray-500">Log offerings, tithes, and building pledges.</p>
+                        </div>
+                        <button onclick="openFinanceModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-xs font-semibold shadow transition">
+                            <i class="fa-solid fa-money-bill-transfer mr-1"></i> Log Contribution
+                        </button>
+                    </div>
+                    <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
+                                <tr>
+                                    <th class="p-3">Date</th>
+                                    <th class="p-3">Contributor</th>
+                                    <th class="p-3">Contribution Type</th>
+                                    <th class="p-3">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="financeTable" class="divide-y text-gray-700"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Tab 5: HQ CIRCULARS -->
+                <section id="section-circulars" class="space-y-4 hidden">
+                    <div class="pb-2 border-b">
+                        <h2 class="text-lg font-bold text-gray-800">Worldwide Circular Bulletins</h2>
+                        <p class="text-xs text-gray-500">Liturgical instructions published directly by the HQ office.</p>
+                    </div>
+                    <div id="circularsList" class="space-y-3">
+                        <p class="text-xs text-gray-400 italic">No global circular bulletins currently loaded.</p>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- MODAL POPUPS -->
+    <!-- 1. ADD MEMBER MODAL -->
+    <div id="addMemberModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center">
+                <span>REGISTER NEW MEMBER</span>
+                <button onclick="closeAddModal()" class="text-white"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-5 space-y-3">
+                <input type="text" id="m_name" class="w-full border p-2.5 rounded text-xs" placeholder="Full Name *">
+                <select id="m_class" class="w-full border p-2.5 rounded text-xs bg-white">
+                    <option value="MEMBER">Member</option>
+                    <option value="CLERGY">Clergy</option>
+                </select>
+                <input type="text" id="m_rank" class="w-full border p-2.5 rounded text-xs" placeholder="Church Rank *">
+                <input type="text" id="m_phone" class="w-full border p-2.5 rounded text-xs" placeholder="Phone Number">
+                <input type="text" id="m_dob" class="w-full border p-2.5 rounded text-xs" placeholder="Birthday Date (e.g. October 14) *">
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2">
+                <button onclick="closeAddModal()" class="px-4 py-2 border rounded">Cancel</button>
+                <button onclick="saveMember()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded">Save Member</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- 2. LOG ATTENDANCE MODAL -->
+    <div id="addAttendanceModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center">
+                <span>RECORD SERVICE ATTENDANCE</span>
+                <button onclick="closeAttendanceModal()" class="text-white"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-5 space-y-3">
+                <input type="date" id="att_date" class="w-full border p-2.5 rounded text-xs">
+                <input type="text" id="att_type" class="w-full border p-2.5 rounded text-xs" placeholder="Service Type (e.g., Sunday Service)">
+                <input type="number" id="att_headcount" class="w-full border p-2.5 rounded text-xs" placeholder="Headcount (e.g. 150)">
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2">
+                <button onclick="closeAttendanceModal()" class="px-4 py-2 border rounded">Cancel</button>
+                <button onclick="saveAttendance()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded">Log Records</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- 3. LOG FINANCE MODAL -->
+    <div id="addFinanceModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center">
+                <span>LOG FINANCIAL TRANSACTION</span>
+                <button onclick="closeFinanceModal()" class="text-white"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-5 space-y-3">
+                <input type="date" id="fin_date" class="w-full border p-2.5 rounded text-xs">
+                <input type="text" id="fin_contrib" class="w-full border p-2.5 rounded text-xs" placeholder="Contributor Name">
+                <input type="text" id="fin_type" class="w-full border p-2.5 rounded text-xs" placeholder="Type (e.g., Tithe, Offering, Pledge)">
+                <input type="number" id="fin_amount" class="w-full border p-2.5 rounded text-xs" placeholder="Amount (e.g., 5000)">
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2">
+                <button onclick="closeFinanceModal()" class="px-4 py-2 border rounded">Cancel</button>
+                <button onclick="saveFinance()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded">Save Transaction</button>
+            </footer>
+        </div>
+    </div>
+
+</body>
+</html>
