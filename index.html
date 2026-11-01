@@ -8,8 +8,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome CDN -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Supabase JS Library -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Firebase (compat SDK, same as EduBloom) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
     <!-- Link to external styles -->
     <link rel="stylesheet" href="styles.css">
     <!-- Link to external app logic -->
@@ -31,11 +33,17 @@
             <!-- Access Gate Structure -->
             <div class="space-y-4">
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Select Parish Database</label>
-                    <select id="entranceSelector" class="w-full bg-white/20 text-slate-800 px-3 py-3 rounded-lg focus:outline-none text-xs font-bold border border-white/10">
-                        <option value="new_parish">+ Register New Parish</option>
-                    </select>
+                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Admin Email</label>
+                    <input type="email" id="loginEmail" autocomplete="username" class="w-full bg-white/20 text-white px-4 py-3 rounded-lg focus:outline-none border border-white/10 placeholder-gray-400 text-sm" placeholder="you@example.com">
                 </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Password</label>
+                    <input type="password" id="loginPassword" autocomplete="current-password" class="w-full bg-white/20 text-white px-4 py-3 rounded-lg focus:outline-none border border-white/10 placeholder-gray-400 text-sm" placeholder="Enter password">
+                </div>
+                <button id="accessBtn" onclick="attemptLogin()" class="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-blue-950 font-bold rounded-lg transition uppercase tracking-wider text-xs shadow-md">
+                    Access Database
+                </button>
+                <button onclick="toggleRegister()" class="w-full text-[11px] text-gray-300 underline">+ Register New Parish</button>
 
                 <!-- Registration Fields -->
                 <div id="parishRegFields" class="hidden space-y-3 bg-black/20 p-3.5 rounded-lg border border-white/5">
@@ -44,23 +52,17 @@
                         <input type="text" id="regName" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="e.g. Grace Parish, Lagos">
                     </div>
                     <div>
-                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">Set Parish Admin Password</label>
-                        <input type="password" id="regPassword" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="Set password">
+                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">Admin Email</label>
+                        <input type="email" id="regEmail" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="you@example.com">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">Set Password (min 8)</label>
+                        <input type="password" id="regPassword" autocomplete="new-password" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="Set password">
                     </div>
                     <button onclick="createNewParish()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold uppercase tracking-wider transition">
                         Submit License Request
                     </button>
                 </div>
-
-                <!-- Passcode Input Box -->
-                <div id="passwordFieldContainer" class="hidden">
-                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Entrance Passcode</label>
-                    <input type="password" id="adminPasswordInput" class="w-full bg-white/20 text-white pl-4 pr-10 py-3 rounded-lg focus:outline-none border border-white/10 placeholder-gray-400 text-sm" placeholder="Enter password">
-                </div>
-
-                <button id="accessBtn" onclick="attemptLogin()" class="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-blue-950 font-bold rounded-lg transition uppercase tracking-wider text-xs shadow-md">
-                    Access Database
-                </button>
             </div>
         </div>
         <div class="text-center text-[10px] text-gray-400 mt-4 leading-relaxed">
@@ -80,6 +82,7 @@
                     <div>
                         <h2 class="text-xs font-black text-yellow-400 uppercase leading-none">PARISH DATA</h2>
                         <p id="dashParishName" class="text-[10px] text-gray-400 italic truncate max-w-[140px] mt-1">Parish Name</p>
+                        <select id="parishPicker" onchange="pickParish(this.value)" class="hidden mt-1 text-[10px] text-slate-800 rounded max-w-[160px]"></select>
                     </div>
                 </div>
 
@@ -138,8 +141,8 @@
                             <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
                                 <tr>
                                     <th class="p-3">Name</th>
-                                    <th class="p-3">ID</th>
-                                    <th class="p-3">Classification</th>
+                                    <th class="p-3">Gender</th>
+                                    <th class="p-3">Household</th>
                                     <th class="p-3">Rank</th>
                                     <th class="p-3">Phone</th>
                                 </tr>
@@ -206,6 +209,10 @@
                         <h2 class="text-lg font-bold text-gray-800">Worldwide Circular Bulletins</h2>
                         <p class="text-xs text-gray-500">Liturgical instructions published directly by the HQ office.</p>
                     </div>
+                    <div id="circularComposer" class="hidden space-y-2">
+                        <textarea id="circ_body" class="w-full border p-2.5 rounded text-xs" rows="3" placeholder="Write a circular for all parishes"></textarea>
+                        <button onclick="postCircular()" class="bg-indigo-600 text-white px-3 py-2 rounded text-xs font-semibold">Publish Circular</button>
+                    </div>
                     <div id="circularsList" class="space-y-3">
                         <p class="text-xs text-gray-400 italic">No global circular bulletins currently loaded.</p>
                     </div>
@@ -225,13 +232,20 @@
             </header>
             <div class="p-5 space-y-3">
                 <input type="text" id="m_name" class="w-full border p-2.5 rounded text-xs" placeholder="Full Name *">
-                <select id="m_class" class="w-full border p-2.5 rounded text-xs bg-white">
-                    <option value="MEMBER">Member</option>
-                    <option value="CLERGY">Clergy</option>
+                <select id="m_gender" class="w-full border p-2.5 rounded text-xs bg-white">
+                    <option value="">Gender *</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
                 </select>
                 <input type="text" id="m_rank" class="w-full border p-2.5 rounded text-xs" placeholder="Church Rank *">
                 <input type="text" id="m_phone" class="w-full border p-2.5 rounded text-xs" placeholder="Phone Number">
-                <input type="text" id="m_dob" class="w-full border p-2.5 rounded text-xs" placeholder="Birthday Date (e.g. October 14) *">
+                <input type="text" id="m_address" class="w-full border p-2.5 rounded text-xs" placeholder="Address">
+                <label class="block text-[10px] text-gray-500">Date Joined *<input type="date" id="m_joined" class="w-full border p-2.5 rounded text-xs"></label>
+                <input type="text" id="m_household" class="w-full border p-2.5 rounded text-xs" placeholder="Family / Household (e.g. Bisi family)">
+                <label class="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 p-2 rounded">
+                    <input type="checkbox" id="m_consent" class="mt-0.5">
+                    <span>The member has given consent for the parish to store these details (NDPA 2023). *</span>
+                </label>
             </div>
             <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2">
                 <button onclick="closeAddModal()" class="px-4 py-2 border rounded">Cancel</button>

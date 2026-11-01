@@ -1,0 +1,60 @@
+rules_version = '2';
+// CCC Parish Portal - Firestore security rules.
+// Roles live in users/{uid}: { role: 'super_admin' | 'hq' | 'parish_admin', parishId }.
+// Nobody can read or write anything without signing in.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function role() { return hasProfile() ? profile().role : ''; }
+    function isSuper() { return role() == 'super_admin'; }
+    function isHQ() { return role() == 'hq'; }
+    // Parish admins only get in while their parish is Approved (not Pending / Suspended).
+    function isParishAdminOf(parishId) {
+      return role() == 'parish_admin' && profile().parishId == parishId
+        && get(/databases/$(database)/documents/parishes/$(parishId)).data.status == 'Approved';
+    }
+
+    // Role records: users read their own; only super_admin assigns roles.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSuper());
+      allow write: if isSuper();
+    }
+
+    // New-parish licence requests: a signed-in user files one for themselves, Pending only.
+    match /parishRequests/{uid} {
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.status == 'Pending'
+        && request.resource.data.keys().hasOnly(['parishName', 'email', 'status', 'createdAt']);
+      allow read: if signedIn() && (request.auth.uid == uid || isSuper() || isHQ());
+      allow update, delete: if isSuper();
+    }
+
+    match /parishes/{parishId} {
+      allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
+      allow write: if isSuper();
+
+      match /{sub}/{docId} {
+        allow read: if sub in ['members', 'attendance', 'finances']
+          && (isSuper() || isHQ() || isParishAdminOf(parishId));
+        allow write: if sub in ['attendance', 'finances']
+          && (isSuper() || isParishAdminOf(parishId));
+        allow delete: if sub == 'members' && (isSuper() || isParishAdminOf(parishId));
+      }
+    }
+
+    // NDPA 2023: a member record can only be saved once consent is recorded.
+    match /parishes/{parishId}/members/{memberId} {
+      allow create, update: if (isSuper() || isParishAdminOf(parishId))
+        && request.resource.data.consentGiven == true
+        && request.resource.data.consentDate is string;
+    }
+
+    match /circulars/{id} {
+      allow read: if hasProfile() && (isSuper() || isHQ() || role() == 'parish_admin');
+      allow write: if isSuper() || isHQ();
+    }
+  }
+}
