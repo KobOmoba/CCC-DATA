@@ -61,12 +61,15 @@
                 <button onclick="showSection('clergy')" id="nav-clergy" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy</button>
                 <button onclick="showSection('former')" id="nav-former" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-slate-300 w-4"></i> Former Clergy</button>
                 <button onclick="showSection('families')" id="nav-families" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-roof text-pink-300 w-4"></i> Families</button>
+                <p class="parish-only hidden md:block px-3 pt-2 text-[10px] uppercase tracking-widest text-slate-400">Departments</p>
+                <button onclick="showSection('diaspora')" id="nav-diaspora" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-cyan-300 w-4"></i> Members in Diaspora</button>
                 <button onclick="showSection('attendance')" id="nav-attendance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance</button>
                 <button onclick="showSection('finance')" id="nav-finance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Finance</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('parishes')" id="nav-parishes" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-earth-africa text-emerald-400 w-4"></i> Parishes</button>
                 <button onclick="showSection('register')" id="nav-register" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy Register</button>
                 <button onclick="showSection('important')" id="nav-important" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-star text-amber-300 w-4"></i> Important Members</button>
+                <button onclick="showSection('flows')" id="nav-flows" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-cyan-300 w-4"></i> Diaspora Flows</button>
                 <button onclick="showSection('circulars')" id="nav-circulars" class="nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-bullhorn text-indigo-400 w-4"></i> Circulars</button>
                 <button onclick="logout()" class="px-3 py-2.5 rounded text-rose-300 hover:bg-rose-900/40 flex items-center gap-2"><i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Sign out</button>
             </nav>
@@ -114,6 +117,11 @@
                         <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Services logged</p><p id="metricServices" class="text-lg font-bold">0</p></div>
                         <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Total giving</p><p id="metricGiving" class="text-lg font-bold">0</p></div>
                     </div>
+                    <div id="electionBanners" class="parish-only space-y-2"></div>
+                    <div class="parish-only">
+                        <p class="text-[10px] uppercase font-semibold text-gray-500 mb-1">Departments</p>
+                        <div id="deptGrid" class="grid grid-cols-2 gap-2 text-xs"></div>
+                    </div>
                     <div id="worldTable" class="hidden bg-white border rounded-xl shadow-sm overflow-x-auto"></div>
                 </section>
 
@@ -152,6 +160,51 @@
                         <button id="addFamilyBtn" onclick="openFamilyForm()" class="bg-pink-600 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Link Family</button>
                     </div>
                     <div id="familiesList" class="space-y-3"></div>
+                </section>
+
+                <!-- DEPARTMENT (one section, filled for the chosen department) -->
+                <section id="section-dept" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 id="deptTitle" class="text-lg font-bold">Department</h2><p class="text-xs text-gray-500">Members serve a 2-year term. Clergy cannot join a department.</p></div>
+                    <div id="deptBanner"></div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2 text-xs">
+                        <p class="font-bold">Current term</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label>Start<input id="d_termStart" type="date" onchange="autoTermEnd()" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>End (2 years)<input id="d_termEnd" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                        </div>
+                        <button id="saveTermBtn" onclick="saveTerm()" class="w-full py-2 bg-blue-600 text-white font-bold rounded">Save term</button>
+                    </div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2 text-xs">
+                        <p class="font-bold">Add a member</p>
+                        <input id="d_find" oninput="findForDept()" class="w-full border p-2.5 rounded" placeholder="Name or number (CCC-MBR-001)">
+                        <input id="d_role" class="w-full border p-2.5 rounded" placeholder="Role (optional, e.g. Head, Secretary)">
+                        <div id="d_matches" class="space-y-1"></div>
+                    </div>
+                    <p class="text-xs font-bold">Members (<span id="deptCount">0</span>)</p>
+                    <div id="deptMembersList" class="space-y-2"></div>
+                    <details class="bg-white border rounded-xl p-3 text-xs"><summary class="font-bold">Former members (<span id="deptFormerCount">0</span>)</summary>
+                        <div id="deptFormerList" class="space-y-2 mt-2"></div></details>
+                </section>
+
+                <!-- MEMBERS IN DIASPORA + TRANSFERS -->
+                <section id="section-diaspora" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Members in Diaspora</h2><p class="text-xs text-gray-500">Members who moved abroad, and member transfers between parishes. Your parish code: <span id="myParishCode" class="font-mono font-bold">-</span></p></div>
+                    <div class="bg-cyan-50 border border-cyan-200 rounded-xl p-3 text-xs space-y-2">
+                        <p class="font-bold"><i class="fa-solid fa-inbox"></i> Incoming transfers</p>
+                        <div id="incomingList" class="space-y-2"></div>
+                    </div>
+                    <p class="text-xs font-bold">Moved abroad (<span id="abroadCount">0</span>)</p>
+                    <p class="text-[11px] text-gray-500">Open a member and tap "Moved abroad" or "Transfer to another parish".</p>
+                    <div id="abroadList" class="space-y-2"></div>
+                    <p class="text-xs font-bold">Sent to other parishes</p>
+                    <div id="outgoingList" class="space-y-2"></div>
+                </section>
+
+                <!-- SUPER ADMIN: DIASPORA FLOWS (places + counts only) -->
+                <section id="section-flows" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Diaspora Flows</h2><p class="text-xs text-gray-500">Where members are moving. Counts only, no names.</p></div>
+                    <select id="flowYear" onchange="renderFlows()" class="w-full border p-2.5 rounded text-sm bg-white"></select>
+                    <div id="flowsList" class="space-y-2"></div>
                 </section>
 
                 <!-- PARISH SETTINGS -->
@@ -355,6 +408,45 @@
             <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl">
                 <button onclick="closeModal('transferModal')" class="px-4 py-2 border rounded">Cancel</button>
                 <button id="saveTransferBtn" onclick="saveTransfer()" class="px-4 py-2 bg-amber-600 text-white font-bold rounded">Move to Former</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- MOVED ABROAD -->
+    <div id="abroadModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-cyan-700 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span>MOVED ABROAD</span>
+                <button onclick="closeModal('abroadModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-4 space-y-3">
+                <label class="block">Country *<input id="ab_country" class="w-full border p-2.5 rounded mt-1" placeholder="e.g. United Kingdom"></label>
+                <label class="block">City<input id="ab_city" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="block">New parish (if known)<input id="ab_parish" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="block">Moved on *<input id="ab_date" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl">
+                <button onclick="closeModal('abroadModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="saveAbroadBtn" onclick="saveAbroad()" class="px-4 py-2 bg-cyan-700 text-white font-bold rounded">Save</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- SEND MEMBER TRANSFER -->
+    <div id="sendTransferModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-indigo-700 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span>TRANSFER TO ANOTHER PARISH</span>
+                <button onclick="closeModal('sendTransferModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-4 space-y-3">
+                <p>The new parish accepts with its own login. The member keeps the same member number for life.</p>
+                <label class="block">New parish code *<input id="st_code" class="w-full border p-2.5 rounded mt-1 font-mono uppercase" placeholder="6 letters/numbers"></label>
+                <label class="flex items-start gap-2 bg-amber-50 border border-amber-200 p-2 rounded"><input type="checkbox" id="st_consent" class="mt-0.5"><span>The member agrees to their record being sent to the new parish (NDPA 2023). *</span></label>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl">
+                <button onclick="closeModal('sendTransferModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="sendTransferBtn" onclick="sendTransfer()" class="px-4 py-2 bg-indigo-700 text-white font-bold rounded">Send transfer</button>
             </footer>
         </div>
     </div>

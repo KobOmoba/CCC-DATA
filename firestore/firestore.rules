@@ -82,10 +82,62 @@ service cloud.firestore {
         && d.get('important', false) is bool
         && d.consentGiven == true && isDate(d.consentDate);
     }
+    // Member statuses: Active, Ordained (now clergy), Diaspora (moved abroad, kept as a link),
+    // TransferredOut (sent to another parish; history link only).
     function validMember(d, id) {
-      return d.keys().hasOnly(personKeys().concat(['ordainedAs']))
-        && validPerson(d, id) && d.status in ['Active', 'Ordained']
-        && (d.status == 'Active' || str(d.get('ordainedAs', ''), 20));
+      return d.keys().hasOnly(personKeys().concat(['ordainedAs', 'abroadCountry', 'abroadCity', 'abroadParish',
+          'abroadSince', 'transferId', 'lifeNo', 'lifeParishCode']))
+        && validPerson(d, id) && d.status in ['Active', 'Ordained', 'Diaspora', 'TransferredOut']
+        && (d.status != 'Ordained' || str(d.get('ordainedAs', ''), 20))
+        && (d.status != 'Diaspora' || (str(d.get('abroadCountry', ''), 80) && s(d.get('abroadCity', ''), 80)
+              && s(d.get('abroadParish', ''), 120) && isDate(d.get('abroadSince', ''))))
+        && s(d.get('lifeNo', ''), 20) && s(d.get('lifeParishCode', ''), 12) && s(d.get('transferId', ''), 40);
+    }
+    // Allowed status moves for an existing member record.
+    function memberMoveOk(p, id) {
+      let o = resource.data;
+      let d = request.resource.data;
+      return (o.status == 'Active' && d.status in ['Active', 'Ordained', 'Diaspora', 'TransferredOut'])
+        || (o.status == 'Diaspora' && d.status in ['Active', 'Diaspora', 'TransferredOut'])
+        || (o.status == 'Ordained' && d.status == 'Ordained')
+        // Back home only if the transfer was declined or cancelled.
+        || (o.status == 'TransferredOut' && d.status == 'Active'
+            && get(docAt('transfers/' + o.transferId)).data.status in ['Declined', 'Cancelled'])
+        || (o.status == 'TransferredOut' && d.status == 'TransferredOut' && d.transferId == o.transferId);
+    }
+    // Sending a member away: the transfer doc for this exact member is created in the same write.
+    function sendsTransfer(p, id) {
+      let d = request.resource.data;
+      return d.status != 'TransferredOut' || resource.data.status == 'TransferredOut'
+        || (getAfter(docAt('transfers/' + d.transferId)).data.fromParish == p
+            && getAfter(docAt('transfers/' + d.transferId)).data.memberNo == id
+            && !exists(docAt('transfers/' + d.transferId)));
+    }
+    // A member created by accepting a transfer carries the transfer id and the life-long number.
+    function arrivesByTransfer(p, d) {
+      return (!('transferId' in d) && !('lifeNo' in d) && !('lifeParishCode' in d))
+        || (get(docAt('transfers/' + d.transferId)).data.status == 'Pending'
+            && getAfter(docAt('transfers/' + d.transferId)).data.status == 'Accepted'
+            && getAfter(docAt('transfers/' + d.transferId)).data.toParish == p
+            && d.lifeNo == get(docAt('transfers/' + d.transferId)).data.lifeNo
+            && d.lifeParishCode == get(docAt('transfers/' + d.transferId)).data.lifeParishCode);
+    }
+
+    // ---- Departments ----
+    function isDept(x) { return x in ['parochial', 'choir', 'ict', 'sidemen', 'prophets', 'sundayschool']; }
+    // One doc per (department, member). Clergy can never join: only CCC-MBR numbers of an
+    // Active member (not Ordained, not abroad, not transferred) may be Current.
+    function validDeptMember(p, d, id) {
+      return d.keys().hasOnly(['dept', 'memberNo', 'fullName', 'role', 'status', 'joinedDate', 'leftDate', 'updatedAt'])
+        && isDept(d.dept) && d.memberNo is string && d.memberNo.matches('^CCC-MBR-[0-9]{3,}$')
+        && id == d.dept + '_' + d.memberNo && str(d.fullName, 120) && s(d.get('role', ''), 40)
+        && isDate(d.joinedDate) && d.status in ['Current', 'Former']
+        && (d.status == 'Former' ? isDate(d.get('leftDate', ''))
+            : getAfter(docAt('parishes/' + p + '/members/' + d.memberNo)).data.status == 'Active');
+    }
+    function validTerm(d, id) {
+      return isDept(id) && d.keys().hasOnly(['termStart', 'termEnd', 'updatedAt'])
+        && isDate(d.termStart) && isDate(d.termEnd) && d.termEnd > d.termStart;
     }
     function validClergy(d, id) {
       return d.keys().hasOnly(personKeys().concat(['formerMemberNo', 'joinedDate', 'leftDate', 'leaveReason',
@@ -119,14 +171,16 @@ service cloud.firestore {
     function nonNegInt(d, k) { return d.get(k, 0) is int && d.get(k, 0) >= 0; }
     function validStats(d) {
       return d.keys().hasOnly(['memberCount', 'clergyCount', 'formerClergyCount', 'attendanceTotal', 'serviceCount',
-          'financeTotal', 'financeCount', 'updatedAt'])
+          'financeTotal', 'financeCount', 'diasporaCount', 'updatedAt'])
+        && nonNegInt(d, 'diasporaCount')
         && nonNegInt(d, 'memberCount') && nonNegInt(d, 'clergyCount') && nonNegInt(d, 'formerClergyCount')
         && nonNegInt(d, 'attendanceTotal') && nonNegInt(d, 'serviceCount') && nonNegInt(d, 'financeCount')
         && (d.get('financeTotal', 0) is int || d.get('financeTotal', 0) is float) && d.get('financeTotal', 0) >= 0;
     }
     function parishFieldKeys() { return ['name', 'address', 'mapsUrl', 'city', 'state', 'country', 'continent', 'logo', 'updatedAt']; }
     function validParish(d) {
-      return d.keys().hasOnly(parishFieldKeys().concat(['status', 'createdAt']))
+      return d.keys().hasOnly(parishFieldKeys().concat(['status', 'createdAt', 'code']))
+        && (!('code' in d) || (d.code is string && d.code.matches('^[A-Z0-9]{6}$')))
         && str(d.name, 120) && d.status in ['Approved', 'Suspended']
         && optStr(d, 'address', 200) && optStr(d, 'city', 80) && optStr(d, 'state', 80) && optStr(d, 'country', 80)
         && (!('continent' in d) || d.continent in ['', 'Africa', 'Europe', 'Asia', 'North America', 'South America', 'Oceania', 'Antarctica'])
@@ -224,9 +278,11 @@ service cloud.firestore {
         allow read: if isParishAdminOf(parishId) || (isSuper() && resource.data.important == true);
         allow create: if isParishAdminOf(parishId) && validMember(request.resource.data, memberId)
           && request.resource.data.status == 'Active'
-          && takesNextNumber(parishId, 'mbr', 'CCC-MBR-', memberId);
+          && takesNextNumber(parishId, 'mbr', 'CCC-MBR-', memberId)
+          && arrivesByTransfer(parishId, request.resource.data);
         allow update: if isParishAdminOf(parishId) && validMember(request.resource.data, memberId) && keepsIdentity()
-          && (resource.data.status == 'Active' || request.resource.data.status == 'Ordained');
+          && request.resource.data.get('lifeNo', '') == resource.data.get('lifeNo', '')
+          && memberMoveOk(parishId, memberId) && sendsTransfer(parishId, memberId);
         allow delete: if false; // numbers are never reused, so records are never deleted
       }
       // Clergy register: parish admin + super_admin.
@@ -246,6 +302,18 @@ service cloud.firestore {
           && str(request.resource.data.clergyId, 20) && optImage(request.resource.data, 'image', 400000);
         allow update, delete: if false;
       }
+      // Departments: term dates per department, and one membership doc per (department, member).
+      match /departments/{dept} {
+        allow read: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validTerm(request.resource.data, dept);
+        allow delete: if false;
+      }
+      match /deptMembers/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validDeptMember(parishId, request.resource.data, id)
+          && (resource == null || (resource.data.dept == request.resource.data.dept && resource.data.memberNo == request.resource.data.memberNo));
+        allow delete: if false; // former members stay on record
+      }
       match /families/{id} {
         allow read, delete: if isParishAdminOf(parishId);
         allow create, update: if isParishAdminOf(parishId)
@@ -262,6 +330,73 @@ service cloud.firestore {
         allow read, delete: if isParishAdminOf(parishId);
         allow create, update: if isParishAdminOf(parishId) && validFinance(request.resource.data);
       }
+    }
+
+    // ---- Parish codes: short public code -> parish id, used to address a member transfer ----
+    match /parishCodes/{code} {
+      allow get: if isSuper() || role() == 'parish_admin';
+      allow list: if isSuper();
+      allow create: if isSuper() && request.resource.data.keys().hasOnly(['parishId'])
+        && getAfter(docAt('parishes/' + request.resource.data.parishId)).data.code == code;
+      allow update, delete: if false;
+    }
+
+    // ---- Member transfers between parishes (with the member's consent) ----
+    // Old parish sends (member becomes TransferredOut in the same write). New parish accepts by
+    // creating its own record that keeps the life-long number. Super admin never reads these.
+    function validTransferCreate(d) {
+      return d.keys().hasOnly(['memberNo', 'lifeNo', 'lifeParishCode', 'fromParish', 'fromName', 'fromCity', 'fromCountry',
+          'toParish', 'toCode', 'person', 'consentGiven', 'consentDate', 'status', 'createdAt'])
+        && isParishAdminOf(d.fromParish) && d.status == 'Pending'
+        && d.consentGiven == true && isDate(d.consentDate) && d.person is map
+        && str(d.lifeNo, 20) && str(d.lifeParishCode, 12)
+        && d.toParish == get(docAt('parishCodes/' + d.toCode)).data.parishId && d.toParish != d.fromParish
+        && getAfter(docAt('parishes/' + d.fromParish + '/members/' + d.memberNo)).data.status == 'TransferredOut'
+        && d.fromCity == get(docAt('parishes/' + d.fromParish)).data.get('city', '')
+        && d.fromCountry == get(docAt('parishes/' + d.fromParish)).data.get('country', '')
+        && s(d.fromName, 120);
+    }
+    match /transfers/{id} {
+      allow read: if isParishAdminOf(resource.data.fromParish) || isParishAdminOf(resource.data.toParish);
+      allow create: if validTransferCreate(request.resource.data);
+      allow update: if resource.data.status == 'Pending' && (
+          // New parish accepts: its new member record (with this transfer id) is created in the same write.
+          (isParishAdminOf(resource.data.toParish) && request.resource.data.status == 'Accepted'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'newMemberNo', 'decidedAt'])
+            && getAfter(docAt('parishes/' + resource.data.toParish + '/members/' + request.resource.data.newMemberNo)).data.transferId == id
+            && !exists(docAt('parishes/' + resource.data.toParish + '/members/' + request.resource.data.newMemberNo)))
+          || (isParishAdminOf(resource.data.toParish) && request.resource.data.status == 'Declined'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decidedAt']))
+          || (isParishAdminOf(resource.data.fromParish) && request.resource.data.status == 'Cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decidedAt'])));
+      allow delete: if false;
+    }
+
+    // ---- Migration flows: places and year only, no personal data. Super admin reads these. ----
+    // 'Transfer': written by the new parish when it accepts (id = transfer id).
+    // 'Abroad': written by a parish when a member moves abroad (id = abroad_<parish>_<memberNo>_<date>).
+    function validFlow(d, id) {
+      return d.keys().hasOnly(['kind', 'fromCity', 'fromCountry', 'toCity', 'toCountry', 'year'])
+        && s(d.fromCity, 80) && s(d.fromCountry, 80) && s(d.toCity, 80) && s(d.toCountry, 80)
+        && d.year is int && d.year >= 2000 && d.year <= 2100
+        && ((d.kind == 'Transfer'
+              && getAfter(docAt('transfers/' + id)).data.status == 'Accepted'
+              && isParishAdminOf(getAfter(docAt('transfers/' + id)).data.toParish)
+              && d.fromCity == getAfter(docAt('transfers/' + id)).data.fromCity
+              && d.fromCountry == getAfter(docAt('transfers/' + id)).data.fromCountry
+              && d.toCity == profileParish().get('city', '') && d.toCountry == profileParish().get('country', ''))
+          || (d.kind == 'Abroad' && isParishAdminOf(profile().parishId)
+              && id == 'abroad_' + profile().parishId + '_' + id.split('_')[2] + '_'
+                 + getAfter(docAt('parishes/' + profile().parishId + '/members/' + id.split('_')[2])).data.abroadSince
+              && getAfter(docAt('parishes/' + profile().parishId + '/members/' + id.split('_')[2])).data.status == 'Diaspora'
+              && d.toCountry == getAfter(docAt('parishes/' + profile().parishId + '/members/' + id.split('_')[2])).data.abroadCountry
+              && d.fromCity == profileParish().get('city', '') && d.fromCountry == profileParish().get('country', '')));
+    }
+    function profileParish() { return get(docAt('parishes/' + profile().parishId)).data; }
+    match /flows/{id} {
+      allow read: if isSuper();
+      allow create: if role() == 'parish_admin' && validFlow(request.resource.data, id);
+      allow update, delete: if false;
     }
 
     // Collection-group reads for the super_admin world view.

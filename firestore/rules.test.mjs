@@ -350,3 +350,147 @@ test('limits: full records in app-shaped writes (create, ordain, transfer, edit)
   e.set(doc(a, 'clergyIndex/edit2@x.org'), { parishId: 'A', clergyId: c2 });
   await assertSucceeds(e.commit());
 });
+
+// ---------------------------------------------------------------- Phase 2: departments
+const dm = (dept, no, extra = {}) => ({ dept, memberNo: no, fullName: 'Ade Bisi', role: '', status: 'Current', joinedDate: '2026-11-01', updatedAt: 'now', ...extra });
+test('departments: add an Active member, move to Former, set the 2-year term', async () => {
+  const a = as.adminA();
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-001'), dm('choir', 'CCC-MBR-001')));
+  await assertSucceeds(getDocs(query(collection(a, 'parishes/A/deptMembers'), where('dept', '==', 'choir'))));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-001'), dm('choir', 'CCC-MBR-001', { status: 'Former' }))); // needs leftDate
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-001'), dm('choir', 'CCC-MBR-001', { status: 'Former', leftDate: '2026-11-02' })));
+  await assertFails(deleteDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-001')));
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/departments/choir'), { termStart: '2025-01-01', termEnd: '2027-01-01', updatedAt: 'now' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/departments/choir'), { termStart: '2027-01-01', termEnd: '2025-01-01' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/departments/football'), { termStart: '2025-01-01', termEnd: '2027-01-01' }));
+});
+test('departments: clergy cannot join (CLG number, ordained member, unknown member)', async () => {
+  const a = as.adminA();
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-CLG-001'), dm('choir', 'CCC-CLG-001')));
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'parishes/A/members/CCC-MBR-002'), person('CCC-MBR-002', { status: 'Ordained', ordainedAs: 'CCC-CLG-001' })));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-002'), dm('choir', 'CCC-MBR-002')));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-099'), dm('choir', 'CCC-MBR-099')));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-001'), dm('football', 'CCC-MBR-001')));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/xyz'), dm('choir', 'CCC-MBR-001')));        // id must be dept_memberNo
+});
+test('departments: private to the parish (no other parish, no super, no hq)', async () => {
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'parishes/A/deptMembers/choir_CCC-MBR-001'), dm('choir', 'CCC-MBR-001')));
+  await assertFails(getDoc(doc(as.adminB(), 'parishes/A/deptMembers/choir_CCC-MBR-001')));
+  await assertFails(setDoc(doc(as.adminB(), 'parishes/A/deptMembers/sidemen_CCC-MBR-001'), dm('sidemen', 'CCC-MBR-001')));
+  await assertFails(getDoc(doc(as.superA(), 'parishes/A/deptMembers/choir_CCC-MBR-001')));
+  await assertFails(getDoc(doc(as.hq(), 'parishes/A/deptMembers/choir_CCC-MBR-001')));
+});
+
+// ---------------------------------------------------------------- Phase 2: diaspora + transfers
+async function seedPlaces() {
+  await env.withSecurityRulesDisabled(async (c) => {
+    const db = c.firestore();
+    await setDoc(doc(db, 'parishes/A'), { name: 'Parish A', status: 'Approved', city: 'Lagos', country: 'Nigeria', code: 'AAAAA1' });
+    await setDoc(doc(db, 'parishes/B'), { name: 'Parish B', status: 'Approved', city: 'London', country: 'United Kingdom', code: 'BBBBB2' });
+    await setDoc(doc(db, 'parishCodes/AAAAA1'), { parishId: 'A' });
+    await setDoc(doc(db, 'parishCodes/BBBBB2'), { parishId: 'B' });
+    await setDoc(doc(db, 'parishStats/B'), { memberCount: 0, clergyCount: 0 });
+  });
+}
+const tr = (extra = {}) => ({ memberNo: 'CCC-MBR-001', lifeNo: 'CCC-MBR-001', lifeParishCode: 'AAAAA1', fromParish: 'A', fromName: 'Parish A',
+  fromCity: 'Lagos', fromCountry: 'Nigeria', toParish: 'B', toCode: 'BBBBB2', person: member, consentGiven: true, consentDate: '2026-11-01',
+  status: 'Pending', createdAt: 'now', ...extra });
+function send(db, id = 'T1', t = tr()) {
+  const b = writeBatch(db);
+  b.update(doc(db, `parishes/${t.fromParish}/members/${t.memberNo}`), { status: 'TransferredOut', transferId: id });
+  b.set(doc(db, `transfers/${id}`), t);
+  b.set(doc(db, `parishStats/${t.fromParish}`), { memberCount: increment(-1) }, { merge: true });
+  return b.commit();
+}
+function accept(db, id = 'T1', life = 'CCC-MBR-001') {
+  return runTransaction(db, async (t) => {
+    const cRef = doc(db, 'parishes/B/meta/counters');
+    const n = (await t.get(cRef)).data().mbr + 1;
+    const no = 'CCC-MBR-' + String(n).padStart(3, '0');
+    t.update(cRef, { mbr: n });
+    t.set(doc(db, `parishes/B/members/${no}`), person(no, { transferId: id, lifeNo: life, lifeParishCode: 'AAAAA1' }));
+    t.update(doc(db, `transfers/${id}`), { status: 'Accepted', newMemberNo: no, decidedAt: 'now' });
+    t.set(doc(db, `flows/${id}`), { kind: 'Transfer', fromCity: 'Lagos', fromCountry: 'Nigeria', toCity: 'London', toCountry: 'United Kingdom', year: 2026 });
+    t.set(doc(db, 'parishStats/B'), { memberCount: increment(1) }, { merge: true });
+    return no;
+  });
+}
+test('parish codes: any parish admin can look one up; only super creates', async () => {
+  await seedPlaces();
+  await assertSucceeds(getDoc(doc(as.adminA(), 'parishCodes/BBBBB2')));
+  await assertFails(getDocs(collection(as.adminA(), 'parishCodes')));
+  await assertFails(setDoc(doc(as.adminA(), 'parishCodes/ZZZZZ9'), { parishId: 'A' }));
+  await assertFails(getDoc(doc(as.stranger(), 'parishCodes/BBBBB2')));
+  const sdb = as.superA();
+  const b = writeBatch(sdb);
+  b.set(doc(sdb, 'parishes/C'), { name: 'Parish C', status: 'Approved', code: 'CCCCC3' });
+  b.set(doc(sdb, 'parishCodes/CCCCC3'), { parishId: 'C' });
+  await assertSucceeds(b.commit());
+  await assertFails(setDoc(doc(as.superA(), 'parishCodes/WRONG1'), { parishId: 'C' }));  // code must match the parish
+});
+test('transfer: send with consent, accept by code, one life-long number, flow for super', async () => {
+  await seedPlaces();
+  await assertSucceeds(send(as.adminA()));
+  // New parish sees the incoming transfer; super and other admins do not.
+  await assertSucceeds(getDocs(query(collection(as.adminB(), 'transfers'), where('toParish', '==', 'B'), where('status', '==', 'Pending'))));
+  await assertSucceeds(getDocs(query(collection(as.adminA(), 'transfers'), where('fromParish', '==', 'A'))));
+  await assertFails(getDoc(doc(as.superA(), 'transfers/T1')));
+  await assertFails(getDoc(doc(as.hq(), 'transfers/T1')));
+  const no = await accept(as.adminB());
+  assert(no, 'CCC-MBR-003');
+  const rec = await getDoc(doc(as.adminB(), `parishes/B/members/${no}`));
+  assert(rec.data().lifeNo, 'CCC-MBR-001');
+  // Super sees the flow (places only), not the people.
+  const flows = await assertSucceeds(getDocs(collection(as.superA(), 'flows')));
+  assert(flows.docs.length, 1);
+  assert(JSON.stringify(Object.keys(flows.docs[0].data()).sort()), JSON.stringify(['fromCity', 'fromCountry', 'kind', 'toCity', 'toCountry', 'year']));
+  await assertFails(getDocs(collection(as.adminA(), 'flows')));
+  // Cannot accept twice; old record stays TransferredOut and cannot be revived.
+  await assertFails(accept(as.adminB()));
+  await assertFails(updateDoc(doc(as.adminA(), 'parishes/A/members/CCC-MBR-001'), { status: 'Active' }));
+});
+test('transfer: refused without consent, to own parish, by the wrong parish, or with a changed number', async () => {
+  await seedPlaces();
+  await assertFails(send(as.adminA(), 'T1', tr({ consentGiven: false })));
+  await assertFails(send(as.adminA(), 'T1', tr({ toCode: 'AAAAA1', toParish: 'A' })));       // own parish
+  await assertFails(send(as.adminA(), 'T1', tr({ toCode: 'BBBBB2', toParish: 'S' })));       // code does not match
+  await assertFails(send(as.adminA(), 'T1', tr({ fromCity: 'Abuja' })));                    // place must match the parish
+  await assertFails(send(as.adminB(), 'T1', tr()));                                          // B cannot send A's member
+  // Transfer doc without marking the member TransferredOut is refused.
+  await assertFails(setDoc(doc(as.adminA(), 'transfers/T2'), tr()));
+  await assertSucceeds(send(as.adminA()));
+  await assertFails(accept(as.adminB(), 'T1', 'CCC-MBR-777'));                               // life number must be kept
+  await assertFails(accept(as.adminA()));                                                    // only the receiving parish
+  await assertFails(updateDoc(doc(as.adminA(), 'transfers/T1'), { status: 'Accepted', newMemberNo: 'x' }));
+  // A member cannot claim a transfer id they did not arrive by.
+  await assertFails(addRecord(as.adminB(), 'B', 'members', person('x', { transferId: 'NOPE', lifeNo: 'CCC-MBR-001', lifeParishCode: 'AAAAA1' })));
+});
+test('transfer: decline or cancel lets the old parish restore the member', async () => {
+  await seedPlaces();
+  await assertSucceeds(send(as.adminA()));
+  await assertFails(updateDoc(doc(as.adminA(), 'parishes/A/members/CCC-MBR-001'), { status: 'Active' }));  // still pending
+  await assertFails(updateDoc(doc(as.adminA(), 'transfers/T1'), { status: 'Declined', decidedAt: 'now' })); // only B declines
+  await assertSucceeds(updateDoc(doc(as.adminB(), 'transfers/T1'), { status: 'Declined', decidedAt: 'now' }));
+  await assertFails(updateDoc(doc(as.adminB(), 'transfers/T1'), { status: 'Accepted', decidedAt: 'now' }));  // decided is final
+  await assertSucceeds(updateDoc(doc(as.adminA(), 'parishes/A/members/CCC-MBR-001'), { status: 'Active' }));
+  // Send again, then the old parish cancels.
+  await assertSucceeds(send(as.adminA(), 'T3'));
+  await assertFails(updateDoc(doc(as.adminB(), 'transfers/T3'), { status: 'Cancelled', decidedAt: 'now' }));
+  await assertSucceeds(updateDoc(doc(as.adminA(), 'transfers/T3'), { status: 'Cancelled', decidedAt: 'now' }));
+});
+test('diaspora: member moved abroad needs a country + date; flow carries places only', async () => {
+  await seedPlaces();
+  const a = as.adminA();
+  await assertFails(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { status: 'Diaspora' }));
+  const b = writeBatch(a);
+  b.update(doc(a, 'parishes/A/members/CCC-MBR-001'), { status: 'Diaspora', abroadCountry: 'United Kingdom', abroadCity: 'Manchester', abroadParish: '', abroadSince: '2026-10-01' });
+  b.set(doc(a, 'flows/abroad_A_CCC-MBR-001_2026-10-01'), { kind: 'Abroad', fromCity: 'Lagos', fromCountry: 'Nigeria', toCity: 'Manchester', toCountry: 'United Kingdom', year: 2026 });
+  b.set(doc(a, 'parishStats/A'), { memberCount: increment(-1), diasporaCount: increment(1) }, { merge: true });
+  await assertSucceeds(b.commit());
+  await assertSucceeds(getDocs(query(collection(a, 'parishes/A/members'), where('status', '==', 'Diaspora'))));
+  // A flow for someone who did not move abroad, or with the wrong country, is refused.
+  await assertFails(setDoc(doc(a, 'flows/abroad_A_CCC-MBR-002_2026-10-01'), { kind: 'Abroad', fromCity: 'Lagos', fromCountry: 'Nigeria', toCity: 'X', toCountry: 'United Kingdom', year: 2026 }));
+  await assertFails(setDoc(doc(as.adminB(), 'flows/abroad_A_CCC-MBR-001_2026-10-01'), { kind: 'Abroad', fromCity: 'Lagos', fromCountry: 'Nigeria', toCity: 'X', toCountry: 'United Kingdom', year: 2026 }));
+  // Diaspora member can transfer on to a parish abroad.
+  await assertSucceeds(send(a, 'T5'));
+});

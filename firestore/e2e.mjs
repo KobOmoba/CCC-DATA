@@ -276,11 +276,76 @@ try {
   await page.waitForFunction(() => ['metricTotal', 'metricClergy', 'metricMembers'].map(i => document.getElementById(i).textContent).join() === '6,2,4');
   await shot('18-parish-dashboard');
   const parishId = await page.evaluate(() => localState.currentParishId);
+
+  // ---------------- PHASE 2: departments ----------------
+  // Six departments as dashboard buttons AND sidebar buttons.
+  assert.equal(await page.locator('#deptGrid > button').count(), 6, 'six dept buttons on dashboard');
+  for (const d of ['parochial', 'choir', 'ict', 'sidemen', 'prophets', 'sundayschool']) assert.equal(await page.locator('#nav-dept-' + d).count(), 1);
+  const deptAdd = async (term, no, role = '') => {
+    await page.fill('#d_role', role);
+    await page.fill('#d_find', term);
+    await page.waitForSelector(`#d_matches .dept-match[data-no="${no}"]`);
+    await page.click(`#d_matches .dept-match[data-no="${no}"]`);
+    await page.waitForSelector(`#deptMembersList .dept-row[data-no="${no}"]`);
+  };
+  await page.click('#nav-dept-choir');
+  await page.waitForSelector('#section-dept:not(.hidden)');
+  await deptAdd('TEST Bisola', 'CCC-MBR-002', 'Head');
+  await deptAdd('ccc-mbr-1', 'CCC-MBR-001');
+  await deptAdd('CCC-MBR-004', 'CCC-MBR-004');
+  // Clergy cannot join: CLG number refused, ordained member (005, now clergy) disabled.
+  await page.fill('#d_find', 'CCC-CLG-002');
+  await page.waitForSelector('#d_matches:has-text("Clergy cannot join a department")');
+  await page.fill('#d_find', 'TEST Emeka');
+  await page.waitForSelector('#d_matches .dept-match[data-no="CCC-MBR-005"][disabled]');
+  await shot('22-dept-clergy-refused');
+  // Rules refuse it too, even if the UI were bypassed.
+  const bypass = await page.evaluate(() => parishRef().collection('deptMembers').doc('choir_CCC-CLG-002').set({ dept: 'choir', memberNo: 'CCC-CLG-002', fullName: 'x', role: '', status: 'Current', joinedDate: today(), updatedAt: nowIso() }).then(() => 'WROTE', e => e.code));
+  assert.equal(bypass, 'permission-denied', 'clergy blocked by rules');
+  await page.fill('#d_find', '');
+  // Choir term ended 1 Oct 2026 -> overdue banner. Move 001 to Former members.
+  await page.fill('#d_termStart', '2024-10-01');
+  await page.dispatchEvent('#d_termStart', 'change');
+  assert.equal(await page.inputValue('#d_termEnd'), '2026-10-01', 'term end = start + 2 years');
+  await page.click('#saveTermBtn');
+  await page.waitForSelector('#deptBanner:has-text("OVERDUE")');
+  await page.click('#deptMembersList .dept-row[data-no="CCC-MBR-001"] button:has-text("Remove")');
+  await page.waitForFunction(() => document.getElementById('deptFormerCount').textContent === '1' && document.getElementById('deptCount').textContent === '2');
+  await page.click('#section-dept details summary');
+  await fullShot('23-dept-choir-members-former');
+  // Parochial: term ends 1 Dec 2026 -> due within 60 days.
+  await page.click('#nav-dept-parochial');
+  await page.waitForFunction(() => document.getElementById('deptTitle').textContent === 'Parochial Committee');
+  await deptAdd('TEST Adebayo', 'CCC-MBR-001', 'Chairman');
+  await page.fill('#d_termStart', '2024-12-01'); await page.dispatchEvent('#d_termStart', 'change');
+  await page.click('#saveTermBtn');
+  await page.waitForSelector('#deptBanner:has-text("Election due in")');
+  await shot('24-dept-parochial-due');
+  await nav('dashboard');
+  await page.waitForFunction(() => document.querySelector('#dept-card-choir .dept-count').textContent === '2' && document.querySelector('#dept-card-parochial .dept-count').textContent === '1');
+  assert.equal(await page.locator('#electionBanners .election-banner').count(), 2);
+  await fullShot('25-dashboard-departments');
+
+  // ---------------- PHASE 2: members in diaspora ----------------
+  await nav('members');
+  await page.click('#membersTable .person-row[data-no="CCC-MBR-004"]');
+  await page.waitForSelector('#recordBody:has-text("Choir")');
+  await page.click('#recordActions button:has-text("Moved abroad")');
+  await page.fill('#ab_country', 'United Kingdom'); await page.fill('#ab_city', 'Manchester'); await page.fill('#ab_parish', 'CCC Manchester Parish');
+  await page.fill('#ab_date', '2026-10-15');
+  await shot('26-moved-abroad-form');
+  await page.click('#saveAbroadBtn');
+  await page.waitForSelector('#section-diaspora:not(.hidden) .abroad-row[data-no="CCC-MBR-004"]');
+  await page.waitForFunction(() => document.getElementById('abroadCount').textContent === '1');
+  await fullShot('27-diaspora-list');
+  await page.evaluate(() => loadParishData());
+  await page.waitForFunction(() => ['metricTotal', 'metricMembers'].map(i => document.getElementById(i).textContent).join() === '5,3');
+  await page.waitForFunction(() => document.querySelector('#dept-card-choir .dept-count').textContent === '1'); // left choir when abroad
   await logout();
 
   // 13. Super admin: totals, clergy register, important members only.
   await login('super@test.local');
-  await page.waitForFunction(() => document.getElementById('metricTotal').textContent === '6');
+  await page.waitForFunction(() => document.getElementById('metricTotal').textContent === '5');
   await shot('19-super-dashboard');
   await nav('register');
   await page.waitForFunction(() => document.querySelectorAll('#registerList .world-row').length === 3);
@@ -311,7 +376,69 @@ try {
   await page.waitForTimeout(500);
   assert.ok(dialogs.slice(b2).some(m => /must not belong to clergy/.test(m)), 'clergy email refused as admin');
 
+  // ---------------- PHASE 2: member transfer between parishes ----------------
+  await page.fill('#np_name', 'TEST London Parish');
+  await page.fill('#np_city', 'London'); await page.fill('#np_country', 'United Kingdom'); await page.selectOption('#np_continent', 'Europe');
+  await page.fill('#np_email', 'london@test.local');
+  await page.click('#createParishBtn');
+  await page.waitForSelector('#newParishCode');
+  const code2 = (await page.textContent('#inviteCode')).trim();
+  const londonCode = (await page.textContent('#newParishCode')).trim();
+  assert.match(londonCode, /^[A-Z0-9]{6}$/);
+  await logout();
+  await page.click('#inviteToggle');
+  await page.fill('#invEmail', 'london@test.local'); await page.fill('#invCode', code2); await page.fill('#invPassword', PASS);
+  await page.click('#claimBtn');
+  await page.waitForFunction(() => document.getElementById('dashParishName').textContent === 'TEST London Parish');
+  await logout();
+
+  // Old parish sends member 003 with consent, by the London parish code.
+  await login('admin@test.local');
+  await nav('members');
+  await page.click('#membersTable .person-row[data-no="CCC-MBR-003"]');
+  await page.waitForSelector('#recordModal:not(.hidden)');
+  await page.click('#recordActions button:has-text("Transfer to another parish")');
+  await page.fill('#st_code', londonCode.toLowerCase());
+  await page.check('#st_consent');
+  await shot('28-send-transfer');
+  await page.click('#sendTransferBtn');
+  await page.waitForSelector('#section-diaspora:not(.hidden) .outgoing-row:has-text("Pending")');
+  await fullShot('29-transfer-sent');
+  await logout();
+
+  // New parish accepts: own record, same life-long number shown.
+  await login('london@test.local');
+  await nav('diaspora');
+  await page.waitForSelector('.incoming-row');
+  assert.match(await page.textContent('#incomingList'), /Life no\. CCC-MBR-003/);
+  await shot('30-incoming-transfer');
+  await page.click('.incoming-row button:has-text("Accept")');
+  await page.waitForSelector('#recordModal:not(.hidden) #recordBody:has-text("Life-long number")');
+  assert.match(await page.textContent('#recordBody'), /CCC-MBR-003 \(/);
+  assert.match(await page.textContent('#recordTitle'), /^CCC-MBR-001$/);
+  await shot('31-accepted-life-number');
+  await page.evaluate(() => closeModal('recordModal'));
+  await nav('members');
+  await page.waitForSelector('#membersTable .person-row:has-text("Life no. CCC-MBR-003")');
+  await shot('32-new-parish-members');
+  await logout();
+
+  // Super: world totals count each person once; flow summary has places + counts only.
+  await login('super@test.local');
+  // Old parish: 2 members (001, 002) + 2 clergy; London: 1 member. 004 abroad, 003 counted once (in London).
+  await page.waitForFunction(() => ['metricTotal', 'metricMembers'].map(i => document.getElementById(i).textContent).join() === '5,3');
+  await nav('flows');
+  await page.waitForFunction(() => document.querySelectorAll('#flowsList .flow-row').length === 2);
+  const flowText = await page.textContent('#flowsList');
+  assert.match(flowText, /Ikeja, Nigeria → Manchester, United Kingdom/);
+  assert.match(flowText, /Ikeja, Nigeria → London, United Kingdom/);
+  assert.ok(!/TEST /.test(flowText), 'no names in flows');
+  await shot('33-super-diaspora-flows');
+  const leak2 = await page.evaluate(async () => { try { await db.collection('transfers').get(); return 'READ'; } catch (e) { return e.code; } });
+  assert.equal(leak2, 'permission-denied', 'super cannot read transfers');
+
   assert.deepEqual(pageErrors, [], 'no page errors');
+  console.log('E2E PASS (phase 2): departments (6 buttons, members + former, terms, due/overdue banners, clergy ban UI + rules), moved abroad, transfer by parish code with life-long number, world totals once, super flow summary without names. ');
   console.log('E2E PASS: super created parish + invite; admin activated, renamed + logo; 5 members with ~60KB photos; 2 clergy; transfer to Former with letter; ordination; family; global search by name/phone/number; dashboard 6/2/4; super sees totals + clergy + important only; clergy-not-admin enforced both ways.');
 } catch (e) {
   await shot('zz-failure').catch(() => {});

@@ -25,6 +25,15 @@ with the invited email + code.
 - `parishes/{p}/families`, `parishes/{p}/letters` (transfer letters), `attendance`, `finances`
 - `parishStats/{p}` - totals only; `invites/{code}`, `adminEmails/{email}`, `clergyIndex/{email}`
 - `firestore.indexes.json` - enables the Super Admin "important members" query
+- **Departments** (Phase 2): `parishes/{p}/departments/{dept}` = 2-year term `{termStart, termEnd}`;
+  `parishes/{p}/deptMembers/{dept}_{memberNo}` = `{status: Current|Former, role, joinedDate, leftDate}`.
+  Six fixed ids: parochial, choir, ict, sidemen, prophets, sundayschool. Clergy can never join (rules: only
+  an Active CCC-MBR member). Banner when an election is due within 60 days or overdue.
+- **Members in Diaspora**: member `status: Diaspora` + abroadCountry/City/Parish/Since (a link, not counted as a member).
+- **Transfers**: `transfers/{id}` (old parish sends with consent, new parish accepts by **parish code**,
+  `parishCodes/{code}`). The new record keeps `lifeNo` + `lifeParishCode` (one member number for life).
+  The old record stays as `TransferredOut`, so world totals count each person once.
+- `flows/{id}` - places + year only (no names); Super Admin's "Diaspora Flows" summary.
 
 ## Set up Firebase later (on your phone)
 1. Open **Chrome** and go to `console.firebase.google.com`. Sign in.
