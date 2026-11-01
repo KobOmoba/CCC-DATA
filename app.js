@@ -1,17 +1,17 @@
 // PARISH DATABASE ENGINE & GATEWAY (Firebase)
 
 // ============================================================================
-// PLACEHOLDER FIREBASE CONFIG - NOT A REAL PROJECT.
+// Firebase web config for project ccc-data-aarinat (public by design; data is protected by Firestore rules).
 // Replace every value below with the config of your own Firebase project
 // (Firebase console > Project settings > Your apps > Web app). See README.md.
 // ============================================================================
 const firebaseConfig = {
-    apiKey: "PLACEHOLDER_API_KEY",
-    authDomain: "PLACEHOLDER_PROJECT_ID.firebaseapp.com",
-    projectId: "PLACEHOLDER_PROJECT_ID",
-    storageBucket: "PLACEHOLDER_PROJECT_ID.appspot.com",
-    messagingSenderId: "PLACEHOLDER_SENDER_ID",
-    appId: "PLACEHOLDER_APP_ID"
+    apiKey: "AIzaSyDtu61cYVY_IZG6-AyXpSOAwW2QZxkBoaU",
+    authDomain: "ccc-data-aarinat.firebaseapp.com",
+    projectId: "ccc-data-aarinat",
+    storageBucket: "ccc-data-aarinat.firebasestorage.app",
+    messagingSenderId: "762074026179",
+    appId: "1:762074026179:web:3ce45d236531e5f1fe9276"
 };
 const CONFIG_IS_PLACEHOLDER = firebaseConfig.apiKey.startsWith("PLACEHOLDER");
 
