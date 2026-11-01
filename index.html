@@ -261,30 +261,124 @@
                     <div id="importantList" class="space-y-2"></div>
                 </section>
 
-                <!-- Tab 3: ATTENDANCE LEDGER -->
-                <section id="section-attendance" class="space-y-4 hidden">
-                    <div class="flex justify-between items-center pb-2 border-b">
-                        <div>
-                            <h2 class="text-lg font-bold text-gray-800">Service Attendance</h2>
-                            <p class="text-xs text-gray-500">Record metrics based on service liturgies.</p>
+                <!-- ATTENDANCE (Phase 3): built around the CCC service schedule -->
+                <section id="section-attendance" class="space-y-3 hidden">
+                    <div class="pb-2 border-b no-print">
+                        <h2 class="text-lg font-bold text-gray-800">Attendance</h2>
+                        <p class="text-xs text-gray-500">This week's services come from the CCC timetable. Tap a service to record it.</p>
+                    </div>
+                    <div id="attTabs" class="no-print flex gap-1.5 overflow-x-auto whitespace-nowrap text-xs pb-1">
+                        <button data-tab="week" onclick="attTab('week')" class="att-tab px-3 py-2 rounded-full border bg-white font-semibold">This week</button>
+                        <button data-tab="followup" onclick="attTab('followup')" class="att-tab px-3 py-2 rounded-full border bg-white font-semibold">Follow-up</button>
+                        <button data-tab="visitors" onclick="attTab('visitors')" class="att-tab px-3 py-2 rounded-full border bg-white font-semibold">Visitors</button>
+                        <button data-tab="depts" onclick="attTab('depts')" class="att-tab px-3 py-2 rounded-full border bg-white font-semibold">Unit registers</button>
+                        <button data-tab="cleaning" onclick="attTab('cleaning')" class="att-tab px-3 py-2 rounded-full border bg-white font-semibold">Cleaning</button>
+                        <button data-tab="reports" onclick="attTab('reports')" class="att-tab px-3 py-2 rounded-full border bg-white font-semibold">Reports</button>
+                    </div>
+
+                    <!-- This week -->
+                    <div id="att-week" class="att-panel space-y-2">
+                        <div class="flex items-center justify-between bg-white border rounded-xl p-2 text-xs">
+                            <button onclick="shiftWeek(-1)" class="px-3 py-2 border rounded" aria-label="Previous week"><i class="fa-solid fa-chevron-left"></i></button>
+                            <span id="weekLabel" class="font-bold"></span>
+                            <button onclick="shiftWeek(1)" class="px-3 py-2 border rounded" aria-label="Next week"><i class="fa-solid fa-chevron-right"></i></button>
                         </div>
-                        <button onclick="openAttendanceModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-xs font-semibold shadow transition">
-                            <i class="fa-solid fa-calendar-plus mr-1"></i> Record Attendance
-                        </button>
+                        <div id="weekList" class="space-y-2"></div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <button onclick="openSpecialForm()" class="py-2.5 bg-amber-500 text-white rounded-lg font-bold"><i class="fa-solid fa-star mr-1"></i> Special service</button>
+                            <button onclick="openServiceModal()" class="py-2.5 bg-blue-600 text-white rounded-lg font-bold"><i class="fa-solid fa-calendar-plus mr-1"></i> Other / past service</button>
+                        </div>
+                        <div id="specialForm" class="hidden bg-white border rounded-xl p-3 space-y-2 text-xs">
+                            <p class="font-bold">Add a special service (harvest, anniversary...)</p>
+                            <input id="sp_name" class="w-full border p-2.5 rounded" placeholder="Name, e.g. Harvest Thanksgiving">
+                            <div class="grid grid-cols-2 gap-2"><input type="date" id="sp_date" class="border p-2.5 rounded"><input type="time" id="sp_time" value="10:00" class="border p-2.5 rounded"></div>
+                            <button id="saveSpecialBtn" onclick="saveSpecial()" class="w-full py-2.5 bg-amber-600 text-white rounded font-bold">Add to the schedule</button>
+                        </div>
+                        <p class="text-[10px] uppercase font-semibold text-gray-500 pt-2">All records (old simple records included)</p>
+                        <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
+                            <table class="w-full text-left text-xs border-collapse">
+                                <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
+                                    <tr><th class="p-3">Date</th><th class="p-3">Service</th><th class="p-3">Headcount</th></tr>
+                                </thead>
+                                <tbody id="attendanceTable" class="divide-y text-gray-700"></tbody>
+                            </table>
+                        </div>
+                        <button id="more-attendance" onclick="loadAttendance(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
                     </div>
-                    <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
-                        <table class="w-full text-left text-xs border-collapse">
-                            <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
-                                <tr>
-                                    <th class="p-3">Service Date</th>
-                                    <th class="p-3">Service Type</th>
-                                    <th class="p-3">Attendee Headcount</th>
-                                </tr>
-                            </thead>
-                            <tbody id="attendanceTable" class="divide-y text-gray-700"></tbody>
-                        </table>
+
+                    <!-- Follow-up -->
+                    <div id="att-followup" class="att-panel hidden space-y-2 text-xs">
+                        <div class="bg-rose-50 border-l-4 border-rose-400 p-3 rounded"><p class="font-bold text-rose-900">Absent 3+ weeks (all units)</p><p class="text-rose-800">Roll-up of every unit register. Tap WhatsApp to send a pre-written message. You press Send in WhatsApp.</p></div>
+                        <div id="absentList" class="space-y-2"></div>
+                        <p class="text-[10px] uppercase font-semibold text-gray-500 pt-2">Best streaks (unit sessions in a row)</p>
+                        <div id="streakList" class="bg-white border rounded-xl divide-y"></div>
                     </div>
-                    <button id="more-attendance" onclick="loadAttendance(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+
+                    <!-- Visitors -->
+                    <div id="att-visitors" class="att-panel hidden space-y-2 text-xs">
+                        <div class="bg-white border rounded-xl p-3 space-y-2">
+                            <p class="font-bold">New visitor</p>
+                            <input id="v_name" class="w-full border p-2.5 rounded" placeholder="Full name">
+                            <input id="v_phone" type="tel" class="w-full border p-2.5 rounded" placeholder="Phone (WhatsApp)">
+                            <input id="v_invited" class="w-full border p-2.5 rounded" placeholder="Invited by (name)">
+                            <input id="v_date" type="date" class="w-full border p-2.5 rounded">
+                            <label class="flex items-start gap-2"><input type="checkbox" id="v_consent" class="mt-0.5"> <span>The visitor agreed we may keep these details to follow up (NDPA 2023).</span></label>
+                            <button id="saveVisitorBtn" onclick="saveVisitor()" class="w-full py-2.5 bg-emerald-600 text-white rounded font-bold">Save visitor</button>
+                        </div>
+                        <div id="visitorList" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Department attendance -->
+                    <div id="att-depts" class="att-panel hidden space-y-2 text-xs">
+                        <div class="bg-white border rounded-xl p-3 space-y-2">
+                            <p class="text-gray-600">Each unit marks its own short register at its meeting or service duty.</p>
+                            <select id="da_dept" onchange="loadDeptRoll()" class="w-full border p-2.5 rounded"></select>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="date" id="da_date" onchange="loadDeptRoll()" class="border p-2.5 rounded">
+                                <select id="da_kind" class="border p-2.5 rounded"><option>Practice</option><option>Meeting</option><option>Class</option><option>Service duty</option><option>Other</option></select>
+                            </div>
+                        </div>
+                        <div id="daList" class="bg-white border rounded-xl divide-y"></div>
+                        <button id="saveDeptAttBtn" onclick="saveDeptAttendance()" class="w-full py-2.5 bg-blue-600 text-white rounded font-bold">Save department attendance</button>
+                        <div id="daAbsent" class="space-y-2"></div>
+                        <div id="daRecent" class="space-y-1"></div>
+                        <div class="bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">Add a unit (e.g. Ushers, Youth, Women's Fellowship)</p>
+                            <div class="flex gap-2"><input id="unit_name" class="flex-1 border p-2.5 rounded" placeholder="Unit name"><button id="addUnitBtn" onclick="addUnit()" class="px-3 bg-slate-800 text-white rounded font-bold">Add</button></div></div>
+                    </div>
+
+                    <!-- Saturday cleaning rota -->
+                    <div id="att-cleaning" class="att-panel hidden space-y-2 text-xs">
+                        <div class="bg-white border rounded-xl p-3 space-y-2">
+                            <label for="cl_date" class="text-[10px] uppercase font-semibold text-gray-500">Saturday</label>
+                            <input type="date" id="cl_date" onchange="loadCleaning()" class="w-full border p-2.5 rounded">
+                            <input type="search" id="cl_search" oninput="findForCleaning()" class="w-full border p-2.5 rounded" placeholder="Assign: search name or number">
+                            <div id="cl_found" class="divide-y"></div>
+                        </div>
+                        <div id="cl_list" class="bg-white border rounded-xl divide-y"></div>
+                        <button id="saveCleaningBtn" onclick="saveCleaning()" class="w-full py-2.5 bg-blue-600 text-white rounded font-bold">Save cleaning rota</button>
+                    </div>
+
+                    <!-- Reports -->
+                    <div id="att-reports" class="att-panel hidden space-y-2 text-xs">
+                        <div class="no-print grid grid-cols-2 gap-2">
+                            <select id="rp_period" onchange="loadReports()" class="border p-2.5 rounded"><option value="week">Weekly (12 weeks)</option><option value="month">Monthly (12 months)</option></select>
+                            <select id="rp_type" onchange="renderReports()" class="border p-2.5 rounded"></select>
+                        </div>
+                        <div class="no-print grid grid-cols-3 gap-2">
+                            <button onclick="exportCsv('services')" class="py-2.5 border rounded bg-white font-bold"><i class="fa-solid fa-file-csv"></i> Services CSV</button>
+                            <button onclick="exportCsv('depts')" class="py-2.5 border rounded bg-white font-bold"><i class="fa-solid fa-file-csv"></i> Depts CSV</button>
+                            <button onclick="window.print()" class="py-2.5 border rounded bg-white font-bold"><i class="fa-solid fa-print"></i> Print / PDF</button>
+                        </div>
+                        <div id="reportPrint" class="bg-white border rounded-xl p-3 space-y-3">
+                            <div><p id="rpTitle" class="font-bold text-sm"></p><p id="rpSub" class="text-gray-500"></p></div>
+                            <div id="rpChart"></div>
+                            <div id="rpTable" class="overflow-x-auto"></div>
+                            <p class="font-bold">Per service type</p>
+                            <div id="rpTypes" class="overflow-x-auto"></div>
+                            <p class="font-bold">Per department</p>
+                            <div id="rpDepts" class="overflow-x-auto"></div>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Tab 4: FINANCIAL CONTRIBUTIONS -->
@@ -472,20 +566,32 @@
     </div>
 
     <!-- 2. LOG ATTENDANCE MODAL -->
-    <div id="addAttendanceModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
+    <!-- SERVICE RECORD MODAL (Phase 3) -->
+    <div id="serviceModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs max-h-[92vh] overflow-y-auto">
             <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center">
-                <span>RECORD SERVICE ATTENDANCE</span>
-                <button onclick="closeAttendanceModal()" class="text-white"><i class="fa-solid fa-xmark"></i></button>
+                <span id="svcTitle">RECORD SERVICE</span>
+                <button onclick="closeModal('serviceModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
             </header>
-            <div class="p-5 space-y-3">
-                <input type="date" id="att_date" class="w-full border p-2.5 rounded text-xs">
-                <input type="text" id="att_type" class="w-full border p-2.5 rounded text-xs" placeholder="Service Type (e.g., Sunday Service)">
-                <input type="number" id="att_headcount" class="w-full border p-2.5 rounded text-xs" placeholder="Headcount (e.g. 150)">
+            <div class="p-4 space-y-3">
+                <div class="grid grid-cols-2 gap-2">
+                    <select id="svc_key" class="border p-2.5 rounded col-span-2"></select>
+                    <input type="date" id="svc_date" class="border p-2.5 rounded">
+                    <input type="time" id="svc_time" class="border p-2.5 rounded">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <label>Men<input type="number" min="0" inputmode="numeric" id="svc_men" oninput="svcTotal()" class="w-full border p-2.5 rounded text-base"></label>
+                    <label>Women<input type="number" min="0" inputmode="numeric" id="svc_women" oninput="svcTotal()" class="w-full border p-2.5 rounded text-base"></label>
+                    <label>Children<input type="number" min="0" inputmode="numeric" id="svc_children" oninput="svcTotal()" class="w-full border p-2.5 rounded text-base"></label>
+                    <label>Visitors<input type="number" min="0" inputmode="numeric" id="svc_visitors" oninput="svcTotal()" class="w-full border p-2.5 rounded text-base"></label>
+                </div>
+                <p class="font-bold text-sm">Total: <span id="svc_total">0</span></p>
+                <label class="block">Led by (clergy)<select id="svc_led" class="w-full border p-2.5 rounded"></select></label>
+                <textarea id="svc_notes" rows="2" class="w-full border p-2.5 rounded" placeholder="Notes (sermon theme, events...)"></textarea>
             </div>
             <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2">
-                <button onclick="closeAttendanceModal()" class="px-4 py-2 border rounded">Cancel</button>
-                <button onclick="saveAttendance()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded">Log Records</button>
+                <button onclick="closeModal('serviceModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="saveServiceBtn" onclick="saveService()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded">Save</button>
             </footer>
         </div>
     </div>

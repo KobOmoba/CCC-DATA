@@ -437,6 +437,128 @@ try {
   const leak2 = await page.evaluate(async () => { try { await db.collection('transfers').get(); return 'READ'; } catch (e) { return e.code; } });
   assert.equal(leak2, 'permission-denied', 'super cannot read transfers');
 
+
+  // ---------------------------------------------------------------- Phase 3: attendance
+  await logout();
+  await login('admin@test.local');
+  // An old simple record (Phase 1 shape) must still show.
+  await page.evaluate(() => parishRef().collection('attendance').doc('legacy1').set({ serviceDate: '2026-10-04', serviceType: 'Sunday Service', headcount: 88 }));
+  await nav('attendance');
+  await page.waitForSelector('#att-week .svc-card');
+  const wk = await page.evaluate(() => weekServices(weekStart(localToday())).map(s => s.key));
+  assert.ok(wk.includes('sunday') && wk.includes('wakati') && wk.includes('fri_evening'), 'timetable generated');
+  assert.ok(wk.includes('new_moon') !== wk.includes('vigil_prophets'), 'Thursday: New Moon OR Prophets vigil');
+  assert.deepEqual(await page.evaluate(() => weekServices('2026-11-01').filter(s => s.date === '2026-11-05').map(s => s.key)), ['new_moon'], 'first Thursday = New Moon 22:00');
+  assert.deepEqual(await page.evaluate(() => weekServices('2026-11-08').filter(s => s.date === '2026-11-12').map(s => s.key)), ['vigil_prophets']);
+  await page.waitForSelector('#attendanceTable:has-text("88 attendees")');
+  await fullShot('40-att-week-timetable');
+  // Record Sunday: split headcount + clergy leader + notes.
+  const sunId = await page.evaluate(() => weekServices(weekStart(localToday())).find(s => s.key === 'sunday').id);
+  await page.click(`.svc-card[data-id="${sunId}"] button:has-text("Record")`);
+  await page.fill('#svc_men', '40'); await page.fill('#svc_women', '55'); await page.fill('#svc_children', '20'); await page.fill('#svc_visitors', '6');
+  await page.selectOption('#svc_led', { index: 1 });
+  await page.fill('#svc_notes', 'Theme: walking in the light');
+  assert.equal(await page.textContent('#svc_total'), '121');
+  await shot('41-att-record-service');
+  await page.click('#saveServiceBtn');
+  await modalClosed('serviceModal');
+  await page.waitForSelector(`.svc-card[data-id="${sunId}"]:has-text("121")`);
+  assert.match(await page.textContent(`.svc-card[data-id="${sunId}"]`), /Led by/);
+  // Special service.
+  await page.click('button:has-text("Special service")');
+  await page.fill('#sp_name', 'Harvest Thanksgiving');
+  await page.fill('#sp_date', await page.evaluate(() => addDays(weekStart(localToday()), 6)));
+  await page.click('#saveSpecialBtn');
+  await page.waitForSelector('.svc-card:has-text("Harvest Thanksgiving")');
+  await fullShot('42-att-week-recorded-special');
+  // No whole-church tick-list (founder decision).
+  assert.equal(await page.locator('[data-tab="checkin"]').count(), 0, 'no whole-church check-in');
+
+  // Unit register: choir marks its own short list; an admin-defined unit too.
+  await page.click('[data-tab="depts"]');
+  await page.waitForSelector('#daList .da-row');
+  await page.selectOption('#da_dept', 'choir');
+  await page.waitForSelector('#daList .da-row');
+  const old = await page.evaluate(() => addDays(localToday(), -35));
+  await page.evaluate(d => parishRef().collection('deptAttendance').doc('choir_' + d).set({ dept: 'choir', date: d, kind: 'Practice', present: ['CCC-MBR-002'], notes: '', updatedAt: nowIso() }), old);
+  await page.selectOption('#da_kind', 'Practice');
+  await page.click('#saveDeptAttBtn');  // nobody ticked today
+  await page.waitForSelector('#daAbsent .absent-row');
+  await fullShot('43-unit-register-choir');
+  await page.fill('#unit_name', 'Ushers');
+  await page.click('#addUnitBtn');
+  await page.waitForFunction(() => [...document.querySelectorAll('#da_dept option')].some(o => o.textContent === 'Ushers'));
+  // Roll-up across units with one-tap WhatsApp.
+  await page.click('[data-tab="followup"]');
+  await page.waitForSelector('#absentList .absent-row');
+  const wa = await page.getAttribute('#absentList .wa-link', 'href');
+  assert.match(wa, /^https:\/\/wa\.me\/\d+\?text=Shalom/);
+  assert.match(await page.textContent('#absentList'), /Choir/);
+  await fullShot('44-followup-rollup-whatsapp');
+
+  // Visitors: log, follow-up status, convert to member.
+  await page.click('[data-tab="visitors"]');
+  await page.fill('#v_name', 'TEST Kemi Visitor'); await page.fill('#v_phone', '08031234567'); await page.fill('#v_invited', 'TEST Bisola');
+  const d1 = dialogs.length;
+  await page.click('#saveVisitorBtn');
+  await page.waitForTimeout(300);
+  assert.ok(dialogs.length > d1 && /permission/.test(dialogs.at(-1)), 'consent required');
+  await page.check('#v_consent');
+  await page.click('#saveVisitorBtn');
+  await page.waitForSelector('.visitor-row:has-text("TEST Kemi Visitor")');
+  await page.selectOption('.visitor-row select', 'Contacted');
+  await page.waitForTimeout(500);
+  await shot('45-visitors-log');
+  await page.click('.visitor-row button:has-text("Make member")');
+  await page.waitForSelector('#personModal:not(.hidden)');
+  assert.equal(await page.inputValue('#p_name'), 'TEST Kemi Visitor');
+  await page.selectOption('#p_gender', 'Female'); await page.selectOption('#p_marital', 'Single');
+  await page.selectOption('#p_dobDay', '5'); await page.selectOption('#p_dobMonth', '5');
+  await page.check('#p_consent');
+  await page.click('#savePersonBtn');
+  await page.waitForSelector('.visitor-row:has-text("Member CCC-MBR-")');
+  await shot('46-visitor-converted');
+
+  // Saturday cleaning rota.
+  await page.click('[data-tab="cleaning"]');
+  await page.fill('#cl_search', 'TEST Bisola');
+  await page.click('#cl_found button');
+  await page.check('#cl_list .cl-row input');
+  await page.click('#saveCleaningBtn');
+  await page.waitForFunction(() => true);
+  await page.waitForTimeout(500);
+  assert.match(dialogs.at(-1), /1 of 1 came/);
+  await shot('47-cleaning-rota');
+
+  // Reports: chart, CSV, print.
+  await page.click('[data-tab="reports"]');
+  await page.waitForSelector('#rpChart svg rect', { state: 'attached' });
+  assert.match(await page.textContent('#rpTypes'), /Sunday Service/);
+  assert.match(await page.textContent('#rpDepts'), /Choir/);
+  await fullShot('48-reports-weekly');
+  await page.selectOption('#rp_period', 'month');
+  await page.waitForSelector('#rpTable:has-text("Month")');
+  await shot('49-reports-monthly');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Services CSV")')]);
+  const csv = readFileSync(await dl.path(), 'utf8');
+  assert.match(csv, /^Date,Service,Type,Men,Women,Children,Visitors,Total/);
+  assert.match(csv, /,40,55,20,6,121,/);
+  assert.match(csv, /2026-10-04,Sunday Service/, 'old records exported too');
+  await page.emulateMedia({ media: 'print' });
+  await fullShot('50-report-print-view');
+  await page.emulateMedia({ media: 'screen' });
+  await logout();
+
+  // Super Admin / HQ: totals per service type, never the records.
+  await login('super@test.local');
+  await page.waitForSelector('#worldByType:has-text("Sunday Service")');
+  await fullShot('51-super-attendance-totals');
+  const leak3 = await page.evaluate(async (p) => { try { await db.collection('parishes').doc(p).collection('attendance').get(); return 'READ'; } catch (e) { return e.code; } }, parishId);
+  assert.equal(leak3, 'permission-denied', 'super cannot read attendance records');
+  const leak4 = await page.evaluate(async (p) => { try { await db.collection('parishes').doc(p).collection('visitors').get(); return 'READ'; } catch (e) { return e.code; } }, parishId);
+  assert.equal(leak4, 'permission-denied', 'super cannot read visitors');
+  console.log('E2E PASS (phase 3): timetable week, split headcount + leader + notes, special service, unit registers + admin unit, absent 3+ weeks roll-up with WhatsApp, visitors + convert, cleaning rota, reports chart/CSV/print, super totals only.');
+
   assert.deepEqual(pageErrors, [], 'no page errors');
   console.log('E2E PASS (phase 2): departments (6 buttons, members + former, terms, due/overdue banners, clergy ban UI + rules), moved abroad, transfer by parish code with life-long number, world totals once, super flow summary without names. ');
   console.log('E2E PASS: super created parish + invite; admin activated, renamed + logo; 5 members with ~60KB photos; 2 clergy; transfer to Former with letter; ordination; family; global search by name/phone/number; dashboard 6/2/4; super sees totals + clergy + important only; clergy-not-admin enforced both ways.');

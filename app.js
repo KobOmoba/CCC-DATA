@@ -37,7 +37,7 @@ const DEPTS = [
     { id: "sidemen", name: "Sidemen / Sidewomen", icon: "fa-people-group", color: "text-emerald-300" },
     { id: "prophets", name: "Prophets / Prophetesses", icon: "fa-eye", color: "text-violet-300" },
     { id: "sundayschool", name: "Sunday School", icon: "fa-children", color: "text-amber-300" }];
-const deptName = id => (DEPTS.find(d => d.id === id) || {}).name || id;
+const deptName = id => (DEPTS.find(d => d.id === id) || {}).name || (localState.units || {})[id] || id;
 const ELECTION_WARN_DAYS = 60;
 
 let auth = null;
@@ -193,6 +193,7 @@ function showSection(id) {
     if (id === "families") loadFamilies();
     if (id === "diaspora") loadDiaspora();
     if (id === "flows") loadFlows();
+    if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
 const parishRef = () => db.collection("parishes").doc(localState.currentParishId);
@@ -444,7 +445,10 @@ async function savePerson() {
             } else {
                 p.status = "Active"; p.consentDate = today(); p.createdAt = nowIso();
                 if (form.kind === "clergy") p.serviceRecord = p.rank ? [{ rank: p.rank, from: p.joinedDate || today() }] : [];
-                await createRecord(form.kind, p);
+                const vid = form.visitorId;
+                // A visitor made member: the visitor is marked Member in the same transaction.
+                await createRecord(form.kind, p, vid ? (t, id) => t.update(parishRef().collection("visitors").doc(vid), { status: "Member", memberNo: id, updatedAt: nowIso() }) : null);
+                if (vid) { form.visitorId = null; closeModal("personModal"); await loadVisitors(); return; }
             }
             closeModal("personModal");
             await loadParishData();
@@ -660,14 +664,14 @@ async function loadWorld() {
     $("dashParishName").textContent = "World-wide";
     const [parishes, stats] = await Promise.all([db.collection("parishes").get(), db.collection("parishStats").get()]);
     const byId = Object.fromEntries(stats.docs.map(d => [d.id, d.data()]));
-    const sum = { memberCount: 0, clergyCount: 0, serviceCount: 0, financeTotal: 0, diasporaCount: 0 };
+    const sum = { memberCount: 0, clergyCount: 0, serviceCount: 0, financeTotal: 0, diasporaCount: 0, attendanceTotal: 0 };
     stats.docs.forEach(d => Object.keys(sum).forEach(k => sum[k] += d.data()[k] || 0));
     showTotals(sum);
     localState.worldDiaspora = sum.diasporaCount;
     localState.parishNames = Object.fromEntries(parishes.docs.map(d => [d.id, d.data().name]));
-    $("worldTable").innerHTML = `<table class="w-full text-left text-xs"><thead class="bg-gray-100"><tr><th class="p-2">Parish</th><th class="p-2">Place</th><th class="p-2">Clergy</th><th class="p-2">Members</th></tr></thead><tbody class="divide-y">` +
+    $("worldTable").innerHTML = `<table class="w-full text-left text-xs"><thead class="bg-gray-100"><tr><th class="p-2">Parish</th><th class="p-2">Place</th><th class="p-2">Clergy</th><th class="p-2">Members</th><th class="p-2">Attendance</th></tr></thead><tbody class="divide-y">` +
         parishes.docs.map(d => { const p = d.data(), s = byId[d.id] || {};
-            return `<tr><td class="p-2 font-bold">${esc(p.name)}${p.status !== "Approved" ? " (" + esc(p.status) + ")" : ""}</td><td class="p-2">${esc([p.city, p.country].filter(Boolean).join(", "))}</td><td class="p-2">${s.clergyCount || 0}</td><td class="p-2">${s.memberCount || 0}</td></tr>`; }).join("") + `</tbody></table>`;
+            return `<tr><td class="p-2 font-bold">${esc(p.name)}${p.status !== "Approved" ? " (" + esc(p.status) + ")" : ""}</td><td class="p-2">${esc([p.city, p.country].filter(Boolean).join(", "))}</td><td class="p-2">${s.clergyCount || 0}</td><td class="p-2">${s.memberCount || 0}</td><td class="p-2">${s.attendanceTotal || 0}</td></tr>`; }).join("") + `</tbody></table>` + worldByType(stats.docs.map(d => d.data()));
     $("worldTable").classList.remove("hidden");
     if (localState.role !== "super_admin") return;
     $("parishList").innerHTML = parishes.docs.map(d => { const p = d.data();
@@ -681,6 +685,14 @@ async function loadWorld() {
     renderRegister();
     $("importantList").innerHTML = important.empty ? `<p class="text-xs text-gray-400 italic">No members flagged yet.</p>` :
         important.docs.map(d => worldCard({ ...d.data(), parish: localState.parishNames[parishOf(d)] })).join("");
+}
+// Totals per service type across parishes (numbers only; HQ + Super Admin).
+function worldByType(all) {
+    const t = {};
+    all.forEach(s => Object.entries(s.byType || {}).forEach(([k, v]) => { const x = t[k] ||= { services: 0, total: 0 }; x.services += v.services || 0; x.total += v.total || 0; }));
+    const rows = Object.entries(t);
+    return rows.length ? `<table id="worldByType" class="w-full text-left text-xs border-t"><thead class="bg-gray-100"><tr><th class="p-2">Service type</th><th class="p-2">Held</th><th class="p-2">Total</th><th class="p-2">Avg</th></tr></thead><tbody class="divide-y">` +
+        rows.map(([k, v]) => `<tr><td class="p-2">${esc(TYPE_NAMES[k] || k)}</td><td class="p-2">${v.services}</td><td class="p-2">${v.total}</td><td class="p-2">${v.services ? Math.round(v.total / v.services) : 0}</td></tr>`).join("") + `</tbody></table>` : "";
 }
 function worldCard(p) {
     return `<div class="world-row bg-white border rounded-xl p-2 flex items-center gap-3 text-xs">${p.photo ? `<img src="${esc(p.photo)}" alt="" class="w-10 h-12 object-cover rounded">` : ""}
@@ -734,25 +746,407 @@ async function logout() {
 }
 
 // ---------------------------------------------------------------- attendance, finance, circulars (Milestone 1)
-function openAttendanceModal() { document.getElementById("addAttendanceModal").classList.remove('hidden'); }
-function closeAttendanceModal() { document.getElementById("addAttendanceModal").classList.add('hidden'); }
-async function saveAttendance() {
-    if (!requireFirebase()) return;
-    const date = document.getElementById("att_date").value;
-    const type = document.getElementById("att_type").value.trim();
-    const headcount = parseInt(document.getElementById("att_headcount").value);
-    if (!date || !type || isNaN(headcount) || headcount < 0) return alert("Fill all elements.");
-    try {
-        const inc = firebase.firestore.FieldValue.increment;
-        const batch = db.batch();
-        batch.set(parishRef().collection("attendance").doc(), { serviceDate: date, serviceType: type, headcount });
-        batch.set(statsRef(), { attendanceTotal: inc(headcount), serviceCount: inc(1) }, { merge: true });
-        await batch.commit();
-        closeAttendanceModal();
-        loadParishData();
-    } catch (e) {
-        alert(`Failed to save log: ${e.message}`);
+// ---------------------------------------------------------------- attendance (Phase 3)
+// The CCC weekly timetable. Keys are fixed: firestore.rules lists the same ones.
+const SCHEDULE = [
+    { key: "sunday", name: "Sunday Service", dow: 0, time: "10:00" },
+    { key: "bible", name: "Bible Class", dow: 1, time: "17:00" },
+    { key: "vigil_sidemen", name: "Sidemen/Sidewomen Night Vigil", dow: 1, time: "23:59" },
+    { key: "wakati", name: "Wakati Adura", dow: 2, time: "09:00" },
+    { key: "seekers", name: "Seekers Service", dow: 3, time: "09:00" },
+    { key: "wed_evening", name: "Wednesday Evening Service", dow: 3, time: "18:00" },
+    { key: "new_moon", name: "New Moon Service", dow: 4, time: "22:00", week: "first" },
+    { key: "vigil_prophets", name: "Prophets/Prophetesses Night Vigil", dow: 4, time: "23:59", week: "other" },
+    { key: "fri_evening", name: "Friday Evening Service", dow: 5, time: "18:00" }];
+const TYPE_NAMES = { ...Object.fromEntries(SCHEDULE.map(s => [s.key, s.name])), special: "Special service", other: "Other service" };
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const ABSENT_DAYS = 21;
+
+// Local calendar dates as YYYY-MM-DD (no UTC shift).
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const parseYmd = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
+const localToday = () => ymd(new Date());
+const weekStart = s => addDays(s, -parseYmd(s).getDay());          // the Sunday of that week
+const fmtDay = s => { const d = parseYmd(s); return `${DOW[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`; };
+
+// All timetable services for the week starting on Sunday `sun`, plus special services that week.
+function weekServices(sun, specials = []) {
+    const list = [];
+    for (const s of SCHEDULE) {
+        const date = addDays(sun, s.dow);
+        const firstThu = parseYmd(date).getDate() <= 7;
+        if (s.week === "first" && !firstThu) continue;
+        if (s.week === "other" && firstThu) continue;
+        list.push({ id: `${date}_${s.key}`, key: s.key, name: s.name, date, time: s.time });
     }
+    for (const sp of specials) list.push({ id: `${sp.date}_special_${sp.id}`, key: "special", specialId: sp.id, name: sp.name, date: sp.date, time: sp.time });
+    return list.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+}
+// Old free-text records are put into a type by name, for the reports.
+function keyOf(a) {
+    if (a.serviceKey) return a.serviceKey;
+    const t = (a.serviceType || "").toLowerCase();
+    const map = [[/sunday/, "sunday"], [/bible/, "bible"], [/wakati/, "wakati"], [/seeker/, "seekers"], [/new moon/, "new_moon"],
+        [/prophet/, "vigil_prophets"], [/sidem|vigil/, "vigil_sidemen"], [/wed/, "wed_evening"], [/fri/, "fri_evening"], [/harvest|anniversary|special/, "special"]];
+    return (map.find(([re]) => re.test(t)) || [, "other"])[1];
+}
+// Nigerian numbers 080... become 23480... for wa.me.
+function waLink(phone, text) {
+    let d = String(phone || "").replace(/\D/g, "");
+    if (!d) return "";
+    if (d.startsWith("0") && d.length === 11) d = "234" + d.slice(1);
+    return `https://wa.me/${d}?text=${encodeURIComponent(text)}`;
+}
+const missText = name => `Shalom ${String(name).split(" ")[0]}, we have missed you at ${localState.parish.name || "church"}. We pray all is well with you and your family, and we look forward to seeing you in service soon. God bless you.`;
+const visitText = name => `Shalom ${String(name).split(" ")[0]}, thank you for worshipping with us at ${localState.parish.name || "our parish"}. You are always welcome. God bless you.`;
+
+let att = { week: "", specials: [], records: {}, people: [], clergy: [], svc: null, reports: null, cleaning: null };
+
+function attTab(tab) {
+    document.querySelectorAll(".att-panel").forEach(p => p.classList.toggle("hidden", p.id !== "att-" + tab));
+    document.querySelectorAll(".att-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+    const run = { week: loadWeek, followup: loadFollowup, visitors: loadVisitors, depts: loadDeptRoll, cleaning: loadCleaning, reports: loadReports }[tab];
+    return run && run().catch(e => alert("Could not load: " + e.message));
+}
+async function openAttendance() {
+    if (!att.week) att.week = weekStart(localToday());
+    await Promise.all([loadPeople(), loadUnits()]);
+    return attTab("week");
+}
+// Active members + active clergy: leader list, phone numbers for WhatsApp, cleaning rota.
+async function loadPeople() {
+    const [m, c] = await Promise.all([parishRef().collection("members").where("status", "==", "Active").get(),
+        parishRef().collection("clergy").where("status", "==", "Active").get()]);
+    att.clergy = c.docs.map(d => d.data());
+    att.people = [...m.docs, ...c.docs].map(d => d.data()).sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+function shiftWeek(n) { att.week = addDays(att.week, 7 * n); loadWeek(); }
+async function loadWeek() {
+    const end = addDays(att.week, 6);
+    $("weekLabel").textContent = `${fmtDay(att.week)} – ${fmtDay(end)}`;
+    const [sp, recs] = await Promise.all([
+        parishRef().collection("specialServices").where("date", ">=", att.week).where("date", "<=", end).get(),
+        parishRef().collection("attendance").where("serviceDate", ">=", att.week).where("serviceDate", "<=", end).get()]);
+    att.specials = sp.docs.map(d => ({ id: d.id, ...d.data() }));
+    att.records = Object.fromEntries(recs.docs.map(d => [d.id, d.data()]));
+    const sat = addDays(att.week, 6);
+    $("weekList").innerHTML = weekServices(att.week, att.specials).map(s => {
+        const r = att.records[s.id];
+        const done = r ? `<span class="text-emerald-700 font-bold">${r.headcount}</span> <span class="text-gray-500">(M ${r.men} · W ${r.women} · C ${r.children} · V ${r.visitors})</span>${r.ledByName ? `<br><span class="text-gray-500">Led by ${esc(r.ledByName)}</span>` : ""}` : `<span class="text-gray-400">Not recorded yet</span>`;
+        return `<div class="svc-card bg-white border rounded-xl p-3 text-xs flex items-center gap-2" data-id="${esc(s.id)}">
+            <div class="w-14 text-center"><p class="font-bold text-blue-900">${esc(fmtDay(s.date).split(" ")[0])}</p><p class="text-gray-500">${esc(s.time)}</p></div>
+            <div class="flex-1 min-w-0"><p class="font-bold">${esc(s.name)}${s.key === "special" ? ' <i class="fa-solid fa-star text-amber-400"></i>' : ""}</p><p>${done}</p></div>
+            <button onclick="openServiceModal('${esc(s.id)}')" class="px-3 py-2 bg-blue-600 text-white rounded font-bold">${r ? "Edit" : "Record"}</button></div>`;
+    }).join("") + `<button onclick="att.cleaningDate='${sat}';attTab('cleaning')" class="w-full bg-white border border-dashed rounded-xl p-3 text-xs text-left"><b>Sat ${esc(fmtDay(sat).slice(4))}</b> · Church cleaning rota <i class="fa-solid fa-broom text-gray-400"></i></button>`;
+}
+function openSpecialForm() { $("specialForm").classList.toggle("hidden"); $("sp_date").value = $("sp_date").value || localToday(); }
+async function saveSpecial() {
+    const name = val("sp_name"), date = $("sp_date").value, time = $("sp_time").value;
+    if (!name || !date || !/^\d\d:\d\d$/.test(time)) return alert("Give the special service a name, date and time.");
+    await busy("saveSpecialBtn", async () => {
+        await parishRef().collection("specialServices").add({ name, date, time, notes: "", createdAt: nowIso() });
+        $("sp_name").value = ""; $("specialForm").classList.add("hidden");
+        att.week = weekStart(date);
+        await loadWeek();
+    });
+}
+function findService(id) {
+    return weekServices(weekStart(id.slice(0, 10)), att.specials).find(s => s.id === id);
+}
+function openServiceModal(id) {
+    const s = id ? findService(id) : null;
+    const r = (id && att.records[id]) || {};
+    att.svc = s;
+    $("svc_key").innerHTML = s ? `<option value="${esc(s.key)}">${esc(s.name)}</option>`
+        : SCHEDULE.concat([{ key: "other", name: "Other service" }]).map(x => `<option value="${x.key}">${esc(x.name)}</option>`).join("");
+    $("svc_key").disabled = !!s;
+    $("svc_date").value = s ? s.date : localToday(); $("svc_date").disabled = !!s;
+    $("svc_time").value = s ? s.time : "10:00";
+    for (const k of ["men", "women", "children", "visitors"]) $("svc_" + k).value = r[k] ?? "";
+    $("svc_led").innerHTML = `<option value="">Not recorded</option>` + att.clergy.map(c => `<option value="${esc(c.memberNo)}">${esc([c.rank, c.fullName].filter(Boolean).join(" "))}</option>`).join("");
+    $("svc_led").value = r.ledBy || "";
+    $("svc_notes").value = r.notes || "";
+    $("svcTitle").textContent = s ? `${s.name.toUpperCase()} · ${fmtDay(s.date)}` : "RECORD A SERVICE";
+    svcTotal();
+    openModal("serviceModal");
+}
+const num = id => Math.max(0, parseInt($(id).value, 10) || 0);
+function svcTotal() { $("svc_total").textContent = ["men", "women", "children", "visitors"].reduce((t, k) => t + num("svc_" + k), 0); }
+// Totals for Super Admin / HQ: overall and per service type, adjusted by the change only.
+function statDelta(batch, key, headDelta, newService) {
+    batch.set(statsRef(), { attendanceTotal: inc(headDelta), serviceCount: inc(newService ? 1 : 0),
+        byType: { [key]: { services: inc(newService ? 1 : 0), total: inc(headDelta) } } }, { merge: true });
+}
+function serviceDoc(s, extra) {
+    return { serviceDate: s.date, serviceType: s.name.slice(0, 60), serviceKey: s.key, serviceTime: s.time,
+        men: 0, women: 0, children: 0, visitors: 0, headcount: 0, ledBy: "", ledByName: "", notes: "",
+        ...(s.specialId ? { specialId: s.specialId } : {}), updatedAt: nowIso(), ...extra };
+}
+async function saveService() {
+    let s = att.svc;
+    if (!s) {
+        const key = $("svc_key").value, date = $("svc_date").value;
+        if (!date) return alert("Pick the date.");
+        s = { id: `${date}_${key}`, key, name: TYPE_NAMES[key], date, time: $("svc_time").value };
+    }
+    const c = Object.fromEntries(["men", "women", "children", "visitors"].map(k => [k, num("svc_" + k)]));
+    const headcount = c.men + c.women + c.children + c.visitors;
+    const led = att.clergy.find(x => x.memberNo === $("svc_led").value);
+    await busy("saveServiceBtn", async () => {
+        try {
+            const ref = parishRef().collection("attendance").doc(s.id);
+            await db.runTransaction(async t => {
+                const old = await t.get(ref);
+                const prev = old.exists ? old.data() : null;
+                t.set(ref, serviceDoc({ ...s, time: $("svc_time").value || s.time }, { ...c, headcount,
+                    ledBy: led ? led.memberNo : "", ledByName: led ? [led.rank, led.fullName].filter(Boolean).join(" ").slice(0, 160) : "", notes: val("svc_notes").slice(0, 1000) }));
+                statDelta(t, s.key, headcount - (prev ? prev.headcount : 0), !prev);
+            });
+            closeModal("serviceModal");
+            if (!att.svc) att.week = weekStart(s.date);
+            await Promise.all([loadWeek(), loadAttendance(true), refreshTotals()]);
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+async function refreshTotals() { const st = await statsRef().get(); showTotals(st.exists ? st.data() : {}); }
+
+// ---- unit registers (founder decision: no whole-church tick-list; named attendance lives in each unit)
+const allUnits = () => DEPTS.map(d => [d.id, d.name]).concat(Object.entries(localState.units || {}));
+async function loadUnits() {
+    const snap = await parishRef().collection("units").get();
+    localState.units = Object.fromEntries(snap.docs.map(d => [d.id, d.data().name]));
+}
+async function addUnit() {
+    const name = val("unit_name");
+    if (!name) return alert("Type the unit's name, e.g. Ushers.");
+    const id = "u_" + (name.replace(/[^A-Za-z0-9]/g, "").slice(0, 24) || "unit") + Math.random().toString(36).slice(2, 6);
+    await busy("addUnitBtn", async () => {
+        try {
+            await parishRef().collection("units").doc(id).set({ name, createdAt: nowIso() });
+            $("unit_name").value = "";
+            await loadUnits(); await loadDeptRoll(id);
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+// For one unit: sessions in the last 12 weeks -> who is away 3+ weeks and present-in-a-row streaks.
+function unitFollowup(unitId, members, sessions) {
+    const cutoff = addDays(localToday(), -ABSENT_DAYS);
+    const sorted = sessions.slice().sort((a, b) => b.date.localeCompare(a.date));
+    if (!sorted.some(s => s.date >= cutoff)) return { absent: [], streaks: [] };   // unit has not met: nobody flagged
+    return {
+        absent: members.map(m => {
+            const last = sorted.find(s => s.present.includes(m.memberNo));
+            return { ...m, unitId, lastSeen: last ? last.date : "" };
+        }).filter(m => !m.lastSeen || m.lastSeen < cutoff),
+        streaks: members.map(m => { let n = 0; for (const s of sorted) { if (!s.present.includes(m.memberNo)) break; n++; } return { ...m, unitId, n }; }).filter(m => m.n > 0)
+    };
+}
+async function unitData(unitId) {
+    const since = addDays(localToday(), -84);
+    const [mem, ses] = await Promise.all([
+        parishRef().collection("deptMembers").where("dept", "==", unitId).where("status", "==", "Current").get(),
+        parishRef().collection("deptAttendance").where("dept", "==", unitId).get()]);
+    return { members: mem.docs.map(d => d.data()), sessions: ses.docs.map(d => d.data()).filter(s => s.date >= since) };
+}
+function absentRow(m, phones, withUnit) {
+    const link = waLink(phones[m.memberNo], missText(m.fullName));
+    const away = m.lastSeen ? `last present ${esc(fmtDay(m.lastSeen))}` : "not present in the last 12 weeks";
+    return `<div class="absent-row bg-white border rounded-xl p-3 flex items-center gap-2"><div class="flex-1"><b>${esc(m.fullName)}</b> <span class="font-mono text-gray-500">${esc(m.memberNo)}</span><br>
+        <span class="text-rose-700">${withUnit ? esc(deptName(m.unitId)) + " · " : ""}${away}</span></div>
+        ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="wa-link px-3 py-2 bg-green-600 text-white rounded font-bold"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>` : `<span class="text-gray-400">No phone</span>`}</div>`;
+}
+const phoneMap = () => Object.fromEntries(att.people.map(p => [p.memberNo, p.phone]));
+// Parish admin roll-up: absent 3+ weeks across every unit.
+async function loadFollowup() {
+    const all = await Promise.all(allUnits().map(([id]) => unitData(id).then(d => unitFollowup(id, d.members, d.sessions))));
+    const absent = all.flatMap(x => x.absent), streaks = all.flatMap(x => x.streaks).sort((a, b) => b.n - a.n).slice(0, 10);
+    const phones = phoneMap();
+    $("absentList").innerHTML = absent.map(m => absentRow(m, phones, true)).join("") || `<p class="text-gray-400 italic">Nobody has been away 3+ weeks from their unit.</p>`;
+    $("streakList").innerHTML = streaks.map(p => `<div class="streak-row p-3 flex justify-between"><span><b>${esc(p.fullName)}</b> <span class="text-gray-500">${esc(deptName(p.unitId))}</span></span><span class="font-bold text-amber-600">${p.n} in a row</span></div>`).join("")
+        || `<p class="p-3 text-gray-400 italic">No streaks yet. Mark unit registers at each meeting.</p>`;
+}
+
+// ---- visitors
+const V_STATUS = ["New", "Contacted", "Returned", "Member", "Not interested"];
+async function saveVisitor() {
+    const name = val("v_name"), phone = val("v_phone");
+    if (!name) return alert("Enter the visitor's name.");
+    if (!$("v_consent").checked) return alert("Ask the visitor's permission first (NDPA 2023), then tick the box.");
+    await busy("saveVisitorBtn", async () => {
+        const batch = db.batch();
+        batch.set(parishRef().collection("visitors").doc(), { name, nameLower: name.toLowerCase(), phone, phoneDigits: phone.replace(/\D/g, ""),
+            invitedBy: val("v_invited"), firstVisit: $("v_date").value || localToday(), serviceType: "", status: "New", notes: "",
+            consentGiven: true, createdAt: nowIso(), updatedAt: nowIso() });
+        batch.set(statsRef(), { visitorCount: inc(1) }, { merge: true });
+        await batch.commit();
+        ["v_name", "v_phone", "v_invited"].forEach(id => $(id).value = ""); $("v_consent").checked = false;
+        await loadVisitors();
+    });
+}
+async function loadVisitors() {
+    $("v_date").value = $("v_date").value || localToday();
+    const snap = await parishRef().collection("visitors").orderBy("firstVisit", "desc").limit(100).get();
+    att.visitors = Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+    $("visitorList").innerHTML = snap.docs.map(d => { const v = d.data(); const link = waLink(v.phone, visitText(v.name));
+        return `<div class="visitor-row bg-white border rounded-xl p-3 space-y-2" data-id="${esc(d.id)}"><div><b>${esc(v.name)}</b> <span class="text-gray-500">${esc(v.phone)}</span><br>
+            <span class="text-gray-500">First visit ${esc(fmtDay(v.firstVisit))}${v.invitedBy ? " · invited by " + esc(v.invitedBy) : ""}</span></div>
+            <div class="flex gap-2 items-center">${v.status === "Member" ? `<span class="px-2 py-1 bg-emerald-100 text-emerald-800 rounded font-bold">Member ${esc(v.memberNo)}</span>`
+                : `<select onchange="setVisitorStatus('${esc(d.id)}', this.value)" class="border p-2 rounded">${V_STATUS.filter(x => x !== "Member").map(x => `<option ${x === v.status ? "selected" : ""}>${x}</option>`).join("")}</select>
+                   <button onclick="convertVisitor('${esc(d.id)}')" class="px-3 py-2 bg-blue-600 text-white rounded font-bold">Make member</button>`}
+                ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="px-3 py-2 bg-green-600 text-white rounded"><i class="fa-brands fa-whatsapp"></i></a>` : ""}</div></div>`; }).join("")
+        || `<p class="text-gray-400 italic">No visitors logged yet.</p>`;
+}
+async function setVisitorStatus(id, status) {
+    try { await parishRef().collection("visitors").doc(id).update({ status, updatedAt: nowIso() }); }
+    catch (e) { alert("Not saved: " + e.message); }
+}
+// Opens the normal member form, pre-filled; saving it also marks the visitor as Member (one transaction).
+function convertVisitor(id) {
+    const v = att.visitors[id];
+    openPersonForm("members", null);
+    $("p_name").value = v.name; $("p_phone").value = v.phone;
+    form.visitorId = id;
+}
+
+// ---- department attendance
+async function loadDeptRoll(pick) {
+    const keep = pick || $("da_dept").value;
+    $("da_dept").innerHTML = allUnits().map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join("");
+    if (keep) $("da_dept").value = keep;
+    $("da_date").value = $("da_date").value || localToday();
+    const dept = $("da_dept").value, date = $("da_date").value;
+    const [{ members, sessions }, existing] = await Promise.all([unitData(dept), parishRef().collection("deptAttendance").doc(`${dept}_${date}`).get()]);
+    const present = new Set(existing.exists ? existing.data().present : []);
+    if (existing.exists) $("da_kind").value = existing.data().kind;
+    $("daList").innerHTML = members.sort((a, b) => a.fullName.localeCompare(b.fullName)).map(m =>
+        `<label class="da-row flex items-center gap-3 p-3"><input type="checkbox" class="w-6 h-6" value="${esc(m.memberNo)}" ${present.has(m.memberNo) ? "checked" : ""}>
+            <span><b>${esc(m.fullName)}</b> <span class="font-mono text-gray-500">${esc(m.memberNo)}</span>${m.role ? ` · ${esc(m.role)}` : ""}</span></label>`).join("")
+        || `<p class="p-3 text-gray-400 italic">No current members in this unit yet. <button onclick="openDept('${esc(dept)}')" class="underline text-blue-700">Add members</button></p>`;
+    const f = unitFollowup(dept, members, sessions), phones = phoneMap();
+    $("daAbsent").innerHTML = f.absent.length ? `<p class="font-bold text-rose-900">Absent 3+ weeks in this unit</p>` + f.absent.map(m => absentRow(m, phones, false)).join("") : "";
+    $("daRecent").innerHTML = sessions.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8)
+        .map(r => `<p class="bg-white border rounded p-2">${esc(fmtDay(r.date))} · ${esc(r.kind)}: <b>${r.present.length}</b>${members.length ? " of " + members.length : ""} present</p>`).join("");
+}
+async function saveDeptAttendance() {
+    const dept = $("da_dept").value, date = $("da_date").value;
+    const present = [...document.querySelectorAll("#daList input:checked")].map(i => i.value);
+    await busy("saveDeptAttBtn", async () => {
+        try {
+            await parishRef().collection("deptAttendance").doc(`${dept}_${date}`).set({ dept, date, kind: $("da_kind").value, present, notes: "", updatedAt: nowIso() });
+            await loadDeptRoll();
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+
+// ---- Saturday cleaning rota
+async function loadCleaning() {
+    const sat = addDays(weekStart(localToday()), 6);
+    if (att.cleaningDate) { $("cl_date").value = att.cleaningDate; att.cleaningDate = ""; }
+    $("cl_date").value = $("cl_date").value || sat;
+    const snap = await parishRef().collection("cleaning").doc($("cl_date").value).get();
+    att.cleaning = snap.exists ? snap.data() : { assigned: [], came: [], names: {} };
+    renderCleaning();
+}
+function renderCleaning() {
+    const c = att.cleaning, came = new Set(c.came);
+    $("cl_list").innerHTML = c.assigned.map(no => `<label class="cl-row flex items-center gap-3 p-3"><input type="checkbox" class="w-6 h-6" value="${esc(no)}" ${came.has(no) ? "checked" : ""}
+        onchange="cleaningCame('${esc(no)}', this.checked)"><span class="flex-1"><b>${esc(c.names[no] || no)}</b> <span class="font-mono text-gray-500">${esc(no)}</span></span>
+        <span class="text-gray-400">${came.has(no) ? "came" : "assigned"}</span></label>`).join("")
+        || `<p class="p-3 text-gray-400 italic">No one assigned yet. Search above to assign.</p>`;
+}
+function findForCleaning() {
+    const t = $("cl_search").value.trim().toLowerCase();
+    $("cl_found").innerHTML = !t ? "" : att.people.filter(p => p.nameLower.includes(t) || p.memberNo.toLowerCase().includes(t)).slice(0, 8)
+        .map(p => `<button onclick="assignCleaning('${esc(p.memberNo)}')" class="w-full text-left p-2">+ ${esc(p.fullName)} <span class="font-mono text-gray-500">${esc(p.memberNo)}</span></button>`).join("");
+}
+function assignCleaning(no) {
+    const p = att.people.find(x => x.memberNo === no);
+    if (!att.cleaning.assigned.includes(no)) att.cleaning.assigned.push(no);
+    att.cleaning.names[no] = p.fullName;
+    $("cl_search").value = ""; $("cl_found").innerHTML = "";
+    renderCleaning();
+}
+function cleaningCame(no, yes) {
+    att.cleaning.came = att.cleaning.came.filter(x => x !== no).concat(yes ? [no] : []);
+    renderCleaning();
+}
+async function saveCleaning() {
+    const date = $("cl_date").value, c = att.cleaning;
+    await busy("saveCleaningBtn", async () => {
+        try {
+            await parishRef().collection("cleaning").doc(date).set({ date, assigned: c.assigned, came: c.came, names: c.names, notes: "", updatedAt: nowIso() });
+            alert(`Cleaning rota saved: ${c.came.length} of ${c.assigned.length} came.`);
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+
+// ---- reports
+async function loadReports() {
+    const period = $("rp_period").value;
+    const start = period === "week" ? addDays(weekStart(localToday()), -7 * 11) : ymd(new Date(new Date().getFullYear(), new Date().getMonth() - 11, 1));
+    const [recs, depts] = await Promise.all([
+        parishRef().collection("attendance").where("serviceDate", ">=", start).get(),
+        parishRef().collection("deptAttendance").where("date", ">=", start).get()]);
+    att.reports = { period, start, recs: recs.docs.map(d => d.data()), depts: depts.docs.map(d => d.data()) };
+    const types = [...new Set(att.reports.recs.map(keyOf))];
+    const cur = $("rp_type").value;
+    $("rp_type").innerHTML = `<option value="">All services</option>` + types.map(k => `<option value="${k}">${esc(TYPE_NAMES[k])}</option>`).join("");
+    $("rp_type").value = types.includes(cur) ? cur : "";
+    renderReports();
+}
+function buckets() {
+    const { period, start } = att.reports;
+    const out = [];
+    for (let i = 0; i < 12; i++) {
+        if (period === "week") { const w = addDays(start, 7 * i); out.push({ id: w, label: fmtDay(w).slice(4) }); }
+        else { const d = parseYmd(start); d.setMonth(d.getMonth() + i); out.push({ id: ymd(d).slice(0, 7), label: MONTHS[d.getMonth()].slice(0, 3) }); }
+    }
+    return out;
+}
+const bucketOf = date => att.reports.period === "week" ? weekStart(date) : date.slice(0, 7);
+function renderReports() {
+    const r = att.reports, type = $("rp_type").value;
+    const recs = r.recs.filter(a => !type || keyOf(a) === type);
+    const bs = buckets().map(b => ({ ...b, total: 0, services: 0 }));
+    const idx = Object.fromEntries(bs.map((b, i) => [b.id, i]));
+    for (const a of recs) { const i = idx[bucketOf(a.serviceDate)]; if (i !== undefined) { bs[i].total += a.headcount; bs[i].services++; } }
+    $("rpTitle").textContent = `${localState.parish.name || "Parish"} · ${type ? TYPE_NAMES[type] : "All services"}`;
+    $("rpSub").textContent = `${r.period === "week" ? "Weekly, last 12 weeks" : "Monthly, last 12 months"} · printed ${localToday()}`;
+    // Simple bar chart (inline SVG, no library).
+    const max = Math.max(1, ...bs.map(b => b.total)), W = 340, H = 150, bw = W / bs.length;
+    $("rpChart").innerHTML = `<svg viewBox="0 -12 ${W} ${H + 42}" class="w-full" role="img" aria-label="Attendance trend">
+        ${bs.map((b, i) => { const h = Math.round((b.total / max) * H);
+            return `<rect x="${i * bw + 3}" y="${H - h}" width="${bw - 6}" height="${h}" rx="2" fill="#1e3a8a"><title>${esc(b.label)}: ${b.total}</title></rect>
+            ${b.total ? `<text x="${i * bw + bw / 2}" y="${H - h - 3}" font-size="8" text-anchor="middle" fill="#374151">${b.total}</text>` : ""}
+            <text x="${i * bw + bw / 2}" y="${H + 12}" font-size="7.5" text-anchor="middle" fill="#6b7280">${esc(b.label)}</text>`; }).join("")}
+        <line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="#d1d5db"/></svg>`;
+    const tbl = (head, rows) => `<table class="w-full text-left text-xs"><thead class="bg-gray-100"><tr>${head.map(h => `<th class="p-1.5">${h}</th>`).join("")}</tr></thead><tbody class="divide-y">${rows.join("")}</tbody></table>`;
+    $("rpTable").innerHTML = tbl([r.period === "week" ? "Week of" : "Month", "Services", "Total", "Average"],
+        bs.map(b => `<tr><td class="p-1.5">${esc(b.label)}</td><td class="p-1.5">${b.services}</td><td class="p-1.5 font-bold">${b.total}</td><td class="p-1.5">${b.services ? Math.round(b.total / b.services) : 0}</td></tr>`));
+    const byType = {};
+    for (const a of r.recs) { const k = keyOf(a), t = byType[k] ||= { s: 0, m: 0, w: 0, c: 0, v: 0, total: 0 };
+        t.s++; t.total += a.headcount; t.m += a.men || 0; t.w += a.women || 0; t.c += a.children || 0; t.v += a.visitors || 0; }
+    $("rpTypes").innerHTML = tbl(["Service", "Held", "Men", "Women", "Children", "Visitors", "Avg"], Object.entries(byType).map(([k, t]) =>
+        `<tr><td class="p-1.5">${esc(TYPE_NAMES[k])}</td><td class="p-1.5">${t.s}</td><td class="p-1.5">${t.m}</td><td class="p-1.5">${t.w}</td><td class="p-1.5">${t.c}</td><td class="p-1.5">${t.v}</td><td class="p-1.5 font-bold">${Math.round(t.total / t.s)}</td></tr>`));
+    const byDept = {};
+    for (const d of r.depts) { const t = byDept[d.dept] ||= { s: 0, p: 0 }; t.s++; t.p += d.present.length; }
+    $("rpDepts").innerHTML = Object.keys(byDept).length ? tbl(["Department", "Sessions", "Avg present"], Object.entries(byDept).map(([k, t]) =>
+        `<tr><td class="p-1.5">${esc(deptName(k))}</td><td class="p-1.5">${t.s}</td><td class="p-1.5 font-bold">${Math.round(t.p / t.s)}</td></tr>`)) : `<p class="text-gray-400 italic">No department sessions in this period.</p>`;
+}
+function exportCsv(which) {
+    const r = att.reports;
+    const cell = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const rows = which === "services"
+        ? [["Date", "Service", "Type", "Men", "Women", "Children", "Visitors", "Total", "Led by", "Notes"],
+           ...r.recs.sort((a, b) => a.serviceDate.localeCompare(b.serviceDate)).map(a => [a.serviceDate, a.serviceType, TYPE_NAMES[keyOf(a)], a.men ?? "", a.women ?? "", a.children ?? "", a.visitors ?? "", a.headcount, a.ledByName || "", a.notes || ""])]
+        : [["Date", "Department", "Kind", "Present", "Member numbers"],
+           ...r.depts.sort((a, b) => a.date.localeCompare(b.date)).map(d => [d.date, deptName(d.dept), d.kind, d.present.length, d.present.join(" ")])];
+    const blob = new Blob([rows.map(x => x.map(cell).join(",")).join("\r\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `attendance-${which}-${localToday()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
 }
 
 function openFinanceModal() { document.getElementById("addFinanceModal").classList.remove('hidden'); }
@@ -826,7 +1220,7 @@ async function loadDepartments() {
 async function openDept(id) {
     deptState.id = id;
     showSection("dept");
-    $(`nav-dept-${id}`).classList.add("bg-slate-800");
+    $(`nav-dept-${id}`)?.classList.add("bg-slate-800");
     $("deptTitle").textContent = deptName(id);
     $("d_find").value = ""; $("d_role").value = ""; $("d_matches").innerHTML = "";
     await refreshDept();
