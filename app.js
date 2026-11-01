@@ -29,6 +29,17 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const CONTINENTS = ["Africa", "Europe", "Asia", "North America", "South America", "Oceania", "Antarctica"];
 const SERIES = { members: { key: "mbr", prefix: "CCC-MBR-", stat: "memberCount" }, clergy: { key: "clg", prefix: "CCC-CLG-", stat: "clergyCount" } };
 
+// Church departments (batch 3). Ids are fixed: the Firestore rules list the same six.
+const DEPTS = [
+    { id: "parochial", name: "Parochial Committee", icon: "fa-landmark", color: "text-blue-300" },
+    { id: "choir", name: "Choir", icon: "fa-music", color: "text-pink-300" },
+    { id: "ict", name: "ICT / Media", icon: "fa-photo-film", color: "text-sky-300" },
+    { id: "sidemen", name: "Sidemen / Sidewomen", icon: "fa-people-group", color: "text-emerald-300" },
+    { id: "prophets", name: "Prophets / Prophetesses", icon: "fa-eye", color: "text-violet-300" },
+    { id: "sundayschool", name: "Sunday School", icon: "fa-children", color: "text-amber-300" }];
+const deptName = id => (DEPTS.find(d => d.id === id) || {}).name || id;
+const ELECTION_WARN_DAYS = 60;
+
 let auth = null;
 let db = null;
 let localState = { user: null, role: "", currentParishId: "", parish: {} };
@@ -65,8 +76,14 @@ function fillSelects() {
     document.querySelectorAll(".continent-select").forEach(s => s.innerHTML = opts(CONTINENTS.map(c => [c, c]), "Continent"));
 }
 
+function renderDeptNav() {
+    $("nav-diaspora").insertAdjacentHTML("beforebegin", DEPTS.map(d =>
+        `<button onclick="openDept('${d.id}')" id="nav-dept-${d.id}" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid ${d.icon} ${d.color} w-4"></i> ${esc(d.name)}</button>`).join(""));
+}
+
 window.onload = function() {
     fillSelects();
+    renderDeptNav();
     if (CONFIG_IS_PLACEHOLDER || !window.firebase) {
         console.warn("Firebase is not configured yet. Fill in firebaseConfig at the top of app.js.");
         return;
@@ -172,8 +189,10 @@ function showSection(id) {
     document.querySelectorAll("main > div > section").forEach(sec => sec.classList.add("hidden"));
     $(`section-${id}`).classList.remove("hidden");
     document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("bg-slate-800"));
-    $(`nav-${id}`).classList.add("bg-slate-800");
+    $(`nav-${id}`)?.classList.add("bg-slate-800");
     if (id === "families") loadFamilies();
+    if (id === "diaspora") loadDiaspora();
+    if (id === "flows") loadFlows();
 }
 
 const parishRef = () => db.collection("parishes").doc(localState.currentParishId);
@@ -203,7 +222,7 @@ async function loadParishData() {
     const st = await statsRef().get().catch(() => null);
     showTotals(st && st.exists ? st.data() : {});
     $("memberSearch").value = "";
-    await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true)]);
+    await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
 }
 
 function showTotals(s) {
@@ -215,7 +234,10 @@ function showTotals(s) {
     $("metricGiving").textContent = "₦" + Number(s.financeTotal || 0).toLocaleString();
 }
 
-function displayNo(p) { return p.memberNo + (p.status === "Former" ? " · Former" : p.status === "Ordained" ? " · Ordained" : ""); }
+const STATUS_TAG = { Former: " · Former", Ordained: " · Ordained", Diaspora: " · Abroad", TransferredOut: " · Transferred" };
+function displayNo(p) { return p.memberNo + (STATUS_TAG[p.status] || ""); }
+// A transferred member keeps ONE member number for life: shown on every card in the new parish.
+const lifeText = p => p.lifeNo ? `Life no. ${p.lifeNo} (${p.lifeParishCode})` : "";
 
 function personCard(kind, d) {
     const p = d.data ? d.data() : d;
@@ -223,7 +245,7 @@ function personCard(kind, d) {
     return `<button data-no="${esc(p.memberNo)}" onclick="openRecord('${kind}','${esc(p.memberNo)}')" class="person-row w-full bg-white border rounded-xl p-2 flex items-center gap-3 text-left shadow-sm">
         ${photo}
         <div class="min-w-0 flex-1"><p class="font-bold truncate">${esc(p.fullName)}${p.important ? ' <i class="fa-solid fa-star text-amber-400"></i>' : ""}</p>
-        <p class="text-[11px] text-gray-500 font-mono">${esc(displayNo(p))}</p>
+        <p class="text-[11px] text-gray-500 font-mono">${esc(displayNo(p))}</p>${p.lifeNo ? `<p class="text-[11px] text-indigo-700 font-mono font-bold">${esc(lifeText(p))}</p>` : ""}
         <p class="text-[11px] text-gray-500 truncate">${esc([p.rank, p.phone].filter(Boolean).join(" · "))}</p></div></button>`;
 }
 
@@ -452,6 +474,11 @@ async function openRecord(kind, id) {
     let history = "";
     if (p.formerMemberNo) history = `Ordained from <button onclick="openRecord('members','${esc(p.formerMemberNo)}')" class="underline text-blue-700">${esc(p.formerMemberNo)}</button>`;
     if (p.ordainedAs) history = `Ordained as clergy: <button onclick="openRecord('clergy','${esc(p.ordainedAs)}')" class="underline text-blue-700">${esc(p.ordainedAs)}</button>`;
+    let depts = [];
+    if (kind === "members") {
+        const ds = await parishRef().collection("deptMembers").where("memberNo", "==", p.memberNo).where("status", "==", "Current").get();
+        depts = ds.docs.map(x => deptName(x.data().dept) + (x.data().role ? ` (${x.data().role})` : ""));
+    }
     let service = "";
     if (kind === "clergy") {
         const ranks = (p.serviceRecord || []).map(r => `<li>${esc(r.rank)}: ${esc(r.from || "?")} → ${esc(r.to || "present")}</li>`).join("");
@@ -467,12 +494,17 @@ async function openRecord(kind, id) {
         ${row("Address", esc(p.address))}${row("Occupation", esc(p.occupation))}${row("Date of birth", esc(fmtDate(p.dobDay, p.dobMonth, p.dobYear)))}
         ${row("Last anointment", esc(fmtDate(p.anointDay, p.anointMonth, p.anointYear)))}
         ${row("Next of kin", esc([p.nokName, p.nokPhone, p.nokAddress].filter(Boolean).join(" · ")))}
-        ${row("Family", famHtml)}${row("History", history)}</div>${service}`;
+        ${row("Family", famHtml)}${row("History", history)}${row("Life-long number", esc(lifeText(p)))}
+        ${row("Departments", esc(depts.join(", ")))}
+        ${p.status === "Diaspora" ? row("Abroad", esc([p.abroadCity, p.abroadCountry].filter(Boolean).join(", ") + (p.abroadParish ? " · " + p.abroadParish : "") + " · since " + p.abroadSince)) : ""}</div>${service}`;
     const btn = (label, fn, cls) => `<button onclick="${fn}" class="px-3 py-2 rounded font-semibold ${cls}">${label}</button>`;
     let actions = "";
     if (p.status === "Active") actions += btn("Edit", "editCurrent()", "bg-blue-600 text-white");
     if (kind === "members" && p.status === "Active") actions += btn("Ordain as clergy", "ordainCurrent()", "bg-amber-600 text-white");
     if (kind === "clergy" && p.status === "Active") actions += btn("Transfer / move to Former", "openTransfer()", "bg-amber-700 text-white");
+    if (kind === "members" && p.status === "Active") actions += btn("Moved abroad", "openAbroad()", "bg-cyan-700 text-white");
+    if (kind === "members" && p.status === "Diaspora") actions += btn("Returned home", "returnHome()", "bg-emerald-600 text-white");
+    if (kind === "members" && ["Active", "Diaspora"].includes(p.status)) actions += btn("Transfer to another parish", "openSendTransfer()", "bg-indigo-700 text-white");
     $("recordActions").innerHTML = actions + btn("Close", "closeModal('recordModal')", "border");
     openModal("recordModal");
 }
@@ -492,7 +524,9 @@ async function ordainCurrent() {
     const c = { ...person, email, status: "Active", formerMemberNo: m.memberNo, joinedDate: today(),
         serviceRecord: m.rank ? [{ rank: m.rank, from: today() }] : [], createdAt: nowIso(), updatedAt: nowIso(), consentDate: m.consentDate };
     try {
+        const current = await currentDeptDocs(m.memberNo);
         const id = await createRecord("clergy", c, (t, newId) => {
+            current.forEach(d => t.update(d.ref, { status: "Former", leftDate: today(), updatedAt: nowIso() })); // clergy cannot stay in a department
             t.update(parishRef().collection("members").doc(m.memberNo), { status: "Ordained", ordainedAs: newId, updatedAt: nowIso() });
             t.set(statsRef(), { memberCount: inc(-1) }, { merge: true });
         });
@@ -626,9 +660,10 @@ async function loadWorld() {
     $("dashParishName").textContent = "World-wide";
     const [parishes, stats] = await Promise.all([db.collection("parishes").get(), db.collection("parishStats").get()]);
     const byId = Object.fromEntries(stats.docs.map(d => [d.id, d.data()]));
-    const sum = { memberCount: 0, clergyCount: 0, serviceCount: 0, financeTotal: 0 };
+    const sum = { memberCount: 0, clergyCount: 0, serviceCount: 0, financeTotal: 0, diasporaCount: 0 };
     stats.docs.forEach(d => Object.keys(sum).forEach(k => sum[k] += d.data()[k] || 0));
     showTotals(sum);
+    localState.worldDiaspora = sum.diasporaCount;
     localState.parishNames = Object.fromEntries(parishes.docs.map(d => [d.id, d.data().name]));
     $("worldTable").innerHTML = `<table class="w-full text-left text-xs"><thead class="bg-gray-100"><tr><th class="p-2">Parish</th><th class="p-2">Place</th><th class="p-2">Clergy</th><th class="p-2">Members</th></tr></thead><tbody class="divide-y">` +
         parishes.docs.map(d => { const p = d.data(), s = byId[d.id] || {};
@@ -636,7 +671,8 @@ async function loadWorld() {
     $("worldTable").classList.remove("hidden");
     if (localState.role !== "super_admin") return;
     $("parishList").innerHTML = parishes.docs.map(d => { const p = d.data();
-        return `<div class="bg-white border rounded-xl p-3 text-xs"><p class="font-bold">${esc(p.name)} <span class="text-gray-400">${esc(p.status)}</span></p><p class="text-gray-500">${esc([p.address, p.city, p.state, p.country, p.continent].filter(Boolean).join(", "))}</p></div>`; }).join("");
+        return `<div class="bg-white border rounded-xl p-3 text-xs"><p class="font-bold">${esc(p.name)} <span class="text-gray-400">${esc(p.status)}</span></p>
+            <p>Parish code: ${p.code ? `<span class="font-mono font-bold">${esc(p.code)}</span>` : `<button onclick="giveParishCode('${esc(d.id)}')" class="underline text-blue-700">Give a parish code</button>`}</p><p class="text-gray-500">${esc([p.address, p.city, p.state, p.country, p.continent].filter(Boolean).join(", "))}</p></div>`; }).join("");
     const [clergy, important] = await Promise.all([
         db.collectionGroup("clergy").get(),
         db.collectionGroup("members").where("important", "==", true).get()]);
@@ -670,8 +706,10 @@ async function createParish() {
         try {
             const ref = db.collection("parishes").doc();
             const code = randomCode();
+            const pcode = parishCode();
             const batch = db.batch();
-            batch.set(ref, { ...p, status: "Approved", createdAt: nowIso() });
+            batch.set(ref, { ...p, status: "Approved", createdAt: nowIso(), code: pcode });
+            batch.set(db.collection("parishCodes").doc(pcode), { parishId: ref.id });
             batch.set(ref.collection("meta").doc("counters"), { clg: 0, mbr: 0 });
             batch.set(db.collection("parishStats").doc(ref.id), { memberCount: 0, clergyCount: 0, formerClergyCount: 0, attendanceTotal: 0, serviceCount: 0, financeTotal: 0, financeCount: 0 });
             batch.set(db.collection("invites").doc(code), { email, parishId: ref.id, role: "parish_admin", usedBy: null, createdAt: nowIso() });
@@ -679,6 +717,7 @@ async function createParish() {
             $("inviteResult").innerHTML = `<p class="font-bold">Parish created. Send this to the admin:</p>
                 <p class="mt-1">Email: <span class="font-mono">${esc(email)}</span></p>
                 <p>Invite code: <span id="inviteCode" class="font-mono font-bold select-all">${esc(code)}</span></p>
+                <p>Parish code (for member transfers): <span id="newParishCode" class="font-mono font-bold select-all">${esc(pcode)}</span></p>
                 <p class="text-gray-600 mt-1">They open the portal, tap "First time? I have an invite code", and choose a password.</p>`;
             $("inviteResult").classList.remove("hidden");
             ["np_name", "np_address", "np_maps", "np_city", "np_state", "np_country", "np_continent", "np_email"].forEach(id => $(id).value = "");
@@ -751,4 +790,294 @@ async function postCircular() {
     } catch (e) {
         alert(`Failed to publish: ${e.message}`);
     }
+}
+
+// ---------------------------------------------------------------- departments
+// Each department: term doc (2-year term) + one deptMembers doc per (department, member).
+let deptState = { id: "", terms: {}, members: [] };
+const DAY = 86400000;
+function termStatus(term) {
+    if (!term || !term.termEnd) return { level: "none", text: "No term dates set yet." };
+    const days = Math.ceil((new Date(term.termEnd + "T00:00:00") - new Date(today() + "T00:00:00")) / DAY);
+    if (days < 0) return { level: "overdue", days, text: `Election OVERDUE by ${-days} day${days === -1 ? "" : "s"} (term ended ${term.termEnd}).` };
+    if (days <= ELECTION_WARN_DAYS) return { level: "due", days, text: `Election due in ${days} day${days === 1 ? "" : "s"} (term ends ${term.termEnd}).` };
+    return { level: "ok", days, text: `Term ${term.termStart} to ${term.termEnd}.` };
+}
+function bannerHtml(deptId, st, withName) {
+    if (st.level !== "due" && st.level !== "overdue") return "";
+    const cls = st.level === "overdue" ? "bg-rose-50 border-rose-400 text-rose-900" : "bg-amber-50 border-amber-400 text-amber-900";
+    return `<button onclick="openDept('${deptId}')" class="election-banner w-full text-left border-l-4 ${cls} p-3 rounded text-xs font-semibold"><i class="fa-solid fa-bell mr-1"></i>${withName ? esc(deptName(deptId)) + ": " : ""}${esc(st.text)}</button>`;
+}
+async function loadDepartments() {
+    const [terms, current] = await Promise.all([parishRef().collection("departments").get(),
+        parishRef().collection("deptMembers").where("status", "==", "Current").get()]);
+    deptState.terms = Object.fromEntries(terms.docs.map(d => [d.id, d.data()]));
+    const counts = {};
+    current.docs.forEach(d => counts[d.data().dept] = (counts[d.data().dept] || 0) + 1);
+    $("deptGrid").innerHTML = DEPTS.map(d => {
+        const st = termStatus(deptState.terms[d.id]);
+        const badge = st.level === "overdue" ? `<span class="text-[9px] bg-rose-600 text-white rounded px-1">ELECTION OVERDUE</span>` : st.level === "due" ? `<span class="text-[9px] bg-amber-500 text-white rounded px-1">ELECTION DUE</span>` : "";
+        return `<button onclick="openDept('${d.id}')" id="dept-card-${d.id}" class="bg-white p-3 rounded-xl border shadow-sm text-left">
+            <p class="text-gray-500 font-semibold text-[10px] uppercase"><i class="fa-solid ${d.icon} text-slate-500"></i> ${esc(d.name)}</p>
+            <p class="dept-count text-xl font-bold text-blue-900">${counts[d.id] || 0}</p>${badge}</button>`;
+    }).join("");
+    $("electionBanners").innerHTML = DEPTS.map(d => bannerHtml(d.id, termStatus(deptState.terms[d.id]), true)).join("");
+}
+async function openDept(id) {
+    deptState.id = id;
+    showSection("dept");
+    $(`nav-dept-${id}`).classList.add("bg-slate-800");
+    $("deptTitle").textContent = deptName(id);
+    $("d_find").value = ""; $("d_role").value = ""; $("d_matches").innerHTML = "";
+    await refreshDept();
+}
+async function refreshDept() {
+    const id = deptState.id;
+    const [term, snap] = await Promise.all([parishRef().collection("departments").doc(id).get(),
+        parishRef().collection("deptMembers").where("dept", "==", id).get()]);
+    const t = term.exists ? term.data() : null;
+    deptState.terms[id] = t;
+    $("d_termStart").value = t?.termStart || ""; $("d_termEnd").value = t?.termEnd || "";
+    const st = termStatus(t);
+    $("deptBanner").innerHTML = bannerHtml(id, st, false) || `<p class="text-xs text-gray-500">${esc(st.text)}</p>`;
+    const all = snap.docs.map(d => d.data()).sort((a, b) => a.memberNo.localeCompare(b.memberNo));
+    const cur = all.filter(m => m.status === "Current"), former = all.filter(m => m.status === "Former");
+    $("deptCount").textContent = cur.length; $("deptFormerCount").textContent = former.length;
+    const card = (m, current) => `<div data-no="${esc(m.memberNo)}" class="dept-row bg-white border rounded-xl p-2 flex items-center gap-2 text-xs">
+        <button onclick="openRecord('members','${esc(m.memberNo)}')" class="flex-1 min-w-0 text-left"><p class="font-bold truncate">${esc(m.fullName)}${m.role ? ` <span class="text-blue-700">· ${esc(m.role)}</span>` : ""}</p>
+        <p class="font-mono text-gray-500">${esc(m.memberNo)} · ${current ? "since " + esc(m.joinedDate) : esc(m.joinedDate) + " to " + esc(m.leftDate)}</p></button>
+        ${current ? `<button onclick="leaveDept('${esc(m.memberNo)}')" class="px-2 py-1.5 border rounded text-rose-700">Remove</button>` : ""}</div>`;
+    $("deptMembersList").innerHTML = cur.map(m => card(m, true)).join("") || `<p class="text-xs text-gray-400 italic">No members yet.</p>`;
+    $("deptFormerList").innerHTML = former.map(m => card(m, false)).join("") || `<p class="text-xs text-gray-400 italic">None.</p>`;
+}
+function autoTermEnd() {
+    const s = $("d_termStart").value;
+    if (s) { const d = new Date(s + "T00:00:00Z"); d.setUTCFullYear(d.getUTCFullYear() + 2); $("d_termEnd").value = d.toISOString().slice(0, 10); }
+}
+async function saveTerm() {
+    const termStart = $("d_termStart").value, termEnd = $("d_termEnd").value;
+    if (!termStart || !termEnd || termEnd <= termStart) return alert("Enter a start date and an end date after it.");
+    await busy("saveTermBtn", async () => {
+        try {
+            await parishRef().collection("departments").doc(deptState.id).set({ termStart, termEnd, updatedAt: nowIso() });
+            await refreshDept(); await loadDepartments();
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+// Find by number (exact) or name prefix; tap a match to add.
+let dTimer = null;
+function findForDept() { clearTimeout(dTimer); dTimer = setTimeout(runFindForDept, 300); }
+async function runFindForDept() {
+    const term = val("d_find"), box = $("d_matches");
+    if (!term) { box.innerHTML = ""; return; }
+    if (/^CCC-CLG-/i.test(term)) { box.innerHTML = `<p class="text-rose-700 font-semibold">Clergy cannot join a department.</p>`; return; }
+    let docs = [];
+    const m = term.toUpperCase().match(/^CCC-MBR-(\d+)$/);
+    if (m) { const d = await parishRef().collection("members").doc("CCC-MBR-" + pad3(Number(m[1]))).get(); if (d.exists) docs = [d]; }
+    else { const t = term.toLowerCase(); docs = (await parishRef().collection("members").orderBy("nameLower").startAt(t).endAt(t + "").limit(8).get()).docs; }
+    box.innerHTML = docs.map(d => { const p = d.data();
+        const ok = p.status === "Active";
+        return `<button ${ok ? `onclick="addToDept('${esc(p.memberNo)}')"` : "disabled"} data-no="${esc(p.memberNo)}" class="dept-match w-full text-left border rounded p-2 ${ok ? "bg-emerald-50" : "bg-gray-100 text-gray-400"}">
+            <i class="fa-solid ${ok ? "fa-plus text-emerald-700" : "fa-ban"}"></i> ${esc(p.fullName)} <span class="font-mono">${esc(displayNo(p))}</span>${ok ? "" : " (clergy / not active: cannot join)"}</button>`; }).join("")
+        || `<p class="text-gray-400 italic">No member found.</p>`;
+}
+async function addToDept(memberNo) {
+    if (memberNo.startsWith("CCC-CLG-")) return alert("Clergy cannot join a department.");
+    const d = await parishRef().collection("members").doc(memberNo).get();
+    if (!d.exists || d.data().status !== "Active") return alert("Only active church members can join. Clergy cannot join a department.");
+    try {
+        await parishRef().collection("deptMembers").doc(`${deptState.id}_${memberNo}`).set({ dept: deptState.id, memberNo, fullName: d.data().fullName,
+            role: val("d_role"), status: "Current", joinedDate: today(), updatedAt: nowIso() });
+        $("d_find").value = ""; $("d_role").value = ""; $("d_matches").innerHTML = "";
+        await refreshDept(); await loadDepartments();
+    } catch (e) { alert(e.code === "permission-denied" ? "Not added. Clergy cannot join a department." : "Not added: " + e.message); }
+}
+async function leaveDept(memberNo) {
+    if (!confirm("Move this member to Former members?")) return;
+    try {
+        await parishRef().collection("deptMembers").doc(`${deptState.id}_${memberNo}`).update({ status: "Former", leftDate: today(), updatedAt: nowIso() });
+        await refreshDept(); await loadDepartments();
+    } catch (e) { alert("Not moved: " + e.message); }
+}
+async function currentDeptDocs(memberNo) {
+    return (await parishRef().collection("deptMembers").where("memberNo", "==", memberNo).where("status", "==", "Current").get()).docs;
+}
+
+// ---------------------------------------------------------------- members in diaspora + transfers
+function openAbroad() {
+    ["ab_country", "ab_city", "ab_parish"].forEach(id => $(id).value = ""); $("ab_date").value = today();
+    closeModal("recordModal"); openModal("abroadModal");
+}
+async function saveAbroad() {
+    const m = current.rec;
+    const abroadCountry = val("ab_country"), abroadCity = val("ab_city"), abroadParish = val("ab_parish"), abroadSince = $("ab_date").value;
+    if (!abroadCountry || !abroadSince) return alert("Enter the country and the date they moved.");
+    await busy("saveAbroadBtn", async () => {
+        try {
+            const depts = await currentDeptDocs(m.memberNo);
+            const b = db.batch();
+            b.update(parishRef().collection("members").doc(m.memberNo), { status: "Diaspora", abroadCountry, abroadCity, abroadParish, abroadSince, updatedAt: nowIso() });
+            depts.forEach(d => b.update(d.ref, { status: "Former", leftDate: today(), updatedAt: nowIso() }));
+            // Places only (no name, no number): lets Super Admin see where members are going.
+            b.set(db.collection("flows").doc(`abroad_${localState.currentParishId}_${m.memberNo}_${abroadSince}`), { kind: "Abroad",
+                fromCity: localState.parish.city || "", fromCountry: localState.parish.country || "", toCity: abroadCity, toCountry: abroadCountry, year: Number(abroadSince.slice(0, 4)) });
+            b.set(statsRef(), { memberCount: inc(-1), diasporaCount: inc(1) }, { merge: true });
+            await b.commit();
+            closeModal("abroadModal");
+            await loadParishData();
+            showSection("diaspora");
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+async function returnHome() {
+    const m = current.rec;
+    if (!confirm(m.fullName + " is back in the parish?")) return;
+    try {
+        const b = db.batch();
+        b.update(parishRef().collection("members").doc(m.memberNo), { status: "Active", updatedAt: nowIso() });
+        b.set(statsRef(), { memberCount: inc(1), diasporaCount: inc(-1) }, { merge: true });
+        await b.commit();
+        await loadParishData(); await openRecord("members", m.memberNo);
+    } catch (e) { alert("Not saved: " + e.message); }
+}
+function openSendTransfer() {
+    if (!localState.parish.code) return alert("Your parish has no parish code yet. Ask the Super Admin to give it one.");
+    $("st_code").value = ""; $("st_consent").checked = false;
+    closeModal("recordModal"); openModal("sendTransferModal");
+}
+async function sendTransfer() {
+    const m = current.rec;
+    const toCode = val("st_code").toUpperCase();
+    if (!toCode) return alert("Enter the new parish's code.");
+    if (!$("st_consent").checked) return alert("The member must agree to the transfer (NDPA 2023).");
+    if (toCode === localState.parish.code) return alert("That is your own parish code.");
+    await busy("sendTransferBtn", async () => {
+        try {
+            const c = await db.collection("parishCodes").doc(toCode).get();
+            if (!c.exists) return alert("No parish has that code. Check it with the new parish.");
+            const { status, transferId, abroadCountry, abroadCity, abroadParish, abroadSince, ordainedAs, lifeNo, lifeParishCode, ...personData } = m;
+            const ref = db.collection("transfers").doc();
+            const depts = await currentDeptDocs(m.memberNo);
+            const b = db.batch();
+            b.set(ref, { memberNo: m.memberNo, lifeNo: m.lifeNo || m.memberNo, lifeParishCode: m.lifeParishCode || localState.parish.code,
+                fromParish: localState.currentParishId, fromName: localState.parish.name || "", fromCity: localState.parish.city || "",
+                fromCountry: localState.parish.country || "", toParish: c.data().parishId, toCode, person: personData,
+                consentGiven: true, consentDate: today(), status: "Pending", createdAt: nowIso() });
+            b.update(parishRef().collection("members").doc(m.memberNo), { status: "TransferredOut", transferId: ref.id, updatedAt: nowIso() });
+            depts.forEach(d => b.update(d.ref, { status: "Former", leftDate: today(), updatedAt: nowIso() }));
+            b.set(statsRef(), m.status === "Diaspora" ? { diasporaCount: inc(-1) } : { memberCount: inc(-1) }, { merge: true });
+            await b.commit();
+            closeModal("sendTransferModal");
+            await loadParishData();
+            showSection("diaspora");
+        } catch (e) { alert("Not sent: " + e.message); }
+    });
+}
+async function loadDiaspora() {
+    if (localState.role !== "parish_admin") return;
+    $("myParishCode").textContent = localState.parish.code || "not set (ask Super Admin)";
+    const pid = localState.currentParishId;
+    const [abroad, incoming, outgoing] = await Promise.all([
+        parishRef().collection("members").where("status", "==", "Diaspora").limit(200).get(),
+        db.collection("transfers").where("toParish", "==", pid).where("status", "==", "Pending").limit(50).get(),
+        db.collection("transfers").where("fromParish", "==", pid).limit(100).get()]);
+    $("abroadCount").textContent = abroad.size;
+    $("abroadList").innerHTML = abroad.docs.map(d => { const p = d.data();
+        return `<button onclick="openRecord('members','${esc(p.memberNo)}')" data-no="${esc(p.memberNo)}" class="abroad-row w-full bg-white border rounded-xl p-2 text-left text-xs">
+            <p class="font-bold">${esc(p.fullName)} <span class="font-mono text-gray-500">${esc(p.memberNo)}</span></p>
+            <p><i class="fa-solid fa-location-dot text-cyan-700"></i> ${esc([p.abroadCity, p.abroadCountry].filter(Boolean).join(", "))}${p.abroadParish ? " · " + esc(p.abroadParish) : ""}</p>
+            <p class="text-gray-500">Since ${esc(p.abroadSince)}</p></button>`; }).join("") || `<p class="text-xs text-gray-400 italic">No members abroad.</p>`;
+    $("incomingList").innerHTML = incoming.docs.map(d => { const t = d.data();
+        return `<div data-id="${esc(d.id)}" class="incoming-row bg-white border rounded-xl p-2 space-y-1">
+            <p class="font-bold">${esc(t.person.fullName)} <span class="font-mono text-indigo-700">Life no. ${esc(t.lifeNo)} (${esc(t.lifeParishCode)})</span></p>
+            <p class="text-gray-500">From ${esc(t.fromName)}${t.fromCity ? ", " + esc(t.fromCity) : ""} · sent ${esc(t.consentDate)}</p>
+            <div class="flex gap-2"><button onclick="acceptTransfer('${esc(d.id)}')" class="flex-1 py-2 bg-emerald-600 text-white rounded font-bold">Accept</button>
+            <button onclick="declineTransfer('${esc(d.id)}')" class="flex-1 py-2 border rounded">Decline</button></div></div>`; }).join("")
+        || `<p class="text-gray-400 italic">No transfers waiting.</p>`;
+    $("outgoingList").innerHTML = outgoing.docs.map(d => { const t = d.data();
+        const act = t.status === "Pending" ? `<button onclick="cancelTransfer('${esc(d.id)}')" class="underline text-rose-700">Cancel</button>`
+            : ["Declined", "Cancelled"].includes(t.status) ? `<button onclick="restoreMember('${esc(t.memberNo)}')" class="underline text-emerald-700">Bring back to members</button>` : "";
+        return `<div class="outgoing-row bg-white border rounded-xl p-2 text-xs"><p class="font-bold">${esc(t.person.fullName)} <span class="font-mono text-gray-500">${esc(t.memberNo)}</span></p>
+            <p>To parish ${esc(t.toCode)} · <span class="transfer-status font-bold">${esc(t.status)}</span> ${act}</p></div>`; }).join("")
+        || `<p class="text-xs text-gray-400 italic">None.</p>`;
+}
+// New parish accepts: its own record (local number) that keeps the life-long number, plus a place-only flow.
+async function acceptTransfer(id) {
+    try {
+        const tRef = db.collection("transfers").doc(id);
+        const t0 = (await tRef.get()).data();
+        const newNo = await db.runTransaction(async t => {
+            const c = await t.get(counterRef());
+            const n = (c.exists ? c.data().mbr : 0) + 1;
+            const no = "CCC-MBR-" + pad3(n);
+            t.update(counterRef(), { mbr: n });
+            t.set(parishRef().collection("members").doc(no), { ...t0.person, memberNo: no, status: "Active", transferId: id,
+                lifeNo: t0.lifeNo, lifeParishCode: t0.lifeParishCode, important: false, updatedAt: nowIso() });
+            t.update(tRef, { status: "Accepted", newMemberNo: no, decidedAt: nowIso() });
+            t.set(db.collection("flows").doc(id), { kind: "Transfer", fromCity: t0.fromCity, fromCountry: t0.fromCountry,
+                toCity: localState.parish.city || "", toCountry: localState.parish.country || "", year: new Date().getFullYear() });
+            t.set(statsRef(), { memberCount: inc(1) }, { merge: true });
+            return no;
+        });
+        await loadParishData(); await loadDiaspora();
+        await openRecord("members", newNo);
+    } catch (e) { alert("Not accepted: " + e.message); }
+}
+async function declineTransfer(id) {
+    if (!confirm("Decline this transfer?")) return;
+    try { await db.collection("transfers").doc(id).update({ status: "Declined", decidedAt: nowIso() }); await loadDiaspora(); }
+    catch (e) { alert("Not saved: " + e.message); }
+}
+async function cancelTransfer(id) {
+    if (!confirm("Cancel this transfer?")) return;
+    try { await db.collection("transfers").doc(id).update({ status: "Cancelled", decidedAt: nowIso() }); await loadDiaspora(); }
+    catch (e) { alert("Not saved: " + e.message); }
+}
+async function restoreMember(memberNo) {
+    try {
+        const ref = parishRef().collection("members").doc(memberNo);
+        if ((await ref.get()).data().status !== "TransferredOut") return alert("Already back.");
+        const b = db.batch();
+        b.update(ref, { status: "Active", updatedAt: nowIso() });
+        b.set(statsRef(), { memberCount: inc(1) }, { merge: true });
+        await b.commit();
+        await loadParishData(); await loadDiaspora();
+    } catch (e) { alert("Not saved: " + e.message); }
+}
+
+// ---------------------------------------------------------------- super admin: parish codes + diaspora flows
+function parishCode() {
+    const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    return Array.from(crypto.getRandomValues(new Uint8Array(6)), b => abc[b % abc.length]).join("");
+}
+async function giveParishCode(parishId) {
+    const code = parishCode();
+    try {
+        const b = db.batch();
+        b.update(db.collection("parishes").doc(parishId), { code });
+        b.set(db.collection("parishCodes").doc(code), { parishId });
+        await b.commit();
+        await loadWorld();
+    } catch (e) { alert("Not saved: " + e.message); }
+}
+let flows = [];
+async function loadFlows() {
+    if (localState.role !== "super_admin") return;
+    flows = (await db.collection("flows").get()).docs.map(d => d.data());
+    const years = [...new Set(flows.map(f => f.year))].sort().reverse();
+    $("flowYear").innerHTML = `<option value="">All years</option>` + years.map(y => `<option>${y}</option>`).join("");
+    renderFlows();
+}
+function renderFlows() {
+    const y = $("flowYear").value;
+    const place = (c, k) => [c, k].filter(Boolean).join(", ") || "Unknown";
+    const groups = {};
+    flows.filter(f => !y || String(f.year) === y).forEach(f => {
+        const k = place(f.fromCity, f.fromCountry) + " → " + place(f.toCity, f.toCountry);
+        groups[k] = (groups[k] || 0) + 1;
+    });
+    const rows = Object.entries(groups).sort((a, b) => b[1] - a[1]);
+    $("flowsList").innerHTML = `<p class="text-xs text-gray-500">Members abroad (world total): <b>${localState.worldDiaspora || 0}</b>. Each person is counted once, in one parish only.</p>` +
+        (rows.map(([k, n]) => `<div class="flow-row bg-white border rounded-xl p-3 flex justify-between items-center text-xs"><span class="font-semibold">${esc(k)}</span><span class="text-lg font-bold text-cyan-700">${n}</span></div>`).join("")
+        || `<p class="text-xs text-gray-400 italic">No moves recorded yet.</p>`);
 }
