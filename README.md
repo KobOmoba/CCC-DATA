@@ -8,7 +8,8 @@ Built on **Firebase** (Auth + Firestore), same as the EduBloom apps.
 ## Who can do what
 Roles are stored in Firestore `users/{uid}` as `{ role, parishId }`:
 - **parish_admin** - reads/writes only their own parish (and only while it is `Approved`).
-- **hq** - reads every parish; publishes circulars.
+- **hq** - reads parish names and per-parish totals (`parishStats`) only, never member,
+  attendance or giving records (NDPA); publishes circulars.
 - **super_admin** - everything, including approving parishes and giving roles.
 - Not logged in - nothing.
 
@@ -36,8 +37,7 @@ Passwords are held by Firebase Auth; the app never stores or shows them.
 8. Make yourself super admin: **Authentication > Add user** (your email + password). Copy your
    **User UID**. In **Firestore > Start collection** `users`, document ID = that UID, field
    `role` (string) = `super_admin`.
-9. To approve a parish: create `parishes/{id}` with `name` and `status = Approved`, then
-   `users/{their UID}` with `role = parish_admin` and `parishId = {id}`.
+9. To approve a parish: log in as super admin, tap **Parish Approvals**, tap **Approve**.
 
 ## NDPA 2023 (Nigeria Data Protection Act)
 Member records are personal data. **Get the member's consent before entering their details.**
@@ -50,3 +50,10 @@ and delete a member's record if they ask.
 cd firestore && npm install && npm test
 ```
 Runs the Firestore emulator (needs Java) and `rules.test.mjs`.
+
+Phone-size browser test (390x844) against the Auth + Firestore emulators, project `demo-ccc`:
+```
+cd firestore && npm run test:e2e
+```
+Set `CHROMIUM_PATH` to use an installed Chromium. Screenshots land in `firestore/screenshots/`.
+Open the app with `?emulator=1` to point it at local emulators instead of the live project.

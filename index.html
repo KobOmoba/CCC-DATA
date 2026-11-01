@@ -92,6 +92,7 @@
                     <button onclick="showSection('attendance')" id="nav-attendance" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance Ledger</button>
                     <button onclick="showSection('finance')" id="nav-finance" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Financial Ledger</button>
                     <button onclick="showSection('circulars')" id="nav-circulars" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-bullhorn text-indigo-400 w-4"></i> HQ Circulars</button>
+                    <button onclick="showSection('approvals')" id="nav-approvals" class="hidden nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-circle-check text-emerald-400 w-4"></i> Parish Approvals</button>
                 </nav>
             </div>
 
@@ -122,6 +123,20 @@
                                 <p id="metricMembers" class="text-xl font-bold">0</p>
                             </div>
                         </div>
+                        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
+                            <div class="p-2.5 bg-yellow-100 text-yellow-600 rounded-lg"><i class="fa-solid fa-calendar-check text-lg"></i></div>
+                            <div>
+                                <p class="text-gray-500 uppercase tracking-wider font-semibold text-[10px]">Services Logged</p>
+                                <p id="metricServices" class="text-xl font-bold">0</p>
+                            </div>
+                        </div>
+                        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
+                            <div class="p-2.5 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-solid fa-naira-sign text-lg"></i></div>
+                            <div>
+                                <p class="text-gray-500 uppercase tracking-wider font-semibold text-[10px]">Total Giving</p>
+                                <p id="metricGiving" class="text-xl font-bold">0</p>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -136,7 +151,9 @@
                             <i class="fa-solid fa-plus mr-1"></i> Register Member
                         </button>
                     </div>
-                    <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
+                    <input type="search" id="memberSearch" oninput="searchMembers()" class="w-full border p-2.5 rounded text-sm" placeholder="Search by name or phone">
+                    <p class="text-[10px] text-gray-500">Tap a member to edit.</p>
+                    <div class="bg-white border rounded-xl overflow-x-auto shadow-sm">
                         <table class="w-full text-left text-xs border-collapse">
                             <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
                                 <tr>
@@ -150,6 +167,7 @@
                             <tbody id="membersTable" class="divide-y"></tbody>
                         </table>
                     </div>
+                    <button id="more-members" onclick="loadMembers(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
                 </section>
 
                 <!-- Tab 3: ATTENDANCE LEDGER -->
@@ -175,6 +193,7 @@
                             <tbody id="attendanceTable" class="divide-y text-gray-700"></tbody>
                         </table>
                     </div>
+                    <button id="more-attendance" onclick="loadAttendance(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
                 </section>
 
                 <!-- Tab 4: FINANCIAL CONTRIBUTIONS -->
@@ -201,6 +220,7 @@
                             <tbody id="financeTable" class="divide-y text-gray-700"></tbody>
                         </table>
                     </div>
+                    <button id="more-finances" onclick="loadFinances(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
                 </section>
 
                 <!-- Tab 5: HQ CIRCULARS -->
@@ -218,6 +238,15 @@
                     </div>
                 </section>
 
+                <!-- Tab 6: PARISH APPROVALS (super_admin only) -->
+                <section id="section-approvals" class="space-y-4 hidden">
+                    <div class="pb-2 border-b">
+                        <h2 class="text-lg font-bold text-gray-800">Parish Approvals</h2>
+                        <p class="text-xs text-gray-500">Approve a pilot parish. Its admin gets access straight away.</p>
+                    </div>
+                    <div id="requestsList" class="space-y-2"></div>
+                </section>
+
             </div>
         </main>
     </div>
@@ -227,7 +256,7 @@
     <div id="addMemberModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
             <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center">
-                <span>REGISTER NEW MEMBER</span>
+                <span id="memberModalTitle">REGISTER NEW MEMBER</span>
                 <button onclick="closeAddModal()" class="text-white"><i class="fa-solid fa-xmark"></i></button>
             </header>
             <div class="p-5 space-y-3">

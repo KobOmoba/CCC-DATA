@@ -2,6 +2,8 @@ rules_version = '2';
 // CCC Parish Portal - Firestore security rules.
 // Roles live in users/{uid}: { role: 'super_admin' | 'hq' | 'parish_admin', parishId }.
 // Nobody can read or write anything without signing in.
+// NDPA 2023: HQ never reads member, attendance or finance records. HQ reads only
+// per-parish totals in parishStats/{parishId}, which parish admins keep up to date.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -15,6 +17,40 @@ service cloud.firestore {
     function isParishAdminOf(parishId) {
       return role() == 'parish_admin' && profile().parishId == parishId
         && get(/databases/$(database)/documents/parishes/$(parishId)).data.status == 'Approved';
+    }
+    function canWriteParish(parishId) { return isSuper() || isParishAdminOf(parishId); }
+
+    function str(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
+    function optStr(d, k, max) { return !(k in d) || d[k] == null || (d[k] is string && d[k].size() <= max); }
+    function isDate(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
+
+    function validMember(d) {
+      return d.keys().hasOnly(['fullName', 'nameLower', 'gender', 'rank', 'phone', 'phoneDigits',
+          'address', 'dateJoined', 'household', 'consentGiven', 'consentDate', 'updatedAt'])
+        && str(d.fullName, 120) && d.nameLower is string && d.nameLower == d.fullName.lower()
+        && d.gender in ['Male', 'Female', 'M', 'F']
+        && str(d.rank, 60) && isDate(d.dateJoined)
+        && optStr(d, 'phone', 20) && optStr(d, 'phoneDigits', 20)
+        && optStr(d, 'address', 200) && optStr(d, 'household', 120)
+        && d.consentGiven == true && isDate(d.consentDate);
+    }
+    function validAttendance(d) {
+      return d.keys().hasOnly(['serviceDate', 'serviceType', 'headcount'])
+        && isDate(d.serviceDate) && str(d.serviceType, 60)
+        && d.headcount is int && d.headcount >= 0 && d.headcount <= 100000;
+    }
+    function validFinance(d) {
+      return d.keys().hasOnly(['transactionDate', 'contributorName', 'contributionType', 'amount'])
+        && isDate(d.transactionDate) && str(d.contributorName, 120) && str(d.contributionType, 60)
+        && (d.amount is int || d.amount is float) && d.amount > 0 && d.amount <= 100000000;
+    }
+    function validStats(d) {
+      return d.keys().hasOnly(['memberCount', 'attendanceTotal', 'serviceCount', 'financeTotal', 'financeCount', 'updatedAt'])
+        && d.get('memberCount', 0) is int && d.get('memberCount', 0) >= 0
+        && d.get('attendanceTotal', 0) is int && d.get('attendanceTotal', 0) >= 0
+        && d.get('serviceCount', 0) is int && d.get('serviceCount', 0) >= 0
+        && d.get('financeCount', 0) is int && d.get('financeCount', 0) >= 0
+        && (d.get('financeTotal', 0) is int || d.get('financeTotal', 0) is float) && d.get('financeTotal', 0) >= 0;
     }
 
     // Role records: users read their own; only super_admin assigns roles.
@@ -36,20 +72,26 @@ service cloud.firestore {
       allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
       allow write: if isSuper();
 
-      match /{sub}/{docId} {
-        allow read: if sub in ['members', 'attendance', 'finances']
-          && (isSuper() || isHQ() || isParishAdminOf(parishId));
-        allow write: if sub in ['attendance', 'finances']
-          && (isSuper() || isParishAdminOf(parishId));
-        allow delete: if sub == 'members' && (isSuper() || isParishAdminOf(parishId));
+      // Personal data: parish admin of this parish and super_admin only. Never HQ.
+      match /members/{memberId} {
+        allow read, delete: if canWriteParish(parishId);
+        allow create, update: if canWriteParish(parishId) && validMember(request.resource.data);
+      }
+      match /attendance/{id} {
+        allow read, delete: if canWriteParish(parishId);
+        allow create, update: if canWriteParish(parishId) && validAttendance(request.resource.data);
+      }
+      match /finances/{id} {
+        allow read, delete: if canWriteParish(parishId);
+        allow create, update: if canWriteParish(parishId) && validFinance(request.resource.data);
       }
     }
 
-    // NDPA 2023: a member record can only be saved once consent is recorded.
-    match /parishes/{parishId}/members/{memberId} {
-      allow create, update: if (isSuper() || isParishAdminOf(parishId))
-        && request.resource.data.consentGiven == true
-        && request.resource.data.consentDate is string;
+    // Per-parish totals only (no names). HQ reads; the parish's own writes keep it current.
+    match /parishStats/{parishId} {
+      allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
+      allow create, update: if canWriteParish(parishId) && validStats(request.resource.data);
+      allow delete: if isSuper();
     }
 
     match /circulars/{id} {
