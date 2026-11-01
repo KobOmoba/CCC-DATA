@@ -14,6 +14,10 @@ const firebaseConfig = {
     appId: "1:762074026179:web:3ce45d236531e5f1fe9276"
 };
 const CONFIG_IS_PLACEHOLDER = firebaseConfig.apiKey.startsWith("PLACEHOLDER");
+// Test mode: open the app with ?emulator=1 to use the local Auth + Firestore emulators
+// under a demo project id, so nothing can ever reach the live project.
+const USE_EMULATOR = new URLSearchParams(location.search).has("emulator");
+const PAGE_SIZE = 20;
 
 let auth = null;
 let db = null;
@@ -31,9 +35,13 @@ window.onload = function() {
         console.warn("Firebase is not configured yet. Fill in firebaseConfig at the top of app.js.");
         return;
     }
-    firebase.initializeApp(firebaseConfig);
+    firebase.initializeApp(USE_EMULATOR ? { ...firebaseConfig, projectId: "demo-ccc" } : firebaseConfig);
     auth = firebase.auth();
     db = firebase.firestore();
+    if (USE_EMULATOR) {
+        auth.useEmulator("http://127.0.0.1:9099");
+        db.useEmulator("127.0.0.1", 8080);
+    }
     auth.onAuthStateChanged(onAuthChanged);
 };
 
@@ -99,6 +107,14 @@ async function onAuthChanged(user) {
             await fillParishPicker();
             document.getElementById("circularComposer").classList.remove("hidden");
         }
+        if (role === "super_admin") {
+            document.getElementById("nav-approvals").classList.remove("hidden");
+            loadRequests();
+        }
+        if (role === "hq") {
+            // NDPA: HQ sees totals only, never member / giving records.
+            ["nav-members", "nav-attendance", "nav-finance"].forEach(id => document.getElementById(id).classList.add("hidden"));
+        }
         if (!localState.currentParishId && role === "parish_admin") {
             alert("Your account is not linked to a parish.");
             return auth.signOut();
@@ -144,32 +160,83 @@ function parishRef() {
     return db.collection("parishes").doc(localState.currentParishId);
 }
 
+function statsRef() {
+    return db.collection("parishStats").doc(localState.currentParishId);
+}
+
+// Paged lists: each keeps the last doc so "Load more" continues from there.
+const pages = { members: null, attendance: null, finances: null };
+
 async function loadParishData() {
     if (!db || !localState.currentParishId) return;
     const pDoc = await parishRef().get();
     document.getElementById("dashParishName").textContent = pDoc.exists ? pDoc.data().name : "";
 
-    const members = await parishRef().collection("members").orderBy("fullName").get();
-    const mTable = document.getElementById("membersTable");
-    document.getElementById("metricMembers").textContent = members.size;
-    mTable.innerHTML = members.docs.map(d => {
-        const m = d.data();
-        return `<tr><td class="p-3 font-bold">${esc(m.fullName)}</td><td class="p-3">${esc(m.gender)}</td><td class="p-3">${esc(m.household)}</td><td class="p-3">${esc(m.rank)}</td><td class="p-3">${esc(m.phone || 'N/A')}</td></tr>`;
-    }).join("");
+    const st = await statsRef().get().catch(() => null);
+    const s = st && st.exists ? st.data() : {};
+    document.getElementById("metricMembers").textContent = s.memberCount || 0;
+    document.getElementById("metricServices").textContent = s.serviceCount || 0;
+    document.getElementById("metricGiving").textContent = "\u20a6" + Number(s.financeTotal || 0).toLocaleString();
 
-    const att = await parishRef().collection("attendance").orderBy("serviceDate", "desc").get();
-    document.getElementById("attendanceTable").innerHTML = att.docs.map(d => {
+    if (localState.role !== "hq") {
+        document.getElementById("memberSearch").value = "";
+        await Promise.all([loadMembers(true), loadAttendance(true), loadFinances(true)]);
+    }
+    await loadCirculars();
+}
+
+function memberRow(d) {
+    const m = d.data();
+    return `<tr data-id="${esc(d.id)}" onclick="openEditModal('${esc(d.id)}')" class="cursor-pointer hover:bg-blue-50"><td class="p-3 font-bold">${esc(m.fullName)}</td><td class="p-3">${esc(m.gender)}</td><td class="p-3">${esc(m.household)}</td><td class="p-3">${esc(m.rank)}</td><td class="p-3">${esc(m.phone || 'N/A')}</td></tr>`;
+}
+
+// Generic pager: runs query q (already ordered), appends rows, shows "Load more" if a full page came back.
+async function loadPage(key, q, tableId, rowFn, reset) {
+    if (reset) { pages[key] = null; document.getElementById(tableId).innerHTML = ""; }
+    if (pages[key]) q = q.startAfter(pages[key]);
+    const snap = await q.limit(PAGE_SIZE).get();
+    if (snap.docs.length) pages[key] = snap.docs[snap.docs.length - 1];
+    document.getElementById(tableId).insertAdjacentHTML("beforeend", snap.docs.map(rowFn).join(""));
+    document.getElementById("more-" + key).classList.toggle("hidden", snap.docs.length < PAGE_SIZE);
+}
+
+// Search: digits = phone prefix, otherwise name prefix. Always inside this parish only.
+function memberQuery() {
+    const term = document.getElementById("memberSearch").value.trim();
+    const col = parishRef().collection("members");
+    const digits = term.replace(/\D/g, "");
+    if (term && digits && digits.length === term.replace(/[\s+()-]/g, "").length) {
+        return col.orderBy("phoneDigits").startAt(digits).endAt(digits + "\uf8ff");
+    }
+    if (term) {
+        const t = term.toLowerCase();
+        return col.orderBy("nameLower").startAt(t).endAt(t + "\uf8ff");
+    }
+    return col.orderBy("nameLower");
+}
+let searchTimer = null;
+function searchMembers() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadMembers(true), 300);
+}
+function loadMembers(reset) {
+    return loadPage("members", memberQuery(), "membersTable", memberRow, reset);
+}
+function loadAttendance(reset) {
+    return loadPage("attendance", parishRef().collection("attendance").orderBy("serviceDate", "desc"), "attendanceTable", d => {
         const a = d.data();
         return `<tr><td class="p-3 font-mono">${esc(a.serviceDate)}</td><td class="p-3 font-bold">${esc(a.serviceType)}</td><td class="p-3">${esc(a.headcount)} attendees</td></tr>`;
-    }).join("");
-
-    const fin = await parishRef().collection("finances").orderBy("transactionDate", "desc").get();
-    document.getElementById("financeTable").innerHTML = fin.docs.map(d => {
+    }, reset);
+}
+function loadFinances(reset) {
+    return loadPage("finances", parishRef().collection("finances").orderBy("transactionDate", "desc"), "financeTable", d => {
         const f = d.data();
-        return `<tr><td class="p-3 font-mono">${esc(f.transactionDate)}</td><td class="p-3 font-bold">${esc(f.contributorName)}</td><td class="p-3">${esc(f.contributionType)}</td><td class="p-3 font-bold text-emerald-600">₦${esc(f.amount)}</td></tr>`;
-    }).join("");
+        return `<tr><td class="p-3 font-mono">${esc(f.transactionDate)}</td><td class="p-3 font-bold">${esc(f.contributorName)}</td><td class="p-3">${esc(f.contributionType)}</td><td class="p-3 font-bold text-emerald-600">\u20a6${esc(f.amount)}</td></tr>`;
+    }, reset);
+}
 
-    const circs = await db.collection("circulars").orderBy("createdAt", "desc").get();
+async function loadCirculars() {
+    const circs = await db.collection("circulars").orderBy("createdAt", "desc").limit(PAGE_SIZE).get();
     const cList = document.getElementById("circularsList");
     if (!circs.empty) {
         cList.innerHTML = circs.docs.map(d => {
@@ -185,8 +252,26 @@ async function loadParishData() {
     }
 }
 
-// Dialog Controller Modals
-function openAddModal() { document.getElementById("addMemberModal").classList.remove('hidden'); }
+// Member add / edit modal. editingId = null means "add new".
+let editingId = null;
+const MEMBER_FIELDS = { m_name: "fullName", m_gender: "gender", m_rank: "rank", m_phone: "phone", m_address: "address", m_joined: "dateJoined", m_household: "household" };
+function openAddModal() {
+    editingId = null;
+    Object.keys(MEMBER_FIELDS).forEach(id => document.getElementById(id).value = "");
+    document.getElementById("m_consent").checked = false;
+    document.getElementById("memberModalTitle").textContent = "REGISTER NEW MEMBER";
+    document.getElementById("addMemberModal").classList.remove('hidden');
+}
+async function openEditModal(id) {
+    const snap = await parishRef().collection("members").doc(id).get();
+    if (!snap.exists) return;
+    const m = snap.data();
+    editingId = id;
+    Object.entries(MEMBER_FIELDS).forEach(([el, key]) => document.getElementById(el).value = m[key] || "");
+    document.getElementById("m_consent").checked = m.consentGiven === true;
+    document.getElementById("memberModalTitle").textContent = "EDIT MEMBER";
+    document.getElementById("addMemberModal").classList.remove('hidden');
+}
 function closeAddModal() { document.getElementById("addMemberModal").classList.add('hidden'); }
 async function saveMember() {
     if (!requireFirebase()) return;
@@ -201,12 +286,25 @@ async function saveMember() {
         dateJoined: val("m_joined"),
         household: val("m_household"),
         consentGiven: consent,
-        consentDate: consent ? new Date().toISOString().slice(0, 10) : null
+        updatedAt: new Date().toISOString()
     };
+    member.nameLower = member.fullName.toLowerCase();
+    member.phoneDigits = member.phone.replace(/\D/g, "");
     if (!member.fullName || !member.gender || !member.rank || !member.dateJoined) return alert("Fill in required elements.");
     if (!consent) return alert("You must record the member's consent before saving (NDPA 2023).");
     try {
-        await parishRef().collection("members").add(member);
+        const col = parishRef().collection("members");
+        if (editingId) {
+            const old = (await col.doc(editingId).get()).data() || {};
+            member.consentDate = old.consentDate || new Date().toISOString().slice(0, 10);
+            await col.doc(editingId).update(member);
+        } else {
+            member.consentDate = new Date().toISOString().slice(0, 10);
+            const batch = db.batch();
+            batch.set(col.doc(), member);
+            batch.set(statsRef(), { memberCount: firebase.firestore.FieldValue.increment(1) }, { merge: true });
+            await batch.commit();
+        }
         closeAddModal();
         loadParishData();
     } catch (e) {
@@ -221,9 +319,13 @@ async function saveAttendance() {
     const date = document.getElementById("att_date").value;
     const type = document.getElementById("att_type").value.trim();
     const headcount = parseInt(document.getElementById("att_headcount").value);
-    if (!date || !type || isNaN(headcount)) return alert("Fill all elements.");
+    if (!date || !type || isNaN(headcount) || headcount < 0) return alert("Fill all elements.");
     try {
-        await parishRef().collection("attendance").add({ serviceDate: date, serviceType: type, headcount });
+        const inc = firebase.firestore.FieldValue.increment;
+        const batch = db.batch();
+        batch.set(parishRef().collection("attendance").doc(), { serviceDate: date, serviceType: type, headcount });
+        batch.set(statsRef(), { attendanceTotal: inc(headcount), serviceCount: inc(1) }, { merge: true });
+        await batch.commit();
         closeAttendanceModal();
         loadParishData();
     } catch (e) {
@@ -239,11 +341,15 @@ async function saveFinance() {
     const contrib = document.getElementById("fin_contrib").value.trim();
     const type = document.getElementById("fin_type").value.trim();
     const amt = parseFloat(document.getElementById("fin_amount").value);
-    if (!date || !contrib || !type || isNaN(amt)) return alert("Fill all elements.");
+    if (!date || !contrib || !type || isNaN(amt) || amt <= 0) return alert("Fill all elements.");
     try {
-        await parishRef().collection("finances").add({
+        const inc = firebase.firestore.FieldValue.increment;
+        const batch = db.batch();
+        batch.set(parishRef().collection("finances").doc(), {
             transactionDate: date, contributorName: contrib, contributionType: type, amount: amt
         });
+        batch.set(statsRef(), { financeTotal: inc(amt), financeCount: inc(1) }, { merge: true });
+        await batch.commit();
         closeFinanceModal();
         loadParishData();
     } catch (e) {
@@ -261,6 +367,37 @@ async function postCircular() {
         loadParishData();
     } catch (e) {
         alert(`Failed to publish: ${e.message}`);
+    }
+}
+
+// Super admin: approve a pending parish request in one step.
+// Creates the parish (Approved), links the requester as its parish_admin, and starts its totals.
+async function loadRequests() {
+    const snap = await db.collection("parishRequests").where("status", "==", "Pending").get();
+    const list = document.getElementById("requestsList");
+    list.innerHTML = snap.empty ? `<p class="text-xs text-gray-400 italic">No pending parish requests.</p>` :
+        snap.docs.map(d => {
+            const r = d.data();
+            return `<div class="bg-white border rounded-xl p-3 flex justify-between items-center gap-2 text-xs">
+                <div><p class="font-bold">${esc(r.parishName)}</p><p class="text-gray-500">${esc(r.email)}</p></div>
+                <button onclick="approveParish('${esc(d.id)}')" class="bg-emerald-600 text-white px-3 py-2 rounded font-semibold">Approve</button>
+            </div>`;
+        }).join("");
+}
+async function approveParish(uid) {
+    if (!confirm("Approve this parish as a pilot? Its admin will get access straight away.")) return;
+    try {
+        const req = (await db.collection("parishRequests").doc(uid).get()).data();
+        const batch = db.batch();
+        batch.set(db.collection("parishes").doc(uid), { name: req.parishName, status: "Approved" });
+        batch.set(db.collection("users").doc(uid), { role: "parish_admin", parishId: uid });
+        batch.set(db.collection("parishStats").doc(uid), { memberCount: 0, attendanceTotal: 0, serviceCount: 0, financeTotal: 0, financeCount: 0 }, { merge: true });
+        batch.update(db.collection("parishRequests").doc(uid), { status: "Approved" });
+        await batch.commit();
+        await loadRequests();
+        await fillParishPicker();
+    } catch (e) {
+        alert(`Approval failed: ${e.message}`);
     }
 }
 
