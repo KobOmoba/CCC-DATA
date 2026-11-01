@@ -1,39 +1,111 @@
 rules_version = '2';
 // CCC Parish Portal - Firestore security rules.
-// Roles live in users/{uid}: { role: 'super_admin' | 'hq' | 'parish_admin', parishId }.
+// Roles live in users/{uid}: { role: 'super_admin' | 'hq' | 'parish_admin', parishId, email }.
 // Nobody can read or write anything without signing in.
-// NDPA 2023: HQ never reads member, attendance or finance records. HQ reads only
-// per-parish totals in parishStats/{parishId}, which parish admins keep up to date.
+// Privacy (NDPA 2023):
+//  - A parish's records are private to that parish's admin.
+//  - super_admin sees per-parish totals, the clergy register, and members the parish
+//    flags "important". Never ordinary members, attendance or giving.
+//  - hq sees per-parish totals only.
+// No self-registration: super_admin creates each parish and an invite (email + secret code).
+// The invited admin signs up with that email and claims the invite.
+// Clergy can never be app admins (adminEmails / clergyIndex cross-check).
+// Member and clergy numbers come from a per-parish counter, are the document id,
+// and are never reused (counter only goes up by 1; records cannot be deleted).
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
+    function docAt(p) { return path('/databases/' + database + '/documents/' + p); }
     function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function role() { return hasProfile() ? profile().role : ''; }
     function isSuper() { return role() == 'super_admin'; }
     function isHQ() { return role() == 'hq'; }
-    // Parish admins only get in while their parish is Approved (not Pending / Suspended).
+    function myEmail() { return signedIn() && request.auth.token.email is string ? request.auth.token.email.lower() : ''; }
+    // Parish admins only get in while their parish is Approved (not Suspended).
     function isParishAdminOf(parishId) {
       return role() == 'parish_admin' && profile().parishId == parishId
         && get(/databases/$(database)/documents/parishes/$(parishId)).data.status == 'Approved';
     }
-    function canWriteParish(parishId) { return isSuper() || isParishAdminOf(parishId); }
+    function isClergyEmail(e) { return exists(/databases/$(database)/documents/clergyIndex/$(e)); }
+    function isAdminEmail(e) { return exists(/databases/$(database)/documents/adminEmails/$(e)); }
 
     function str(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
     function optStr(d, k, max) { return !(k in d) || d[k] == null || (d[k] is string && d[k].size() <= max); }
+    function optInt(d, k, lo, hi) { return !(k in d) || d[k] == null || (d[k] is int && d[k] >= lo && d[k] <= hi); }
     function isDate(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
+    function optDate(d, k) { return !(k in d) || d[k] == null || d[k] == '' || isDate(d[k]); }
+    function optImage(d, k, max) {
+      return !(k in d) || d[k] == null || d[k] == ''
+        || (d[k] is string && d[k].size() <= max && d[k].matches('^data:image/(jpeg|png|webp);base64,.*'));
+    }
+    function isEmail(v) { return v is string && v.size() <= 120 && v.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'); }
 
-    function validMember(d) {
-      return d.keys().hasOnly(['fullName', 'nameLower', 'gender', 'rank', 'phone', 'phoneDigits',
-          'address', 'dateJoined', 'household', 'consentGiven', 'consentDate', 'updatedAt'])
-        && str(d.fullName, 120) && d.nameLower is string && d.nameLower == d.fullName.lower()
-        && d.gender in ['Male', 'Female', 'M', 'F']
-        && str(d.rank, 60) && isDate(d.dateJoined)
-        && optStr(d, 'phone', 20) && optStr(d, 'phoneDigits', 20)
-        && optStr(d, 'address', 200) && optStr(d, 'household', 120)
+    // ---- Numbers: CCC-CLG-001 / CCC-MBR-001, from parishes/{p}/meta/counters ----
+    function pad3(n) { return n < 10 ? '00' + string(n) : (n < 100 ? '0' + string(n) : string(n)); }
+    function counterPath(p) { return /databases/$(database)/documents/parishes/$(p)/meta/counters; }
+    function counterBefore(p, k) { return get(counterPath(p)).data[k]; }
+    function counterAfter(p, k) { return getAfter(counterPath(p)).data[k]; }
+    // Creating record `id` must take exactly the next number in the same write.
+    function takesNextNumber(p, k, prefix, id) {
+      return counterAfter(p, k) == counterBefore(p, k) + 1 && id == prefix + pad3(counterAfter(p, k));
+    }
+
+    // ---- Member / clergy record ----
+    // The 28 ranks (male line). One regex = one expression (a 28-item list costs ~30).
+    function isRank(r) {
+      return r.matches('^(Brother|Elder Brother|Cape Elder Brother|Full Elder Brother|Senior Elder Brother|Superior Senior Elder Brother|Assistant Leader|Leader|Senior Leader|Superior Senior Leader|Honorary Assistant Evangelist|Assistant Evangelist|Honorary Evangelist|Evangelist|Honorary Senior Evangelist|Senior Evangelist|Special Most Senior Evangelist|Most Senior Evangelist|Special Venerable Most Senior Evangelist|Venerable Most Senior Evangelist|Assistant Superior Evangelist|Superior Evangelist|Assistant Venerable Superior Evangelist|Venerable Superior Evangelist|Assistant Most Superior Evangelist|Most Superior Evangelist|Supreme Evangelist|Pastor Reverend)$');
+    }
+    function personKeys() {
+      return ['memberNo', 'fullName', 'nameLower', 'gender', 'maritalStatus', 'address', 'phone', 'phoneDigits',
+        'email', 'rank', 'occupation', 'dobDay', 'dobMonth', 'dobYear', 'anointDay', 'anointMonth', 'anointYear',
+        'nokName', 'nokAddress', 'nokPhone', 'photo', 'important', 'status', 'consentGiven', 'consentDate',
+        'createdAt', 'updatedAt'];
+    }
+    // Compact helpers: Firestore caps a request at 1000 evaluated expressions, so these stay small.
+    function s(v, max) { return v is string && v.size() <= max; }
+    function n(v, lo, hi) { return v == null || (v is int && v >= lo && v <= hi); }
+    function validPerson(d, id) {
+      return d.memberNo == id && str(d.fullName, 120) && d.nameLower == d.fullName.lower()
+        && d.gender in ['Male', 'Female']
+        && d.maritalStatus in ['Single', 'Married', 'Widowed', 'Divorced', 'Separated']
+        && s(d.get('address', ''), 200) && s(d.get('phone', ''), 20) && s(d.get('phoneDigits', ''), 20)
+        && s(d.get('occupation', ''), 80) && s(d.get('nokName', ''), 120) && s(d.get('nokAddress', ''), 200)
+        && s(d.get('nokPhone', ''), 20)
+        && (d.get('email', '') == '' || (isEmail(d.email) && d.email == d.email.lower()))
+        && (d.get('rank', '') == '' || isRank(d.rank))
+        && n(d.dobDay, 1, 31) && d.dobDay != null && n(d.dobMonth, 1, 12) && d.dobMonth != null
+        && n(d.get('dobYear', null), 1900, 2100) && n(d.get('anointDay', null), 1, 31)
+        && n(d.get('anointMonth', null), 1, 12) && n(d.get('anointYear', null), 1900, 2100)
+        && (d.get('photo', '') == '' || (s(d.photo, 110000) && d.photo.matches('^data:image/(jpeg|png|webp);base64,.*')))
+        && d.get('important', false) is bool
         && d.consentGiven == true && isDate(d.consentDate);
     }
+    function validMember(d, id) {
+      return d.keys().hasOnly(personKeys().concat(['ordainedAs']))
+        && validPerson(d, id) && d.status in ['Active', 'Ordained']
+        && (d.status == 'Active' || str(d.get('ordainedAs', ''), 20));
+    }
+    function validClergy(d, id) {
+      return d.keys().hasOnly(personKeys().concat(['formerMemberNo', 'joinedDate', 'leftDate', 'leaveReason',
+          'transferredTo', 'letterId', 'serviceRecord']))
+        && validPerson(d, id) && d.status in ['Active', 'Former']
+        // Clergy must carry an email so the clergy-not-admin rule can be enforced.
+        && d.email != '' && !isAdminEmail(d.email)
+        && getAfter(docAt('clergyIndex/' + d.email)).data.parishId != null
+        && s(d.get('formerMemberNo', ''), 20) && s(d.get('transferredTo', ''), 120) && s(d.get('letterId', ''), 60)
+        && s(d.get('joinedDate', ''), 10) && s(d.get('leftDate', ''), 10)
+        && d.get('leaveReason', '') in ['', 'Transfer', 'Retired', 'Called to glory', 'Other']
+        && d.get('serviceRecord', []) is list && d.get('serviceRecord', []).size() <= 40
+        && (d.status == 'Active' || isDate(d.get('leftDate', '')));
+    }
+    // Number, identity and consent date never change after creation.
+    function keepsIdentity() {
+      return request.resource.data.memberNo == resource.data.memberNo
+        && request.resource.data.consentDate == resource.data.consentDate;
+    }
+
     function validAttendance(d) {
       return d.keys().hasOnly(['serviceDate', 'serviceType', 'headcount'])
         && isDate(d.serviceDate) && str(d.serviceType, 60)
@@ -44,53 +116,167 @@ service cloud.firestore {
         && isDate(d.transactionDate) && str(d.contributorName, 120) && str(d.contributionType, 60)
         && (d.amount is int || d.amount is float) && d.amount > 0 && d.amount <= 100000000;
     }
+    function nonNegInt(d, k) { return d.get(k, 0) is int && d.get(k, 0) >= 0; }
     function validStats(d) {
-      return d.keys().hasOnly(['memberCount', 'attendanceTotal', 'serviceCount', 'financeTotal', 'financeCount', 'updatedAt'])
-        && d.get('memberCount', 0) is int && d.get('memberCount', 0) >= 0
-        && d.get('attendanceTotal', 0) is int && d.get('attendanceTotal', 0) >= 0
-        && d.get('serviceCount', 0) is int && d.get('serviceCount', 0) >= 0
-        && d.get('financeCount', 0) is int && d.get('financeCount', 0) >= 0
+      return d.keys().hasOnly(['memberCount', 'clergyCount', 'formerClergyCount', 'attendanceTotal', 'serviceCount',
+          'financeTotal', 'financeCount', 'updatedAt'])
+        && nonNegInt(d, 'memberCount') && nonNegInt(d, 'clergyCount') && nonNegInt(d, 'formerClergyCount')
+        && nonNegInt(d, 'attendanceTotal') && nonNegInt(d, 'serviceCount') && nonNegInt(d, 'financeCount')
         && (d.get('financeTotal', 0) is int || d.get('financeTotal', 0) is float) && d.get('financeTotal', 0) >= 0;
     }
-
-    // Role records: users read their own; only super_admin assigns roles.
-    match /users/{uid} {
-      allow read: if signedIn() && (request.auth.uid == uid || isSuper());
-      allow write: if isSuper();
+    function parishFieldKeys() { return ['name', 'address', 'mapsUrl', 'city', 'state', 'country', 'continent', 'logo', 'updatedAt']; }
+    function validParish(d) {
+      return d.keys().hasOnly(parishFieldKeys().concat(['status', 'createdAt']))
+        && str(d.name, 120) && d.status in ['Approved', 'Suspended']
+        && optStr(d, 'address', 200) && optStr(d, 'city', 80) && optStr(d, 'state', 80) && optStr(d, 'country', 80)
+        && (!('continent' in d) || d.continent in ['', 'Africa', 'Europe', 'Asia', 'North America', 'South America', 'Oceania', 'Antarctica'])
+        && (!('mapsUrl' in d) || d.mapsUrl == '' || (d.mapsUrl is string && d.mapsUrl.size() <= 300 && d.mapsUrl.matches('^https://.*')))
+        && optImage(d, 'logo', 110000);
     }
 
-    // New-parish licence requests: a signed-in user files one for themselves, Pending only.
-    match /parishRequests/{uid} {
-      allow create: if signedIn() && request.auth.uid == uid
-        && request.resource.data.status == 'Pending'
-        && request.resource.data.keys().hasOnly(['parishName', 'email', 'status', 'createdAt']);
-      allow read: if signedIn() && (request.auth.uid == uid || isSuper() || isHQ());
+    // ---- Accounts ----
+    // Users read their own profile. super_admin assigns roles but can never make a clergy an admin.
+    // An invited admin may create their OWN parish_admin profile by claiming a valid invite in the same write.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSuper());
+      allow create: if (isSuper() && (request.resource.data.role != 'parish_admin'
+              || (isEmail(request.resource.data.get('email', '')) && !isClergyEmail(request.resource.data.email))))
+        || (signedIn() && request.auth.uid == uid && claimsInvite(request.resource.data));
+      allow update: if isSuper() && (request.resource.data.role != 'parish_admin'
+              || (isEmail(request.resource.data.get('email', '')) && !isClergyEmail(request.resource.data.email)));
+      allow delete: if isSuper();
+    }
+    function claimsInvite(d) {
+      return d.keys().hasOnly(['role', 'parishId', 'email', 'inviteCode']) && d.role == 'parish_admin'
+        && d.email == myEmail() && myEmail() != '' && !isClergyEmail(myEmail())
+        && inviteValidFor(d.inviteCode, d.parishId, myEmail())
+        && getAfter(docAt('invites/' + d.inviteCode)).data.usedBy == request.auth.uid
+        && getAfter(docAt('adminEmails/' + myEmail())).data.uid == request.auth.uid;
+    }
+    function inviteValidFor(code, parishId, email) {
+      return code is string && exists(docAt('invites/' + code))
+        && get(docAt('invites/' + code)).data.email == email
+        && get(docAt('invites/' + code)).data.parishId == parishId
+        && get(docAt('invites/' + code)).data.get('usedBy', null) == null;
+    }
+
+    // Invites: id is a random secret code. Only super_admin creates or lists them.
+    // The invited person can read their own (they must know the code) and mark it used, once.
+    match /invites/{code} {
+      allow create: if isSuper() && code.size() >= 16
+        && request.resource.data.keys().hasOnly(['email', 'parishId', 'role', 'createdAt', 'usedBy'])
+        && isEmail(request.resource.data.email) && request.resource.data.email == request.resource.data.email.lower()
+        && request.resource.data.role == 'parish_admin' && request.resource.data.get('usedBy', null) == null
+        && existsAfter(docAt('parishes/' + request.resource.data.parishId))
+        && !isClergyEmail(request.resource.data.email);
+      allow get: if isSuper() || (signedIn() && resource.data.email == myEmail());
+      allow list, delete: if isSuper();
+      allow update: if signedIn() && resource.data.email == myEmail() && resource.data.get('usedBy', null) == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedBy'])
+        && request.resource.data.usedBy == request.auth.uid
+        && existsAfter(docAt('users/' + request.auth.uid));
+    }
+    // One doc per admin email (lower case): lets the clergy rules refuse admin emails.
+    match /adminEmails/{email} {
+      allow read: if isSuper();
+      allow create: if (isSuper() || (signedIn() && email == myEmail() && request.resource.data.uid == request.auth.uid
+              && existsAfter(docAt('users/' + request.auth.uid))))
+        && request.resource.data.keys().hasOnly(['uid']) && !isClergyEmail(email);
       allow update, delete: if isSuper();
+    }
+    // One doc per clergy email (lower case), written with the clergy record.
+    match /clergyIndex/{email} {
+      allow read: if isSuper();
+      allow create, update: if request.resource.data.keys().hasOnly(['parishId', 'clergyId'])
+        && isParishAdminOf(request.resource.data.parishId)
+        && getAfter(docAt('parishes/' + request.resource.data.parishId + '/clergy/' + request.resource.data.clergyId)).data.email == email;
+      allow delete: if false;
+    }
+
+    // Old self-registration path is closed. Super admin may read / clean up old requests.
+    match /parishRequests/{uid} {
+      allow read, delete: if isSuper();
     }
 
     match /parishes/{parishId} {
       allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
-      allow write: if isSuper();
+      allow create: if isSuper() && validParish(request.resource.data);
+      allow update: if (isSuper() && validParish(request.resource.data))
+        || (isParishAdminOf(parishId) && validParish(request.resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(parishFieldKeys()));
+      allow delete: if isSuper();
 
-      // Personal data: parish admin of this parish and super_admin only. Never HQ.
+      match /meta/counters {
+        allow read: if isParishAdminOf(parishId) || isSuper();
+        allow create: if isSuper() && request.resource.data == { 'clg': 0, 'mbr': 0 };
+        // Exactly one counter moves up by exactly 1, and the record with that number is created in the same write.
+        allow update: if isParishAdminOf(parishId) && request.resource.data.keys().hasOnly(['clg', 'mbr'])
+          && ((request.resource.data.clg == resource.data.clg + 1 && request.resource.data.mbr == resource.data.mbr
+                && existsAfter(docAt('parishes/' + parishId + '/clergy/CCC-CLG-' + pad3(request.resource.data.clg)))
+                && !exists(docAt('parishes/' + parishId + '/clergy/CCC-CLG-' + pad3(request.resource.data.clg))))
+           || (request.resource.data.mbr == resource.data.mbr + 1 && request.resource.data.clg == resource.data.clg
+                && existsAfter(docAt('parishes/' + parishId + '/members/CCC-MBR-' + pad3(request.resource.data.mbr)))
+                && !exists(docAt('parishes/' + parishId + '/members/CCC-MBR-' + pad3(request.resource.data.mbr)))));
+      }
+
+      // Church members: private to the parish; super_admin reads only those flagged important.
       match /members/{memberId} {
-        allow read, delete: if canWriteParish(parishId);
-        allow create, update: if canWriteParish(parishId) && validMember(request.resource.data);
+        allow read: if isParishAdminOf(parishId) || (isSuper() && resource.data.important == true);
+        allow create: if isParishAdminOf(parishId) && validMember(request.resource.data, memberId)
+          && request.resource.data.status == 'Active'
+          && takesNextNumber(parishId, 'mbr', 'CCC-MBR-', memberId);
+        allow update: if isParishAdminOf(parishId) && validMember(request.resource.data, memberId) && keepsIdentity()
+          && (resource.data.status == 'Active' || request.resource.data.status == 'Ordained');
+        allow delete: if false; // numbers are never reused, so records are never deleted
+      }
+      // Clergy register: parish admin + super_admin.
+      match /clergy/{clergyId} {
+        allow read: if isParishAdminOf(parishId) || isSuper();
+        allow create: if isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId)
+          && request.resource.data.status == 'Active'
+          && takesNextNumber(parishId, 'clg', 'CCC-CLG-', clergyId);
+        allow update: if isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId) && keepsIdentity();
+        allow delete: if false;
+      }
+      // Transfer letters (photo of the letter), kept apart from the clergy doc.
+      match /letters/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId)
+          && request.resource.data.keys().hasOnly(['clergyId', 'image', 'createdAt'])
+          && str(request.resource.data.clergyId, 20) && optImage(request.resource.data, 'image', 400000);
+        allow update, delete: if false;
+      }
+      match /families/{id} {
+        allow read, delete: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId)
+          && request.resource.data.keys().hasOnly(['name', 'memberNos', 'roles', 'updatedAt'])
+          && str(request.resource.data.name, 120)
+          && request.resource.data.memberNos is list && request.resource.data.memberNos.size() <= 30
+          && request.resource.data.roles is map;
       }
       match /attendance/{id} {
-        allow read, delete: if canWriteParish(parishId);
-        allow create, update: if canWriteParish(parishId) && validAttendance(request.resource.data);
+        allow read, delete: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validAttendance(request.resource.data);
       }
       match /finances/{id} {
-        allow read, delete: if canWriteParish(parishId);
-        allow create, update: if canWriteParish(parishId) && validFinance(request.resource.data);
+        allow read, delete: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validFinance(request.resource.data);
       }
     }
 
-    // Per-parish totals only (no names). HQ reads; the parish's own writes keep it current.
+    // Collection-group reads for the super_admin world view.
+    match /{p=**}/clergy/{id} {
+      allow read: if isSuper();
+    }
+    match /{p=**}/members/{id} {
+      allow read: if isSuper() && resource.data.important == true;
+    }
+
+    // Per-parish totals only (no names). HQ + super read; the parish's own writes keep it current.
     match /parishStats/{parishId} {
       allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
-      allow create, update: if canWriteParish(parishId) && validStats(request.resource.data);
+      allow create: if isSuper() && validStats(request.resource.data);
+      allow update: if (isSuper() || isParishAdminOf(parishId)) && validStats(request.resource.data);
       allow delete: if isSuper();
     }
 
