@@ -6,23 +6,25 @@ log in, keep members, attendance, finances, and read HQ circulars.
 Built on **Firebase** (Auth + Firestore), same as the EduBloom apps.
 
 ## Who can do what
-Roles are stored in Firestore `users/{uid}` as `{ role, parishId }`:
+Roles are stored in Firestore `users/{uid}` as `{ role, parishId, email }`:
 - **parish_admin** - reads/writes only their own parish (and only while it is `Approved`).
-- **hq** - reads parish names and per-parish totals (`parishStats`) only, never member,
-  attendance or giving records (NDPA); publishes circulars.
-- **super_admin** - everything, including approving parishes and giving roles.
-- Not logged in - nothing.
+- **super_admin** - creates parishes and admin invites; sees per-parish totals, the clergy
+  register, and members a parish flags **important**. Never ordinary members, attendance or giving.
+- **hq** - per-parish totals only; publishes circulars.
+- Not signed in - nothing. **Clergy can never be app admins** (enforced by the rules).
 
-These rules are enforced by the server in `firestore/firestore.rules`, not by the browser.
-Passwords are held by Firebase Auth; the app never stores or shows them.
+No self-registration: the Super Admin creates a parish and gets a one-time **invite code**.
+The parish admin opens the portal, taps **First time? I have an invite code**, and signs up
+with the invited email + code.
 
 ## Data
-- `parishes/{parishId}` - `{ name, status: Pending | Approved | Suspended }`
-- `parishes/{parishId}/members` - fullName, gender, phone, address, dateJoined, rank,
-  household, consentGiven, consentDate
-- `parishes/{parishId}/attendance`, `parishes/{parishId}/finances`
-- `circulars` - HQ bulletins
-- `parishRequests/{uid}` - new parish sign-ups waiting for approval
+- `parishes/{p}` - name, logo, address, mapsUrl, city, state, country, continent, status
+- `parishes/{p}/members/CCC-MBR-001`, `parishes/{p}/clergy/CCC-CLG-001` - the member form
+  (photo is a ~60KB JPEG stored in the record; Firebase Storage is not enabled)
+- `parishes/{p}/meta/counters` - `{ clg, mbr }`; numbers are allocated in a transaction and never reused
+- `parishes/{p}/families`, `parishes/{p}/letters` (transfer letters), `attendance`, `finances`
+- `parishStats/{p}` - totals only; `invites/{code}`, `adminEmails/{email}`, `clergyIndex/{email}`
+- `firestore.indexes.json` - enables the Super Admin "important members" query
 
 ## Set up Firebase later (on your phone)
 1. Open **Chrome** and go to `console.firebase.google.com`. Sign in.
@@ -37,7 +39,7 @@ Passwords are held by Firebase Auth; the app never stores or shows them.
 8. Make yourself super admin: **Authentication > Add user** (your email + password). Copy your
    **User UID**. In **Firestore > Start collection** `users`, document ID = that UID, field
    `role` (string) = `super_admin`.
-9. To approve a parish: log in as super admin, tap **Parish Approvals**, tap **Approve**.
+9. To add a parish: sign in as super admin, tap **Parishes**, fill the form, send the invite code to the admin.
 
 ## NDPA 2023 (Nigeria Data Protection Act)
 Member records are personal data. **Get the member's consent before entering their details.**

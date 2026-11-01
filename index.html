@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CELESTIAL CHURCH OF CHRIST - PARISH PORTAL</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CELESTIAL CHURCH OF CHRIST</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome CDN -->
@@ -12,162 +12,200 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-    <!-- Link to external styles -->
     <link rel="stylesheet" href="styles.css">
-    <!-- Link to external app logic -->
     <script src="app.js" defer></script>
 </head>
-<body class="bg-gray-50 font-sans text-gray-800 transition-colors duration-200">
+<body class="bg-gray-50 font-sans text-gray-800">
 
-    <!-- LANDING / LOGIN PAGE -->
-    <div id="landingPage" class="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 text-white p-6 overflow-y-auto">
+    <!-- GET STARTED: parish sign-in (no self-registration; Super Admin sends invites) -->
+    <div id="landingPage" class="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 text-white p-4 overflow-y-auto">
         <div class="max-w-md mx-auto my-auto w-full bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 shadow-2xl">
             <div class="text-center mb-6">
-                <div class="w-16 h-16 mx-auto mb-4 bg-white rounded-full flex items-center justify-center shadow-lg p-1 text-blue-900 font-extrabold text-xs">
-                    CCC
-                </div>
+                <div class="w-16 h-16 mx-auto mb-4 bg-white rounded-full flex items-center justify-center shadow-lg p-1 text-blue-900 font-extrabold text-xs">CCC</div>
                 <h1 class="text-lg font-black uppercase tracking-wider text-yellow-400">CELESTIAL CHURCH OF CHRIST</h1>
-                <p class="text-xs tracking-widest text-gray-300 font-semibold uppercase">Parish Administration Portal</p>
+                <p class="text-xs tracking-widest text-gray-300 font-semibold uppercase">Get Started &middot; Parish Sign-in</p>
             </div>
-
-            <!-- Access Gate Structure -->
             <div class="space-y-4">
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Admin Email</label>
-                    <input type="email" id="loginEmail" autocomplete="username" class="w-full bg-white/20 text-white px-4 py-3 rounded-lg focus:outline-none border border-white/10 placeholder-gray-400 text-sm" placeholder="you@example.com">
+                    <label for="loginEmail" class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Admin Email</label>
+                    <input type="email" id="loginEmail" autocomplete="username" class="w-full bg-white/20 text-white px-4 py-3 rounded-lg border border-white/10 placeholder-gray-400 text-sm" placeholder="you@example.com">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Password</label>
-                    <input type="password" id="loginPassword" autocomplete="current-password" class="w-full bg-white/20 text-white px-4 py-3 rounded-lg focus:outline-none border border-white/10 placeholder-gray-400 text-sm" placeholder="Enter password">
+                    <label for="loginPassword" class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Password</label>
+                    <input type="password" id="loginPassword" autocomplete="current-password" class="w-full bg-white/20 text-white px-4 py-3 rounded-lg border border-white/10 placeholder-gray-400 text-sm" placeholder="Enter password">
                 </div>
-                <button id="accessBtn" onclick="attemptLogin()" class="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-blue-950 font-bold rounded-lg transition uppercase tracking-wider text-xs shadow-md">
-                    Access Database
-                </button>
-                <button onclick="toggleRegister()" class="w-full text-[11px] text-gray-300 underline">+ Register New Parish</button>
+                <button id="accessBtn" onclick="attemptLogin()" class="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-blue-950 font-bold rounded-lg uppercase tracking-wider text-xs shadow-md">Sign in</button>
+                <button id="inviteToggle" onclick="toggleInvite()" class="w-full text-[11px] text-gray-300 underline">First time? I have an invite code</button>
 
-                <!-- Registration Fields -->
-                <div id="parishRegFields" class="hidden space-y-3 bg-black/20 p-3.5 rounded-lg border border-white/5">
-                    <div>
-                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">New Parish Name</label>
-                        <input type="text" id="regName" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="e.g. Grace Parish, Lagos">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">Admin Email</label>
-                        <input type="email" id="regEmail" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="you@example.com">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold uppercase text-gray-300 mb-1">Set Password (min 8)</label>
-                        <input type="password" id="regPassword" autocomplete="new-password" class="w-full bg-white/10 text-white p-2 rounded text-xs border border-white/10" placeholder="Set password">
-                    </div>
-                    <button onclick="createNewParish()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold uppercase tracking-wider transition">
-                        Submit License Request
-                    </button>
+                <div id="inviteFields" class="hidden space-y-3 bg-black/20 p-3.5 rounded-lg border border-white/5">
+                    <p class="text-[11px] text-gray-300">Your Super Admin created your parish and sent you an invite code. Use the same email it was sent to.</p>
+                    <input type="email" id="invEmail" class="w-full bg-white/10 text-white p-2.5 rounded text-xs border border-white/10" placeholder="Invited email">
+                    <input type="text" id="invCode" class="w-full bg-white/10 text-white p-2.5 rounded text-xs border border-white/10 font-mono" placeholder="Invite code">
+                    <input type="password" id="invPassword" autocomplete="new-password" class="w-full bg-white/10 text-white p-2.5 rounded text-xs border border-white/10" placeholder="Choose a password (min 8)">
+                    <button id="claimBtn" onclick="claimInvite()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold uppercase tracking-wider">Activate my parish account</button>
                 </div>
             </div>
         </div>
         <div class="text-center text-[10px] text-gray-400 mt-4 leading-relaxed">
-            <p>Licensed for Celestial Church of Christ Parishes Worldwide</p>
-            <p class="text-gray-500 font-semibold">© 2026 Celestial Church of Christ. Powered by Aarinat Company Limited</p>
+            <p>CELESTIAL CHURCH OF CHRIST WORLD-WIDE &middot; Parish Portal</p>
+            <p class="text-gray-500 font-semibold">&copy; 2026 Celestial Church of Christ. Powered by Aarinat Company Limited</p>
         </div>
     </div>
 
-    <!-- MAIN APP WRAPPER -->
+    <!-- MAIN APP -->
     <div id="mainApp" class="hidden min-h-screen flex flex-col md:flex-row">
-        
-        <!-- SIDEBAR NAVIGATION -->
-        <aside class="w-full md:w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col justify-between border-r border-slate-800 shadow-xl">
-            <div>
-                <div class="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-3">
-                    <div class="w-9 h-9 bg-white rounded-full flex items-center justify-center text-blue-900 font-extrabold text-[10px]">CCC</div>
-                    <div>
-                        <h2 class="text-xs font-black text-yellow-400 uppercase leading-none">PARISH DATA</h2>
-                        <p id="dashParishName" class="text-[10px] text-gray-400 italic truncate max-w-[140px] mt-1">Parish Name</p>
-                        <select id="parishPicker" onchange="pickParish(this.value)" class="hidden mt-1 text-[10px] text-slate-800 rounded max-w-[160px]"></select>
-                    </div>
-                </div>
-
-                <nav class="p-2 space-y-1 text-xs">
-                    <button onclick="showSection('dashboard')" id="nav-dashboard" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-chart-line text-blue-400 w-4"></i> Dashboard</button>
-                    <button onclick="showSection('members')" id="nav-members" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-users text-emerald-400 w-4"></i> Members Directory</button>
-                    <button onclick="showSection('attendance')" id="nav-attendance" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance Ledger</button>
-                    <button onclick="showSection('finance')" id="nav-finance" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Financial Ledger</button>
-                    <button onclick="showSection('circulars')" id="nav-circulars" class="nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-bullhorn text-indigo-400 w-4"></i> HQ Circulars</button>
-                    <button onclick="showSection('approvals')" id="nav-approvals" class="hidden nav-btn w-full text-left px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-circle-check text-emerald-400 w-4"></i> Parish Approvals</button>
-                </nav>
-            </div>
-
-            <div class="p-3 border-t border-slate-800 bg-slate-950 space-y-2">
-                <button onclick="logout()" class="w-full py-2 bg-rose-600/25 hover:bg-rose-600/50 hover:text-white border border-rose-500/20 rounded text-xs font-semibold flex justify-center items-center gap-1.5 transition">
-                    <i class="fa-solid fa-arrow-right-from-bracket"></i> Lock Session
-                </button>
-                <div class="text-center text-[8px] text-slate-500">© 2026 CCC Parish System • Aarinat</div>
-            </div>
+        <aside class="w-full md:w-60 bg-slate-900 text-white flex-shrink-0 md:min-h-screen">
+            <nav id="mainNav" class="p-2 flex md:flex-col gap-1 text-xs overflow-x-auto whitespace-nowrap">
+                <button onclick="showSection('dashboard')" id="nav-dashboard" class="nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-chart-line text-blue-400 w-4"></i> Dashboard</button>
+                <button onclick="showSection('members')" id="nav-members" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-users text-emerald-400 w-4"></i> Church Members</button>
+                <button onclick="showSection('clergy')" id="nav-clergy" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy</button>
+                <button onclick="showSection('former')" id="nav-former" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-slate-300 w-4"></i> Former Clergy</button>
+                <button onclick="showSection('families')" id="nav-families" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-roof text-pink-300 w-4"></i> Families</button>
+                <button onclick="showSection('attendance')" id="nav-attendance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance</button>
+                <button onclick="showSection('finance')" id="nav-finance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Finance</button>
+                <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
+                <button onclick="showSection('parishes')" id="nav-parishes" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-earth-africa text-emerald-400 w-4"></i> Parishes</button>
+                <button onclick="showSection('register')" id="nav-register" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy Register</button>
+                <button onclick="showSection('important')" id="nav-important" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-star text-amber-300 w-4"></i> Important Members</button>
+                <button onclick="showSection('circulars')" id="nav-circulars" class="nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-bullhorn text-indigo-400 w-4"></i> Circulars</button>
+                <button onclick="logout()" class="px-3 py-2.5 rounded text-rose-300 hover:bg-rose-900/40 flex items-center gap-2"><i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Sign out</button>
+            </nav>
         </aside>
 
-        <!-- MAIN WORKSPACE -->
-        <main class="flex-1 flex flex-col overflow-hidden">
-            <div class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-                
-                <!-- Tab 1: DASHBOARD -->
-                <section id="section-dashboard" class="space-y-6">
-                    <div class="bg-gradient-to-r from-blue-900 to-indigo-800 text-white p-6 rounded-xl shadow-md">
-                        <h2 class="text-xl font-bold">Shalom Parish Administrator!</h2>
-                        <p class="text-xs text-blue-200 mt-1">Manage, capture, and update your local registries cleanly.</p>
+        <main class="flex-1 flex flex-col min-w-0">
+            <!-- Branding bar: church title, parish logo + name, global search -->
+            <header class="bg-white border-b shadow-sm p-3 space-y-2 sticky top-0 z-30">
+                <div class="flex items-center gap-3">
+                    <img id="parishLogo" alt="Parish logo" class="hidden w-12 h-12 rounded-full object-cover border">
+                    <div id="logoFallback" class="w-12 h-12 rounded-full bg-blue-900 text-yellow-300 flex items-center justify-center font-extrabold text-xs">CCC</div>
+                    <div class="min-w-0">
+                        <h1 class="text-sm font-black text-blue-950 uppercase tracking-wide leading-tight">CELESTIAL CHURCH OF CHRIST</h1>
+                        <p id="dashParishName" class="text-xs text-gray-500 truncate">Parish</p>
                     </div>
+                </div>
+                <div id="globalSearchBox" class="parish-only relative">
+                    <input type="search" id="globalSearch" oninput="globalSearch()" class="w-full border p-2.5 rounded-lg text-sm bg-gray-50" placeholder="Search name, phone or number (CCC-MBR-001)">
+                    <div id="globalResults" class="hidden absolute left-0 right-0 mt-1 bg-white border rounded-lg shadow-xl max-h-80 overflow-y-auto text-xs divide-y z-40"></div>
+                </div>
+            </header>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
-                            <div class="p-2.5 bg-blue-100 text-blue-600 rounded-lg"><i class="fa-solid fa-users text-lg"></i></div>
-                            <div>
-                                <p class="text-gray-500 uppercase tracking-wider font-semibold text-[10px]">Total Congregation</p>
-                                <p id="metricMembers" class="text-xl font-bold">0</p>
-                            </div>
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+
+                <section id="section-dashboard" class="space-y-4">
+                    <div class="bg-gradient-to-r from-blue-900 to-indigo-800 text-white p-5 rounded-xl shadow-md">
+                        <h2 id="welcomeTitle" class="text-lg font-bold">Shalom!</h2>
+                        <p id="welcomeSub" class="text-xs text-blue-200 mt-1">Your parish at a glance.</p>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div class="bg-white p-3 rounded-xl border shadow-sm text-center">
+                            <p class="text-gray-500 uppercase font-semibold text-[10px]">Total</p>
+                            <p id="metricTotal" class="text-2xl font-bold text-blue-900">0</p>
                         </div>
-                        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
-                            <div class="p-2.5 bg-yellow-100 text-yellow-600 rounded-lg"><i class="fa-solid fa-calendar-check text-lg"></i></div>
-                            <div>
-                                <p class="text-gray-500 uppercase tracking-wider font-semibold text-[10px]">Services Logged</p>
-                                <p id="metricServices" class="text-xl font-bold">0</p>
-                            </div>
+                        <div class="bg-white p-3 rounded-xl border shadow-sm text-center">
+                            <p class="text-gray-500 uppercase font-semibold text-[10px]">Clergy</p>
+                            <p id="metricClergy" class="text-2xl font-bold text-amber-600">0</p>
                         </div>
-                        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
-                            <div class="p-2.5 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-solid fa-naira-sign text-lg"></i></div>
-                            <div>
-                                <p class="text-gray-500 uppercase tracking-wider font-semibold text-[10px]">Total Giving</p>
-                                <p id="metricGiving" class="text-xl font-bold">0</p>
-                            </div>
+                        <div class="bg-white p-3 rounded-xl border shadow-sm text-center">
+                            <p class="text-gray-500 uppercase font-semibold text-[10px]">Members</p>
+                            <p id="metricMembers" class="text-2xl font-bold text-emerald-600">0</p>
                         </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Services logged</p><p id="metricServices" class="text-lg font-bold">0</p></div>
+                        <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Total giving</p><p id="metricGiving" class="text-lg font-bold">0</p></div>
+                    </div>
+                    <div id="worldTable" class="hidden bg-white border rounded-xl shadow-sm overflow-x-auto"></div>
+                </section>
+
+                <!-- CHURCH MEMBERS -->
+                <section id="section-members" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Church Members</h2><p class="text-xs text-gray-500">Numbers CCC-MBR-001 onwards. Tap a member to open.</p></div>
+                        <button id="addMemberBtn" onclick="openPersonForm('members')" class="bg-blue-600 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Add Member</button>
+                    </div>
+                    <input type="search" id="memberSearch" oninput="searchMembers()" class="w-full border p-2.5 rounded text-sm" placeholder="Filter members by name or phone">
+                    <div id="membersTable" class="space-y-2"></div>
+                    <button id="more-members" onclick="loadMembers(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
+
+                <!-- CLERGY -->
+                <section id="section-clergy" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Clergy</h2><p class="text-xs text-gray-500">Numbers CCC-CLG-001 onwards. Clergy cannot be app admins.</p></div>
+                        <button id="addClergyBtn" onclick="openPersonForm('clergy')" class="bg-amber-600 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Add Clergy</button>
+                    </div>
+                    <div id="clergyTable" class="space-y-2"></div>
+                    <button id="more-clergy" onclick="loadClergy(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
+
+                <!-- FORMER CLERGY -->
+                <section id="section-former" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Former Clergy</h2><p class="text-xs text-gray-500">Transferred, retired or called to glory. Numbers are kept, never reused.</p></div>
+                    <div id="formerTable" class="space-y-2"></div>
+                    <button id="more-former" onclick="loadFormer(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
+
+                <!-- FAMILIES -->
+                <section id="section-families" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Families</h2><p class="text-xs text-gray-500">Spouses and children together. Tap a person to see them alone.</p></div>
+                        <button id="addFamilyBtn" onclick="openFamilyForm()" class="bg-pink-600 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Link Family</button>
+                    </div>
+                    <div id="familiesList" class="space-y-3"></div>
+                </section>
+
+                <!-- PARISH SETTINGS -->
+                <section id="section-settings" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Parish Settings</h2><p class="text-xs text-gray-500">Name, logo and location of your parish.</p></div>
+                    <div class="bg-white border rounded-xl p-4 space-y-3 text-xs">
+                        <div class="flex items-center gap-3">
+                            <img id="settingsLogo" alt="" class="hidden w-16 h-16 rounded-full object-cover border">
+                            <label class="flex-1">Parish logo<input type="file" id="s_logo" accept="image/*" onchange="pickLogo(this)" class="block w-full text-xs mt-1"></label>
+                        </div>
+                        <label class="block">Parish name *<input id="s_name" class="w-full border p-2.5 rounded mt-1"></label>
+                        <label class="block">Address<input id="s_address" class="w-full border p-2.5 rounded mt-1"></label>
+                        <label class="block">Google Maps link (open Maps, tap Share, copy link)<input id="s_maps" class="w-full border p-2.5 rounded mt-1" placeholder="https://maps.app.goo.gl/..."></label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label>City<input id="s_city" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>State<input id="s_state" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Country<input id="s_country" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Continent<select id="s_continent" class="continent-select w-full border p-2.5 rounded mt-1 bg-white"></select></label>
+                        </div>
+                        <a id="s_mapsOpen" target="_blank" rel="noopener" class="hidden text-blue-700 underline">Open pin in Google Maps</a>
+                        <button id="saveParishBtn" onclick="saveParishSettings()" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded">Save parish details</button>
                     </div>
                 </section>
 
-                <!-- Tab 2: MEMBERS & CLERGY DIRECTORY -->
-                <section id="section-members" class="space-y-4 hidden">
-                    <div class="flex justify-between items-center pb-2 border-b">
-                        <div>
-                            <h2 class="text-lg font-bold text-gray-800">Members & Clergy Registry</h2>
-                            <p class="text-xs text-gray-500">Complete church demographic ledger.</p>
+                <!-- SUPER ADMIN: PARISHES + INVITES -->
+                <section id="section-parishes" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Parishes</h2><p class="text-xs text-gray-500">Create a parish and invite its admin. There is no self-registration.</p></div>
+                    <div class="bg-white border rounded-xl p-4 space-y-2 text-xs">
+                        <p class="font-bold">New parish</p>
+                        <input id="np_name" class="w-full border p-2.5 rounded" placeholder="Parish name *">
+                        <input id="np_address" class="w-full border p-2.5 rounded" placeholder="Address">
+                        <input id="np_maps" class="w-full border p-2.5 rounded" placeholder="Google Maps link (https://...)">
+                        <div class="grid grid-cols-2 gap-2">
+                            <input id="np_city" class="border p-2.5 rounded" placeholder="City">
+                            <input id="np_state" class="border p-2.5 rounded" placeholder="State">
+                            <input id="np_country" class="border p-2.5 rounded" placeholder="Country">
+                            <select id="np_continent" class="continent-select border p-2.5 rounded bg-white"></select>
                         </div>
-                        <button onclick="openAddModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-xs font-semibold shadow transition">
-                            <i class="fa-solid fa-plus mr-1"></i> Register Member
-                        </button>
+                        <input id="np_email" type="email" class="w-full border p-2.5 rounded" placeholder="Parish admin email * (must not be clergy)">
+                        <button id="createParishBtn" onclick="createParish()" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded">Create parish + invite</button>
+                        <div id="inviteResult" class="hidden bg-emerald-50 border border-emerald-300 rounded p-3"></div>
                     </div>
-                    <input type="search" id="memberSearch" oninput="searchMembers()" class="w-full border p-2.5 rounded text-sm" placeholder="Search by name or phone">
-                    <p class="text-[10px] text-gray-500">Tap a member to edit.</p>
-                    <div class="bg-white border rounded-xl overflow-x-auto shadow-sm">
-                        <table class="w-full text-left text-xs border-collapse">
-                            <thead class="bg-gray-100 font-bold uppercase text-gray-600 border-b">
-                                <tr>
-                                    <th class="p-3">Name</th>
-                                    <th class="p-3">Gender</th>
-                                    <th class="p-3">Household</th>
-                                    <th class="p-3">Rank</th>
-                                    <th class="p-3">Phone</th>
-                                </tr>
-                            </thead>
-                            <tbody id="membersTable" class="divide-y"></tbody>
-                        </table>
-                    </div>
-                    <button id="more-members" onclick="loadMembers(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                    <div id="parishList" class="space-y-2"></div>
+                </section>
+
+                <section id="section-register" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Clergy Register (all parishes)</h2></div>
+                    <input type="search" id="registerFilter" oninput="renderRegister()" class="w-full border p-2.5 rounded text-sm" placeholder="Filter by name, number or parish">
+                    <div id="registerList" class="space-y-2"></div>
+                </section>
+
+                <section id="section-important" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Important Members</h2><p class="text-xs text-gray-500">Only members a parish flags as important (e.g. department heads).</p></div>
+                    <div id="importantList" class="space-y-2"></div>
                 </section>
 
                 <!-- Tab 3: ATTENDANCE LEDGER -->
@@ -238,47 +276,105 @@
                     </div>
                 </section>
 
-                <!-- Tab 6: PARISH APPROVALS (super_admin only) -->
-                <section id="section-approvals" class="space-y-4 hidden">
-                    <div class="pb-2 border-b">
-                        <h2 class="text-lg font-bold text-gray-800">Parish Approvals</h2>
-                        <p class="text-xs text-gray-500">Approve a pilot parish. Its admin gets access straight away.</p>
-                    </div>
-                    <div id="requestsList" class="space-y-2"></div>
-                </section>
-
             </div>
         </main>
     </div>
 
-    <!-- MODAL POPUPS -->
-    <!-- 1. ADD MEMBER MODAL -->
-    <div id="addMemberModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
-            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center">
-                <span id="memberModalTitle">REGISTER NEW MEMBER</span>
-                <button onclick="closeAddModal()" class="text-white"><i class="fa-solid fa-xmark"></i></button>
+    <!-- PERSON FORM (members + clergy; same fields will be used by AI entry) -->
+    <div id="personModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span id="personModalTitle">ADD MEMBER</span>
+                <button onclick="closeModal('personModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
             </header>
-            <div class="p-5 space-y-3">
-                <input type="text" id="m_name" class="w-full border p-2.5 rounded text-xs" placeholder="Full Name *">
-                <select id="m_gender" class="w-full border p-2.5 rounded text-xs bg-white">
-                    <option value="">Gender *</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                </select>
-                <input type="text" id="m_rank" class="w-full border p-2.5 rounded text-xs" placeholder="Church Rank *">
-                <input type="text" id="m_phone" class="w-full border p-2.5 rounded text-xs" placeholder="Phone Number">
-                <input type="text" id="m_address" class="w-full border p-2.5 rounded text-xs" placeholder="Address">
-                <label class="block text-[10px] text-gray-500">Date Joined *<input type="date" id="m_joined" class="w-full border p-2.5 rounded text-xs"></label>
-                <input type="text" id="m_household" class="w-full border p-2.5 rounded text-xs" placeholder="Family / Household (e.g. Bisi family)">
-                <label class="flex items-start gap-2 text-[11px] bg-amber-50 border border-amber-200 p-2 rounded">
-                    <input type="checkbox" id="m_consent" class="mt-0.5">
-                    <span>The member has given consent for the parish to store these details (NDPA 2023). *</span>
-                </label>
+            <div class="p-4 space-y-3">
+                <div class="flex items-center gap-3">
+                    <img id="p_photoPreview" alt="" class="hidden w-20 h-24 object-cover rounded border">
+                    <label class="flex-1">Passport photo<input type="file" id="p_photo" accept="image/*" capture="user" onchange="pickPhoto(this)" class="block w-full mt-1"></label>
+                </div>
+                <label class="block">Full name *<input id="p_name" class="w-full border p-2.5 rounded mt-1"></label>
+                <div class="grid grid-cols-2 gap-2">
+                    <label>Gender *<select id="p_gender" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Male</option><option>Female</option></select></label>
+                    <label>Marital status *<select id="p_marital" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option><option>Separated</option></select></label>
+                </div>
+                <label class="block">Address<input id="p_address" class="w-full border p-2.5 rounded mt-1"></label>
+                <div class="grid grid-cols-2 gap-2">
+                    <label>Phone<input id="p_phone" type="tel" class="w-full border p-2.5 rounded mt-1"></label>
+                    <label>Email <span id="p_emailReq" class="hidden text-rose-600">* (clergy)</span><input id="p_email" type="email" class="w-full border p-2.5 rounded mt-1"></label>
+                </div>
+                <label class="block">Church rank<select id="p_rank" class="rank-select w-full border p-2.5 rounded mt-1 bg-white"></select></label>
+                <label class="block">Occupation<input id="p_occupation" class="w-full border p-2.5 rounded mt-1"></label>
+                <fieldset><legend>Date of birth * (year optional)</legend>
+                    <div class="grid grid-cols-3 gap-2 mt-1"><select id="p_dobDay" class="day-select border p-2.5 rounded bg-white"></select><select id="p_dobMonth" class="month-select border p-2.5 rounded bg-white"></select><select id="p_dobYear" class="year-select border p-2.5 rounded bg-white"></select></div>
+                </fieldset>
+                <fieldset><legend>Last anointment date</legend>
+                    <div class="grid grid-cols-3 gap-2 mt-1"><select id="p_anDay" class="day-select border p-2.5 rounded bg-white"></select><select id="p_anMonth" class="month-select border p-2.5 rounded bg-white"></select><select id="p_anYear" class="year-select border p-2.5 rounded bg-white"></select></div>
+                </fieldset>
+                <div class="bg-gray-50 border rounded p-2 space-y-2">
+                    <p class="font-semibold">Next of kin</p>
+                    <input id="p_nokName" class="w-full border p-2.5 rounded" placeholder="Name">
+                    <input id="p_nokAddress" class="w-full border p-2.5 rounded" placeholder="Address">
+                    <input id="p_nokPhone" type="tel" class="w-full border p-2.5 rounded" placeholder="Phone">
+                </div>
+                <label id="p_joinedWrap" class="hidden block">Date joined clergy<input id="p_joined" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="flex items-start gap-2"><input type="checkbox" id="p_important" class="mt-0.5"><span>Important member (e.g. department head). Super Admin can see this record.</span></label>
+                <label class="flex items-start gap-2 bg-amber-50 border border-amber-200 p-2 rounded"><input type="checkbox" id="p_consent" class="mt-0.5"><span>The person has given consent for the parish to store these details (NDPA 2023). *</span></label>
             </div>
-            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2">
-                <button onclick="closeAddModal()" class="px-4 py-2 border rounded">Cancel</button>
-                <button onclick="saveMember()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded">Save Member</button>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl">
+                <button onclick="closeModal('personModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="savePersonBtn" onclick="savePerson()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded">Save</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- RECORD VIEW -->
+    <div id="recordModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span id="recordTitle">RECORD</span>
+                <button onclick="closeModal('recordModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div id="recordBody" class="p-4 space-y-3"></div>
+            <footer id="recordActions" class="bg-gray-50 p-3 border-t flex flex-wrap justify-end gap-2 rounded-b-xl"></footer>
+        </div>
+    </div>
+
+    <!-- CLERGY TRANSFER / MOVE TO FORMER -->
+    <div id="transferModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-amber-700 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span>MOVE TO FORMER CLERGY</span>
+                <button onclick="closeModal('transferModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-4 space-y-3">
+                <label class="block">Reason *<select id="t_reason" class="w-full border p-2.5 rounded mt-1 bg-white"><option>Transfer</option><option>Retired</option><option>Called to glory</option><option>Other</option></select></label>
+                <label class="block">Date left *<input id="t_date" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="block">Transferred to (parish)<input id="t_to" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="block">Transfer letter (photo)<input id="t_letter" type="file" accept="image/*" class="block w-full mt-1"></label>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl">
+                <button onclick="closeModal('transferModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="saveTransferBtn" onclick="saveTransfer()" class="px-4 py-2 bg-amber-600 text-white font-bold rounded">Move to Former</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- FAMILY LINK -->
+    <div id="familyModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-pink-700 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span>LINK A FAMILY</span>
+                <button onclick="closeModal('familyModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-4 space-y-3">
+                <label class="block">Family name *<input id="f_name" class="w-full border p-2.5 rounded mt-1" placeholder="e.g. Adeyemi family"></label>
+                <label class="block">Husband (number)<input id="f_husband" class="w-full border p-2.5 rounded mt-1 font-mono uppercase" placeholder="CCC-MBR-001 or CCC-CLG-001"></label>
+                <label class="block">Wife (number)<input id="f_wife" class="w-full border p-2.5 rounded mt-1 font-mono uppercase" placeholder="CCC-MBR-002"></label>
+                <label class="block">Children (numbers, separated by commas)<input id="f_children" class="w-full border p-2.5 rounded mt-1 font-mono uppercase" placeholder="CCC-MBR-003, CCC-MBR-004"></label>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl">
+                <button onclick="closeModal('familyModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="saveFamilyBtn" onclick="saveFamily()" class="px-4 py-2 bg-pink-600 text-white font-bold rounded">Save family</button>
             </footer>
         </div>
     </div>
