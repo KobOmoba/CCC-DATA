@@ -1820,3 +1820,215 @@ async function moveAllPending() {
         await loadParishData();
     });
 }
+
+// ============================================================================ AI-Assisted Data Entry (Phase 5)
+// The file is read in the browser where possible (pdf.js, mammoth, SheetJS); photos and scanned PDFs go to the
+// "ccc-ai" Cloudflare Worker (Gemini). The worker needs the admin's Firebase ID token. Nothing is saved until the
+// admin ticks people + consent and taps "Save selected", which uses the normal createRecord path (rules apply).
+const AI_URL = "https://ccc-ai.aarinat-company-limited.workers.dev/extract";
+const LIBS = {
+    pdf: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
+    pdfWorker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
+    mammoth: "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js",
+    xlsx: "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+};
+const AI_FIELDS = [["fullName", "Name"], ["gender", "Gender"], ["maritalStatus", "Marital status"], ["address", "Address"],
+    ["phone", "Phone"], ["email", "Email"], ["rank", "Rank"], ["occupation", "Occupation"], ["nokName", "Next of kin"],
+    ["nokAddress", "Next of kin address"], ["nokPhone", "Next of kin phone"]];
+let ai = { people: [] };
+
+const loadedLibs = {};
+function loadLib(url) {
+    return loadedLibs[url] ||= new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = url; s.onload = resolve; s.onerror = () => reject(new Error("Could not load a reader. Check your internet and try again."));
+        document.head.appendChild(s);
+    });
+}
+const fileToBase64 = file => new Promise((resolve, reject) => {
+    const r = new FileReader(); r.onload = () => resolve(String(r.result).split(",")[1]); r.onerror = reject; r.readAsDataURL(file);
+});
+
+function openAiEntry() {
+    ai = { people: [] };
+    $("aiFile").value = ""; $("aiStatus").textContent = ""; $("aiResults").innerHTML = "";
+    $("ai_consent").checked = false; $("aiSaveBar").classList.add("hidden");
+    openModal("aiModal");
+}
+
+// Returns { text } when the browser can read it, or { file, mime } for the vision AI.
+async function readListFile(file) {
+    const name = file.name.toLowerCase(), ext = name.split(".").pop();
+    if (file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "heic"].includes(ext)) {
+        const dataUrl = await compressImage(file, 1500000, 2000); // keeps handwriting readable, under the worker limit
+        return { file: dataUrl.split(",")[1], mime: "image/jpeg", how: "photo (vision AI)" };
+    }
+    if (["txt", "csv"].includes(ext)) return { text: await file.text(), how: ext.toUpperCase() + " text" };
+    if (["xlsx", "xls"].includes(ext)) {
+        await loadLib(LIBS.xlsx);
+        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        return { text: wb.SheetNames.map(n => XLSX.utils.sheet_to_csv(wb.Sheets[n])).join("\n\n"), how: "Excel sheet" };
+    }
+    if (ext === "docx") {
+        await loadLib(LIBS.mammoth);
+        const { value } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+        // Keep table rows on one line ("cell | cell") so the AI sees each person's row together.
+        const doc = new DOMParser().parseFromString(value, "text/html");
+        doc.querySelectorAll("tr").forEach(tr => tr.replaceWith(doc.createTextNode([...tr.children].map(td => td.textContent.trim()).join(" | ") + "\n")));
+        doc.querySelectorAll("p,li,h1,h2,h3").forEach(el => el.append("\n"));
+        return { text: doc.body.textContent, how: "Word document" };
+    }
+    if (ext === "pdf" || file.type === "application/pdf") {
+        await loadLib(LIBS.pdf);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
+        const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const items = (await (await pdf.getPage(i)).getTextContent()).items;
+            let lastY = null;
+            for (const it of items) { // new line when the y position changes (table rows)
+                const y = Math.round(it.transform[5]);
+                text += lastY !== null && Math.abs(y - lastY) > 2 ? "\n" : (text && !text.endsWith("\n") ? " " : "");
+                text += it.str; lastY = y;
+            }
+            text += "\n";
+        }
+        if (text.replace(/\s/g, "").length > 30) return { text, how: "PDF text" };
+        if (file.size > 6000000) throw new Error("This scanned PDF is too big (over 6 MB). Take photos of the pages instead.");
+        return { file: await fileToBase64(file), mime: "application/pdf", how: "scanned PDF (vision AI)" };
+    }
+    throw new Error("This file type is not supported. Use PDF, DOCX, TXT, CSV, XLSX, JPG or PNG.");
+}
+
+async function callAi(payload) {
+    const token = await auth.currentUser.getIdToken();
+    const r = await fetch(AI_URL, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: JSON.stringify(payload) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ("AI service error " + r.status));
+    return d.people || [];
+}
+
+async function runAiExtract() {
+    const file = $("aiFile").files[0];
+    if (!file) return alert("Choose a file first.");
+    await busy("aiReadBtn", async () => {
+        try {
+            $("aiStatus").textContent = "Reading the file...";
+            const input = await readListFile(file);
+            $("aiStatus").textContent = `Read as ${input.how}. Asking the AI to find each person...`;
+            delete input.how;
+            const people = await callAi(input);
+            ai.people = people.map(d => ({ d, selected: true, photo: "", saved: "", error: "", dup: "", editing: false }));
+            await Promise.all(ai.people.map(findDuplicate));
+            $("aiStatus").textContent = `Found ${people.length} ${people.length === 1 ? "person" : "people"}. Check each card, fix anything wrong, then save.`;
+            renderAiCards();
+        } catch (e) {
+            console.error("ai extract", e.message);
+            $("aiStatus").textContent = "Could not read the file: " + e.message;
+        }
+    });
+}
+
+// Warns when a name or phone already exists among members or clergy.
+async function findDuplicate(x) {
+    const hits = new Set();
+    const name = x.d.fullName.trim().toLowerCase(), phone = (x.d.phone || "").replace(/\D/g, "");
+    for (const col of ["members", "clergy"]) {
+        const qs = [parishRef().collection(col).where("nameLower", "==", name).limit(3)];
+        if (phone.length >= 7) qs.push(parishRef().collection(col).where("phoneDigits", "==", phone).limit(3));
+        for (const q of qs) (await q.get().catch(() => ({ docs: [] }))).docs.forEach(doc => hits.add(`${doc.id} (${doc.data().fullName})`));
+    }
+    x.dup = [...hits].join(", ");
+    if (x.dup) x.selected = false; // the admin must tick it on purpose
+}
+
+function aiMissing(d) {
+    const m = [];
+    if (!d.fullName) m.push("name"); if (!d.gender) m.push("gender"); if (!d.maritalStatus) m.push("marital status");
+    if (!d.dobDay || !d.dobMonth) m.push("date of birth");
+    return m;
+}
+
+function renderAiCards() {
+    const opt = (list, v, first) => `<option value="">${first}</option>` + list.map(([k, t]) => `<option value="${esc(k)}"${String(k) === String(v ?? "") ? " selected" : ""}>${esc(t)}</option>`).join("");
+    const days = Array.from({ length: 31 }, (_, i) => [i + 1, i + 1]), months = MONTHS.map((m, i) => [i + 1, m]);
+    const yr = new Date().getFullYear(), years = Array.from({ length: yr - 1899 }, (_, i) => [yr - i, yr - i]);
+    $("aiResults").innerHTML = ai.people.map((x, i) => {
+        const d = x.d, missing = aiMissing(d);
+        const status = x.saved ? `<div class="text-green-700 font-semibold"><i class="fa-solid fa-check"></i> Saved as ${esc(x.saved)}</div>`
+            : x.error ? `<div class="text-red-700 text-xs">Not saved: ${esc(x.error)}</div>` : "";
+        const summary = `<div class="text-xs text-gray-600 space-y-0.5">
+            ${AI_FIELDS.slice(1).map(([k, t]) => d[k] ? `<div><span class="text-gray-400">${t}:</span> ${esc(d[k])}</div>` : "").join("")}
+            ${d.rankAsWritten ? `<div class="text-amber-700">Rank written as "${esc(d.rankAsWritten)}" is not on the ${esc(d.gender || "")} rank list: pick one in Edit.</div>` : ""}
+            <div><span class="text-gray-400">Date of birth:</span> ${fmtDate(d.dobDay, d.dobMonth, d.dobYear)} · <span class="text-gray-400">Last anointment:</span> ${fmtDate(d.anointDay, d.anointMonth, d.anointYear)}</div></div>`;
+        const inp = (k, t) => `<label class="block text-xs">${t}<input data-k="${k}" value="${esc(d[k] || "")}" class="w-full border p-2 rounded mt-0.5"></label>`;
+        const editor = `<div class="space-y-2 border-t pt-2">
+            ${inp("fullName", "Name *")}
+            <div class="grid grid-cols-2 gap-2">
+              <label class="text-xs">Gender *<select data-k="gender" class="w-full border p-2 rounded mt-0.5 bg-white">${opt([["Male", "Male"], ["Female", "Female"]], d.gender, "Select")}</select></label>
+              <label class="text-xs">Marital status *<select data-k="maritalStatus" class="w-full border p-2 rounded mt-0.5 bg-white">${opt(["Single", "Married", "Widowed", "Divorced", "Separated"].map(v => [v, v]), d.maritalStatus, "Select")}</select></label></div>
+            ${inp("address", "Address")}
+            <div class="grid grid-cols-2 gap-2">${inp("phone", "Phone")}${inp("email", "Email")}</div>
+            <label class="block text-xs">Rank<select data-k="rank" class="w-full border p-2 rounded mt-0.5 bg-white">${opt(ranksFor(d.gender).map(r => [r, r]), d.rank, d.gender ? "No rank / not listed" : "Choose gender first")}</select></label>
+            ${inp("occupation", "Occupation")}
+            <div class="text-xs">Date of birth *</div><div class="grid grid-cols-3 gap-1">
+              <select data-k="dobDay" class="border p-2 rounded bg-white">${opt(days, d.dobDay, "Day")}</select><select data-k="dobMonth" class="border p-2 rounded bg-white">${opt(months, d.dobMonth, "Month")}</select><select data-k="dobYear" class="border p-2 rounded bg-white">${opt(years, d.dobYear, "Year")}</select></div>
+            <div class="text-xs">Last anointment</div><div class="grid grid-cols-3 gap-1">
+              <select data-k="anointDay" class="border p-2 rounded bg-white">${opt(days, d.anointDay, "Day")}</select><select data-k="anointMonth" class="border p-2 rounded bg-white">${opt(months, d.anointMonth, "Month")}</select><select data-k="anointYear" class="border p-2 rounded bg-white">${opt(years, d.anointYear, "Year")}</select></div>
+            ${inp("nokName", "Next of kin name")}${inp("nokAddress", "Next of kin address")}${inp("nokPhone", "Next of kin phone")}
+            <button onclick="aiEdit(${i}, false)" class="w-full py-2 bg-blue-600 text-white rounded text-xs font-semibold">Done</button></div>`;
+        return `<div class="ai-card border rounded-lg p-3 ${x.saved ? "bg-green-50" : x.dup ? "bg-amber-50 border-amber-300" : "bg-white"}" data-i="${i}">
+            <div class="flex items-start gap-2">
+              <input type="checkbox" class="ai-pick mt-1 w-5 h-5" ${x.selected ? "checked" : ""} ${x.saved ? "disabled" : ""} onchange="ai.people[${i}].selected=this.checked" aria-label="Select ${esc(d.fullName)}">
+              ${x.photo ? `<img src="${x.photo}" class="w-12 h-12 rounded object-cover" alt="">` : ""}
+              <div class="flex-1 min-w-0"><div class="font-bold text-base">${esc(d.fullName || "(no name)")}</div>
+                <div class="text-xs text-gray-500">${esc([d.gender, d.maritalStatus, d.rank].filter(Boolean).join(" · "))}</div></div>
+              ${x.saved ? "" : `<button onclick="aiEdit(${i}, ${!x.editing})" class="ai-edit px-3 py-1.5 border rounded text-xs font-semibold bg-white"><i class="fa-solid fa-pen mr-1"></i>${x.editing ? "Close" : "Edit"}</button>`}
+            </div>
+            ${x.dup ? `<div class="ai-dup mt-2 text-xs text-amber-800 bg-amber-100 rounded p-2"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Possible duplicate: already have ${esc(x.dup)}. Unticked; tick only if this is a different person.</div>` : ""}
+            ${missing.length && !x.saved ? `<div class="mt-1 text-xs text-red-700">Missing: ${missing.join(", ")}. Tap Edit to fill in.</div>` : ""}
+            <div class="mt-2">${x.editing ? editor : summary}</div>
+            ${x.saved ? "" : `<label class="mt-2 block text-xs text-gray-600">Passport photo (optional)<input type="file" accept="image/*" class="ai-photo block w-full text-xs mt-0.5" onchange="aiPhoto(${i}, this)"></label>`}
+            ${status}</div>`;
+    }).join("");
+    $("aiResults").querySelectorAll(".ai-card").forEach(card => card.querySelectorAll("[data-k]").forEach(el => el.addEventListener("change", () => {
+        const x = ai.people[card.dataset.i], k = el.dataset.k;
+        x.d[k] = /^(dob|anoint)/.test(k) ? (el.value ? Number(el.value) : null) : el.value.trim();
+        if (k === "gender") { if (!ranksFor(x.d.gender).includes(x.d.rank)) x.d.rank = ""; renderAiCards(); }
+        if (k === "rank") x.d.rankAsWritten = "";
+    })));
+    $("aiSaveBar").classList.toggle("hidden", !ai.people.length);
+}
+function aiEdit(i, open) { ai.people.forEach((x, j) => x.editing = j === i ? open : false); renderAiCards(); }
+async function aiPhoto(i, input) {
+    if (!input.files[0]) return;
+    try { ai.people[i].photo = await compressImage(input.files[0]); renderAiCards(); } catch (e) { alert(e.message); }
+}
+
+async function saveAiSelected() {
+    const picked = ai.people.filter(x => x.selected && !x.saved);
+    if (!picked.length) return alert("Tick at least one person to save.");
+    if (!$("ai_consent").checked) return alert("You must record consent before saving (NDPA 2023).");
+    await busy("aiSaveBtn", async () => {
+        let ok = 0;
+        for (const x of picked) {
+            const d = x.d;
+            const p = { fullName: d.fullName.trim(), gender: d.gender, maritalStatus: d.maritalStatus, address: d.address || "",
+                phone: d.phone || "", email: (d.email || "").toLowerCase(), rank: ranksFor(d.gender).includes(d.rank) ? d.rank : "",
+                occupation: d.occupation || "", dobDay: d.dobDay || null, dobMonth: d.dobMonth || null, dobYear: d.dobYear || null,
+                anointDay: d.anointDay || null, anointMonth: d.anointMonth || null, anointYear: d.anointYear || null,
+                nokName: d.nokName || "", nokAddress: d.nokAddress || "", nokPhone: d.nokPhone || "",
+                photo: x.photo || "", important: false, consentGiven: true, updatedAt: nowIso() };
+            p.nameLower = p.fullName.toLowerCase(); p.phoneDigits = p.phone.replace(/\D/g, "");
+            const problem = checkPerson(p, "members");
+            if (problem) { x.error = problem; continue; }
+            p.status = "Active"; p.consentDate = today(); p.createdAt = nowIso();
+            try { x.saved = await createRecord("members", p); x.error = ""; x.selected = false; ok++; }
+            catch (e) { console.error("ai save", e.code, e.message); x.error = e.message; }
+        }
+        renderAiCards();
+        const failed = picked.length - ok;
+        $("aiStatus").textContent = `Saved ${ok} member${ok === 1 ? "" : "s"}.` + (failed ? ` ${failed} not saved: see the red notes.` : "");
+        if (ok) await loadParishData();
+    });
+}
