@@ -17,7 +17,7 @@ const CONFIG_IS_PLACEHOLDER = firebaseConfig.apiKey.startsWith("PLACEHOLDER");
 const USE_EMULATOR = new URLSearchParams(location.search).has("emulator");
 const PAGE_SIZE = 20;
 
-// The 28 ranks of the male leadership line (client brief, batch 1). Female line pending.
+// The 28 ranks of the male leadership line (client brief, batch 1).
 const RANKS = ["Brother", "Elder Brother", "Cape Elder Brother", "Full Elder Brother", "Senior Elder Brother",
     "Superior Senior Elder Brother", "Assistant Leader", "Leader", "Senior Leader", "Superior Senior Leader",
     "Honorary Assistant Evangelist", "Assistant Evangelist", "Honorary Evangelist", "Evangelist",
@@ -25,9 +25,34 @@ const RANKS = ["Brother", "Elder Brother", "Cape Elder Brother", "Full Elder Bro
     "Special Venerable Most Senior Evangelist", "Venerable Most Senior Evangelist", "Assistant Superior Evangelist",
     "Superior Evangelist", "Assistant Venerable Superior Evangelist", "Venerable Superior Evangelist",
     "Assistant Most Superior Evangelist", "Most Superior Evangelist", "Supreme Evangelist", "Pastor Reverend"];
+// The female line (batch 8, confirmed by the founder). "Lace Elder Sister / Lace Senior Elder Sister" is ONE rank
+// (the name differs by region). firestore.rules holds the same two lists.
+const RANKS_F = ["Sister", "Elder Sister", "Cape Elder Sister", "Senior Elder Sister", "Lace Elder Sister / Lace Senior Elder Sister",
+    "Superior Senior Elder Sister", "Lace Superior Senior Elder Sister", "Assistant Mother Celestial", "Mother Celestial"];
+const ranksFor = g => g === "Male" ? RANKS : g === "Female" ? RANKS_F : [];
+// Rank dropdown shows only the line for the chosen gender.
+function fillRanks(selected) {
+    const list = ranksFor($("p_gender").value);
+    $("p_rank").innerHTML = `<option value="">${list.length ? "No rank / not listed" : "Choose gender first"}</option>` +
+        list.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    $("p_rank").value = list.includes(selected) ? selected : "";
+}
+// Number = CCC-[PARISH-CITY-]TYPE-NNN (old style has no lettering).
+const NO_RE = /^CCC-(?:([A-Z]{2,4})-([A-Z]{2,4})-)?([A-Z]{3})-(\d+)$/;
+const letteringOf = (parish = localState.parish || {}) => parish.parishLetters && parish.cityLetters ? `${parish.parishLetters}-${parish.cityLetters}` : "";
+function numberFor(tail, n) {
+    const l = letteringOf();
+    if (!l) throw new Error("Your parish has no lettering yet (e.g. IJY-ABK). Ask the Super Admin to set it before new numbers are issued.");
+    return `CCC-${l}-${tail}${pad3(n)}`;
+}
+const noType = no => (String(no).toUpperCase().match(NO_RE) || [])[3] || "";
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const CONTINENTS = ["Africa", "Europe", "Asia", "North America", "South America", "Oceania", "Antarctica"];
-const SERIES = { members: { key: "mbr", prefix: "CCC-MBR-", stat: "memberCount" }, clergy: { key: "clg", prefix: "CCC-CLG-", stat: "clergyCount" } };
+// New numbers carry the parish lettering: CCC-IJY-ABK-MBR-001. Old records keep CCC-MBR-001 and still work.
+const SERIES = { members: { key: "mbr", prefix: "MBR-", stat: "memberCount" }, clergy: { key: "clg", prefix: "CLG-", stat: "clergyCount" },
+    // Phase 4: each has its own counter doc parishes/{p}/meta/{key} = { n }.
+    births: { key: "brt", prefix: "BRT-", stat: "birthCount", own: true }, children: { key: "chd", prefix: "CHD-", stat: "childCount", own: true },
+    teens: { key: "ten", prefix: "TEN-", stat: "teenCount", own: true }, deaths: { key: "dth", prefix: "DTH-", stat: "deathCount", own: true } };
 
 // Church departments (batch 3). Ids are fixed: the Firestore rules list the same six.
 const DEPTS = [
@@ -72,7 +97,6 @@ function fillSelects() {
     document.querySelectorAll(".day-select").forEach(s => s.innerHTML = opts(days, "Day"));
     document.querySelectorAll(".month-select").forEach(s => s.innerHTML = opts(months, "Month"));
     document.querySelectorAll(".year-select").forEach(s => s.innerHTML = opts(years, "Year (optional)"));
-    document.querySelectorAll(".rank-select").forEach(s => s.innerHTML = opts(RANKS.map(r => [r, r]), "No rank / not listed"));
     document.querySelectorAll(".continent-select").forEach(s => s.innerHTML = opts(CONTINENTS.map(c => [c, c]), "Continent"));
 }
 
@@ -193,6 +217,7 @@ function showSection(id) {
     if (id === "families") loadFamilies();
     if (id === "diaspora") loadDiaspora();
     if (id === "flows") loadFlows();
+    if (YOUNG[id] || id === "deaths") loadYoung(id, true).catch(e => alert("Could not load: " + e.message));
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -224,6 +249,7 @@ async function loadParishData() {
     showTotals(st && st.exists ? st.data() : {});
     $("memberSearch").value = "";
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
+    await checkPendingMoves().catch(e => console.error("pending moves", e.message));
 }
 
 function showTotals(s) {
@@ -233,9 +259,13 @@ function showTotals(s) {
     $("metricMembers").textContent = m;
     $("metricServices").textContent = s.serviceCount || 0;
     $("metricGiving").textContent = "₦" + Number(s.financeTotal || 0).toLocaleString();
+    $("metricBirths").textContent = s.birthCount || 0;
+    $("metricChildren").textContent = s.childCount || 0;
+    $("metricTeens").textContent = s.teenCount || 0;
+    $("metricDeaths").textContent = s.deathCount || 0;
 }
 
-const STATUS_TAG = { Former: " · Former", Ordained: " · Ordained", Diaspora: " · Abroad", TransferredOut: " · Transferred" };
+const STATUS_TAG = { Former: " · Former", Ordained: " · Ordained", Diaspora: " · Abroad", TransferredOut: " · Transferred", "Called to glory": " · Called to glory" };
 function displayNo(p) { return p.memberNo + (STATUS_TAG[p.status] || ""); }
 // A transferred member keeps ONE member number for life: shown on every card in the new parish.
 const lifeText = p => p.lifeNo ? `Life no. ${p.lifeNo} (${p.lifeParishCode})` : "";
@@ -309,10 +339,10 @@ async function runGlobalSearch() {
     if (!term) { box.classList.add("hidden"); return; }
     const kinds = ["members", "clergy"];
     let results = [];
-    const numberMatch = term.toUpperCase().match(/^CCC-(MBR|CLG)-(\d+)$/);
+    const numberMatch = ["MBR", "CLG"].includes(noType(term)) && normNo(term);
     if (numberMatch) {
-        const kind = numberMatch[1] === "MBR" ? "members" : "clergy";
-        const d = await parishRef().collection(kind).doc(`CCC-${numberMatch[1]}-${pad3(Number(numberMatch[2]))}`).get();
+        const kind = noType(term) === "MBR" ? "members" : "clergy";
+        const d = await parishRef().collection(kind).doc(numberMatch).get();
         if (d.exists) results.push([kind, d]);
     } else {
         const digits = term.replace(/\D/g, "");
@@ -371,7 +401,7 @@ function openPersonForm(kind, existing) {
     const p = existing || {};
     const set = (id, v) => $(id).value = v ?? "";
     set("p_name", p.fullName); set("p_gender", p.gender); set("p_marital", p.maritalStatus); set("p_address", p.address);
-    set("p_phone", p.phone); set("p_email", p.email); set("p_rank", p.rank); set("p_occupation", p.occupation);
+    set("p_phone", p.phone); set("p_email", p.email); fillRanks(p.rank); set("p_occupation", p.occupation);
     set("p_dobDay", p.dobDay); set("p_dobMonth", p.dobMonth); set("p_dobYear", p.dobYear);
     set("p_anDay", p.anointDay); set("p_anMonth", p.anointMonth); set("p_anYear", p.anointYear);
     set("p_nokName", p.nokName); set("p_nokAddress", p.nokAddress); set("p_nokPhone", p.nokPhone);
@@ -415,12 +445,13 @@ function checkPerson(p, kind) {
 // New record: next number from the parish counter, inside a transaction (never reused).
 async function createRecord(kind, p, extraWrites) {
     const s = SERIES[kind];
+    const cRef = s.own ? parishRef().collection("meta").doc(s.key) : counterRef();
     return db.runTransaction(async t => {
-        const c = await t.get(counterRef());
-        const n = (c.exists ? c.data()[s.key] : 0) + 1;
-        const id = s.prefix + pad3(n);
-        t.update(counterRef(), { [s.key]: n });
-        t.set(parishRef().collection(kind).doc(id), { ...p, memberNo: id });
+        const c = await t.get(cRef);
+        const n = (c.exists ? c.data()[s.own ? "n" : s.key] : 0) + 1;
+        const id = numberFor(s.prefix, n);
+        if (s.own) t.set(cRef, { n }); else t.update(cRef, { [s.key]: n });
+        t.set(parishRef().collection(kind).doc(id), s.own ? { ...p, no: id } : { ...p, memberNo: id });
         if (kind === "clergy") t.set(db.collection("clergyIndex").doc(p.email), { parishId: localState.currentParishId, clergyId: id });
         t.set(statsRef(), { [s.stat]: inc(1) }, { merge: true });
         if (extraWrites) extraWrites(t, id);
@@ -477,6 +508,8 @@ async function openRecord(kind, id) {
     const famHtml = fam.docs.map(f => `<button onclick="showFamily('${esc(f.id)}')" class="text-pink-700 underline">${esc(f.data().name)}</button> (${esc(f.data().roles?.[p.memberNo] || "")})`).join(", ");
     let history = "";
     if (p.formerMemberNo) history = `Ordained from <button onclick="openRecord('members','${esc(p.formerMemberNo)}')" class="underline text-blue-700">${esc(p.formerMemberNo)}</button>`;
+    if (p.fromNo) history = `Moved up from Teenagers: <button onclick="openYoungRecord('teens','${esc(p.fromNo)}')" class="underline text-blue-700">${esc(p.fromNo)}</button>`;
+    if (p.deathId) history = `Called to glory: <button onclick="openYoungRecord('deaths','${esc(p.deathId)}')" class="underline text-blue-700">${esc(p.deathId)}</button>`;
     if (p.ordainedAs) history = `Ordained as clergy: <button onclick="openRecord('clergy','${esc(p.ordainedAs)}')" class="underline text-blue-700">${esc(p.ordainedAs)}</button>`;
     let depts = [];
     if (kind === "members") {
@@ -509,6 +542,8 @@ async function openRecord(kind, id) {
     if (kind === "members" && p.status === "Active") actions += btn("Moved abroad", "openAbroad()", "bg-cyan-700 text-white");
     if (kind === "members" && p.status === "Diaspora") actions += btn("Returned home", "returnHome()", "bg-emerald-600 text-white");
     if (kind === "members" && ["Active", "Diaspora"].includes(p.status)) actions += btn("Transfer to another parish", "openSendTransfer()", "bg-indigo-700 text-white");
+    if ((kind === "members" && ["Active", "Diaspora"].includes(p.status)) || (kind === "clergy" && p.status === "Active"))
+        actions += btn("Called to glory", `openDeathForm('${kind}')`, "bg-gray-800 text-white");
     $("recordActions").innerHTML = actions + btn("Close", "closeModal('recordModal')", "border");
     openModal("recordModal");
 }
@@ -574,7 +609,7 @@ async function saveTransfer() {
 
 // ---------------------------------------------------------------- families
 function openFamilyForm() { ["f_name", "f_husband", "f_wife", "f_children"].forEach(id => $(id).value = ""); openModal("familyModal"); }
-const kindOf = no => no.startsWith("CCC-CLG-") ? "clergy" : "members";
+const kindOf = no => noType(no) === "CLG" ? "clergy" : "members";
 async function saveFamily() {
     const name = val("f_name");
     const norm = s => s.trim().toUpperCase();
@@ -664,19 +699,20 @@ async function loadWorld() {
     $("dashParishName").textContent = "World-wide";
     const [parishes, stats] = await Promise.all([db.collection("parishes").get(), db.collection("parishStats").get()]);
     const byId = Object.fromEntries(stats.docs.map(d => [d.id, d.data()]));
-    const sum = { memberCount: 0, clergyCount: 0, serviceCount: 0, financeTotal: 0, diasporaCount: 0, attendanceTotal: 0 };
+    const sum = { memberCount: 0, clergyCount: 0, serviceCount: 0, financeTotal: 0, diasporaCount: 0, attendanceTotal: 0,
+        birthCount: 0, childCount: 0, teenCount: 0, deathCount: 0 };
     stats.docs.forEach(d => Object.keys(sum).forEach(k => sum[k] += d.data()[k] || 0));
     showTotals(sum);
     localState.worldDiaspora = sum.diasporaCount;
     localState.parishNames = Object.fromEntries(parishes.docs.map(d => [d.id, d.data().name]));
-    $("worldTable").innerHTML = `<table class="w-full text-left text-xs"><thead class="bg-gray-100"><tr><th class="p-2">Parish</th><th class="p-2">Place</th><th class="p-2">Clergy</th><th class="p-2">Members</th><th class="p-2">Attendance</th></tr></thead><tbody class="divide-y">` +
+    $("worldTable").innerHTML = `<table class="w-full text-left text-xs"><thead class="bg-gray-100"><tr><th class="p-2">Parish</th><th class="p-2">Place</th><th class="p-2">Clergy</th><th class="p-2">Members</th><th class="p-2">Births</th><th class="p-2">Children</th><th class="p-2">Teens</th><th class="p-2">Deaths</th><th class="p-2">Attendance</th></tr></thead><tbody class="divide-y">` +
         parishes.docs.map(d => { const p = d.data(), s = byId[d.id] || {};
-            return `<tr><td class="p-2 font-bold">${esc(p.name)}${p.status !== "Approved" ? " (" + esc(p.status) + ")" : ""}</td><td class="p-2">${esc([p.city, p.country].filter(Boolean).join(", "))}</td><td class="p-2">${s.clergyCount || 0}</td><td class="p-2">${s.memberCount || 0}</td><td class="p-2">${s.attendanceTotal || 0}</td></tr>`; }).join("") + `</tbody></table>` + worldByType(stats.docs.map(d => d.data()));
+            return `<tr><td class="p-2 font-bold">${esc(p.name)}${p.status !== "Approved" ? " (" + esc(p.status) + ")" : ""}</td><td class="p-2">${esc([p.city, p.country].filter(Boolean).join(", "))}</td><td class="p-2">${s.clergyCount || 0}</td><td class="p-2">${s.memberCount || 0}</td><td class="p-2">${s.birthCount || 0}</td><td class="p-2">${s.childCount || 0}</td><td class="p-2">${s.teenCount || 0}</td><td class="p-2">${s.deathCount || 0}</td><td class="p-2">${s.attendanceTotal || 0}</td></tr>`; }).join("") + `</tbody></table>` + worldByType(stats.docs.map(d => d.data()));
     $("worldTable").classList.remove("hidden");
     if (localState.role !== "super_admin") return;
     $("parishList").innerHTML = parishes.docs.map(d => { const p = d.data();
         return `<div class="bg-white border rounded-xl p-3 text-xs"><p class="font-bold">${esc(p.name)} <span class="text-gray-400">${esc(p.status)}</span></p>
-            <p>Parish code: ${p.code ? `<span class="font-mono font-bold">${esc(p.code)}</span>` : `<button onclick="giveParishCode('${esc(d.id)}')" class="underline text-blue-700">Give a parish code</button>`}</p><p class="text-gray-500">${esc([p.address, p.city, p.state, p.country, p.continent].filter(Boolean).join(", "))}</p></div>`; }).join("");
+            <p>Parish code: ${p.code ? `<span class="font-mono font-bold">${esc(p.code)}</span>` : `<button onclick="giveParishCode('${esc(d.id)}')" class="underline text-blue-700">Give a parish code</button>`}</p><p>Lettering: ${p.parishLetters ? `<span class="font-mono font-bold">${esc(p.parishLetters)}-${esc(p.cityLetters)}</span>` : `<button onclick="setLettering('${esc(d.id)}')" class="underline text-blue-700">Set parish lettering</button>`}</p><p class="text-gray-500">${esc([p.address, p.city, p.state, p.country, p.continent].filter(Boolean).join(", "))}</p></div>`; }).join("");
     const [clergy, important] = await Promise.all([
         db.collectionGroup("clergy").get(),
         db.collectionGroup("members").where("important", "==", true).get()]);
@@ -704,6 +740,21 @@ function renderRegister() {
     $("registerList").innerHTML = list.length ? list.map(worldCard).join("") : `<p class="text-xs text-gray-400 italic">No clergy found.</p>`;
 }
 
+// Existing parishes: Super Admin sets the lettering once (index doc in the same write keeps it unique).
+async function setLettering(parishId) {
+    const v = (prompt("Parish lettering, PARISH-CITY (2-4 letters each), e.g. IJY-ABK. It cannot be changed later.") || "").trim().toUpperCase();
+    if (!v) return;
+    if (!/^[A-Z]{2,4}-[A-Z]{2,4}$/.test(v)) return alert("Use 2-4 letters, a dash, then 2-4 letters (e.g. IJY-ABK).");
+    const [pl, cl] = v.split("-");
+    try {
+        if ((await db.collection("parishLettering").doc(v).get()).exists) return alert(`${v} is already used by another parish.`);
+        const b = db.batch();
+        b.update(db.collection("parishes").doc(parishId), { parishLetters: pl, cityLetters: cl });
+        b.set(db.collection("parishLettering").doc(v), { parishId });
+        await b.commit();
+        await loadWorld();
+    } catch (e) { alert("Not saved: " + e.message); }
+}
 function randomCode() {
     const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     return Array.from(crypto.getRandomValues(new Uint8Array(20)), b => abc[b % abc.length]).join("").replace(/(.{5})(?!$)/g, "$1-");
@@ -713,6 +764,9 @@ async function createParish() {
     const p = readLocation("np_");
     if (p.error) return alert(p.error);
     const email = val("np_email").toLowerCase();
+    const pl = val("np_pletters").toUpperCase(), cl = val("np_cletters").toUpperCase();
+    if (!/^[A-Z]{2,4}$/.test(pl) || !/^[A-Z]{2,4}$/.test(cl)) return alert("Enter the parish lettering: 2-4 letters for the parish and 2-4 for the city (e.g. IJY and ABK).");
+    if ((await db.collection("parishLettering").doc(`${pl}-${cl}`).get()).exists) return alert(`The lettering ${pl}-${cl} is already used by another parish.`);
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return alert("Enter the parish admin's email.");
     await busy("createParishBtn", async () => {
         try {
@@ -720,10 +774,12 @@ async function createParish() {
             const code = randomCode();
             const pcode = parishCode();
             const batch = db.batch();
-            batch.set(ref, { ...p, status: "Approved", createdAt: nowIso(), code: pcode });
+            batch.set(ref, { ...p, status: "Approved", createdAt: nowIso(), code: pcode, parishLetters: pl, cityLetters: cl });
+            batch.set(db.collection("parishLettering").doc(`${pl}-${cl}`), { parishId: ref.id });
             batch.set(db.collection("parishCodes").doc(pcode), { parishId: ref.id });
             batch.set(ref.collection("meta").doc("counters"), { clg: 0, mbr: 0 });
-            batch.set(db.collection("parishStats").doc(ref.id), { memberCount: 0, clergyCount: 0, formerClergyCount: 0, attendanceTotal: 0, serviceCount: 0, financeTotal: 0, financeCount: 0 });
+            batch.set(db.collection("parishStats").doc(ref.id), { memberCount: 0, clergyCount: 0, formerClergyCount: 0, attendanceTotal: 0, serviceCount: 0, financeTotal: 0, financeCount: 0,
+                birthCount: 0, childCount: 0, teenCount: 0, deathCount: 0 });
             batch.set(db.collection("invites").doc(code), { email, parishId: ref.id, role: "parish_admin", usedBy: null, createdAt: nowIso() });
             await batch.commit();
             $("inviteResult").innerHTML = `<p class="font-bold">Parish created. Send this to the admin:</p>
@@ -732,7 +788,7 @@ async function createParish() {
                 <p>Parish code (for member transfers): <span id="newParishCode" class="font-mono font-bold select-all">${esc(pcode)}</span></p>
                 <p class="text-gray-600 mt-1">They open the portal, tap "First time? I have an invite code", and choose a password.</p>`;
             $("inviteResult").classList.remove("hidden");
-            ["np_name", "np_address", "np_maps", "np_city", "np_state", "np_country", "np_continent", "np_email"].forEach(id => $(id).value = "");
+            ["np_pletters", "np_cletters", "np_name", "np_address", "np_maps", "np_city", "np_state", "np_country", "np_continent", "np_email"].forEach(id => $(id).value = "");
             await loadWorld();
         } catch (e) {
             alert(e.code === "permission-denied" ? "Not created. Check the details; the admin email must not belong to clergy." : e.message);
@@ -1264,10 +1320,9 @@ function findForDept() { clearTimeout(dTimer); dTimer = setTimeout(runFindForDep
 async function runFindForDept() {
     const term = val("d_find"), box = $("d_matches");
     if (!term) { box.innerHTML = ""; return; }
-    if (/^CCC-CLG-/i.test(term)) { box.innerHTML = `<p class="text-rose-700 font-semibold">Clergy cannot join a department.</p>`; return; }
+    if (noType(term) === "CLG") { box.innerHTML = `<p class="text-rose-700 font-semibold">Clergy cannot join a department.</p>`; return; }
     let docs = [];
-    const m = term.toUpperCase().match(/^CCC-MBR-(\d+)$/);
-    if (m) { const d = await parishRef().collection("members").doc("CCC-MBR-" + pad3(Number(m[1]))).get(); if (d.exists) docs = [d]; }
+    if (noType(term) === "MBR") { const d = await parishRef().collection("members").doc(normNo(term)).get(); if (d.exists) docs = [d]; }
     else { const t = term.toLowerCase(); docs = (await parishRef().collection("members").orderBy("nameLower").startAt(t).endAt(t + "").limit(8).get()).docs; }
     box.innerHTML = docs.map(d => { const p = d.data();
         const ok = p.status === "Active";
@@ -1276,7 +1331,7 @@ async function runFindForDept() {
         || `<p class="text-gray-400 italic">No member found.</p>`;
 }
 async function addToDept(memberNo) {
-    if (memberNo.startsWith("CCC-CLG-")) return alert("Clergy cannot join a department.");
+    if (noType(memberNo) === "CLG") return alert("Clergy cannot join a department.");
     const d = await parishRef().collection("members").doc(memberNo).get();
     if (!d.exists || d.data().status !== "Active") return alert("Only active church members can join. Clergy cannot join a department.");
     try {
@@ -1403,7 +1458,7 @@ async function acceptTransfer(id) {
         const newNo = await db.runTransaction(async t => {
             const c = await t.get(counterRef());
             const n = (c.exists ? c.data().mbr : 0) + 1;
-            const no = "CCC-MBR-" + pad3(n);
+            const no = numberFor("MBR-", n);
             t.update(counterRef(), { mbr: n });
             t.set(parishRef().collection("members").doc(no), { ...t0.person, memberNo: no, status: "Active", transferId: id,
                 lifeNo: t0.lifeNo, lifeParishCode: t0.lifeParishCode, important: false, updatedAt: nowIso() });
@@ -1474,4 +1529,294 @@ function renderFlows() {
     $("flowsList").innerHTML = `<p class="text-xs text-gray-500">Members abroad (world total): <b>${localState.worldDiaspora || 0}</b>. Each person is counted once, in one parish only.</p>` +
         (rows.map(([k, n]) => `<div class="flow-row bg-white border rounded-xl p-3 flex justify-between items-center text-xs"><span class="font-semibold">${esc(k)}</span><span class="text-lg font-bold text-cyan-700">${n}</span></div>`).join("")
         || `<p class="text-xs text-gray-400 italic">No moves recorded yet.</p>`);
+}
+
+// ---------------------------------------------------------------- Phase 4: births, children, teenagers, deaths
+// Births (0-2) -> Sunday School Children (2-12) -> Teenagers (12-18) -> Members (18, new CCC-MBR number).
+// Each section is independent of Members, has its own number series, and a FULL date of birth (with year).
+const YOUNG = {
+    births: { title: "Births", next: "children", age: 2, nextName: "Sunday School Children" },
+    children: { title: "Sunday School Children", next: "teens", age: 12, nextName: "Teenagers" },
+    teens: { title: "Teenagers", next: "members", age: 18, nextName: "Church Members" } };
+const KIND_OF_NO = { MBR: "members", CLG: "clergy", BRT: "births", CHD: "children", TEN: "teens", DTH: "deaths" };
+const kindOfNo = no => KIND_OF_NO[noType(String(no).trim())];
+const normNo = no => { const m = String(no).trim().toUpperCase().match(NO_RE); return m ? `CCC-${m[1] ? m[1] + "-" + m[2] + "-" : ""}${m[3]}-${pad3(Number(m[4]))}` : ""; };
+// Ages use the UTC date, the same "today" the Firestore rules use, so the app and the rules always agree.
+const yearsBefore = n => `${Number(today().slice(0, 4)) - n}${today().slice(4)}`;
+function ageOf(dob, at = today()) {
+    if (!dob) return null;
+    let a = Number(at.slice(0, 4)) - Number(dob.slice(0, 4));
+    if (at.slice(5) < dob.slice(5)) a--;
+    return a;
+}
+// The certificate number is the record number itself: CCC-{PARISH}-{CITY}-BRT-001.
+const certNoOf = no => NO_RE.test(no) && (NO_RE.exec(no) || [])[1] ? no : "";
+const fmtIso = v => { if (!v) return ""; const [y, m, d] = v.split("-").map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
+
+function youngCard(kind, d) {
+    const p = d.data();
+    const age = ageOf(p.dob);
+    const sub = kind === "deaths" ? `Died ${fmtIso(p.dateOfDeath)}${p.age != null ? " · aged " + p.age : ""}`
+        : `Born ${fmtIso(p.dob)} · age ${age}` + (p.status === "Moved" ? ` · moved to ${p.movedTo}` : p.status === "Called to glory" ? " · Called to glory" : "");
+    return `<button data-no="${esc(p.no)}" onclick="openYoungRecord('${kind}','${esc(p.no)}')" class="young-row w-full bg-white border rounded-xl p-2 text-left shadow-sm ${p.status && p.status !== "Active" ? "opacity-70" : ""}">
+        <p class="font-bold truncate">${esc(p.fullName)}</p><p class="text-[11px] text-gray-500 font-mono">${esc(p.no)}</p>
+        <p class="text-[11px] text-gray-500 truncate">${esc(sub)}</p></button>`;
+}
+const loadYoung = (kind, reset) => loadPage(kind, parishRef().collection(kind).orderBy(firebase.firestore.FieldPath.documentId()),
+    kind + "List", d => youngCard(kind, d), reset);
+
+// Officiating clergy: pick an Active clergy of this parish, or type a name.
+async function fillOfficiants(selectId) {
+    const snap = await parishRef().collection("clergy").where("status", "==", "Active").limit(100).get();
+    $(selectId).innerHTML = `<option value="">Not listed (type below)</option>` + snap.docs.map(d => {
+        const c = d.data(); return `<option value="${esc(c.memberNo)}">${esc([c.rank, c.fullName].filter(Boolean).join(" "))} (${esc(c.memberNo)})</option>`; }).join("");
+}
+function officiantOf(selectId, otherId) {
+    const sel = $(selectId);
+    return sel.value ? { officiant: sel.value, officiantName: sel.options[sel.selectedIndex].text.replace(/ \(CCC-[A-Z0-9-]+\)$/, "").slice(0, 160) }
+        : { officiant: "", officiantName: val(otherId).slice(0, 160) };
+}
+// "CCC-MBR-001" (linked, must exist here) or a plain name (free text).
+async function resolvePerson(text) {
+    const no = normNo(text);
+    if (!no) return { no: "", name: text.trim() };
+    const kind = kindOfNo(no);
+    if (!["members", "clergy"].includes(kind)) throw new Error(text + " is not a member or clergy number.");
+    const d = await parishRef().collection(kind).doc(no).get();
+    if (!d.exists) throw new Error(no + " is not in this parish.");
+    return { no, name: d.data().fullName };
+}
+
+// ---- add / edit a birth, child or teenager
+let yform = { kind: "births", old: null };
+function openYoungForm(kind, existing) {
+    yform = { kind, old: existing || null };
+    const p = existing || {};
+    const set = (id, v) => $(id).value = v ?? "";
+    set("y_name", p.fullName); set("y_gender", p.gender); set("y_dob", p.dob); set("y_place", p.place);
+    set("y_father", p.fatherNo || p.fatherName); set("y_mother", p.motherNo || p.motherName); set("y_naming", p.namingDate);
+    set("y_officiantOther", p.officiant ? "" : p.officiantName);
+    set("y_parent", p.parentName); set("y_parentPhone", p.parentPhone); set("y_address", p.address);
+    $("y_consent").checked = p.consentGiven === true;
+    document.querySelectorAll(".y-birth").forEach(el => el.classList.toggle("hidden", kind !== "births"));
+    document.querySelectorAll(".y-kid").forEach(el => el.classList.toggle("hidden", kind === "births"));
+    $("youngModalTitle").textContent = existing ? "EDIT " + existing.no : kind === "births" ? "RECORD A BIRTH" : "ADD TO " + YOUNG[kind].title.toUpperCase();
+    closeModal("recordModal");
+    openModal("youngModal");
+    if (kind === "births") fillOfficiants("y_officiant").then(() => $("y_officiant").value = p.officiant || "").catch(() => {});
+}
+async function saveYoung() {
+    const kind = yform.kind, o = yform.old;
+    const p = { fullName: val("y_name"), gender: val("y_gender"), dob: $("y_dob").value, consentGiven: $("y_consent").checked, updatedAt: nowIso() };
+    p.nameLower = p.fullName.toLowerCase();
+    if (!p.fullName || !p.gender || !p.dob) return alert("Fill in the name, gender and full date of birth (day, month and year).");
+    if (p.dob > today()) return alert("The date of birth cannot be in the future.");
+    if (!p.consentGiven) return alert("You must record the parent's consent before saving (NDPA 2023).");
+    await busy("saveYoungBtn", async () => {
+        try {
+            if (kind === "births") {
+                const [f, m] = await Promise.all([resolvePerson(val("y_father")), resolvePerson(val("y_mother"))]);
+                Object.assign(p, { place: val("y_place"), fatherNo: f.no, fatherName: f.name, motherNo: m.no, motherName: m.name,
+                    namingDate: $("y_naming").value }, officiantOf("y_officiant", "y_officiantOther"));
+            } else Object.assign(p, { parentName: val("y_parent"), parentPhone: val("y_parentPhone"), address: val("y_address") });
+            let id;
+            if (o) {
+                id = o.no;
+                await parishRef().collection(kind).doc(id).set({ ...o, ...p, no: o.no, consentDate: o.consentDate, createdAt: o.createdAt, status: o.status });
+            } else {
+                Object.assign(p, { status: "Active", consentDate: today(), createdAt: nowIso() });
+                id = await createRecord(kind, p);
+            }
+            closeModal("youngModal");
+            await refreshTotals();
+            await loadYoung(kind, true);
+            await checkPendingMoves();
+            await openYoungRecord(kind, id);
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+
+// ---- view one record (birth / child / teen / death)
+async function openYoungRecord(kind, id) {
+    const d = await parishRef().collection(kind).doc(id).get();
+    if (!d.exists) return;
+    const p = d.data();
+    current = { kind, rec: p };
+    const link = no => no ? `<button onclick="openAnyRecord('${esc(no)}')" class="underline text-blue-700">${esc(no)}</button>` : "";
+    const who = (no, name) => [link(no), esc(name || "")].filter(Boolean).join(" ");
+    $("recordTitle").textContent = p.no + (p.status && p.status !== "Active" ? " · " + p.status : "");
+    let body = `<p class="text-base font-bold">${esc(p.fullName)}</p><p class="font-mono text-gray-500">${esc(p.no)}</p><div>`;
+    if (kind === "deaths") {
+        body += row("Linked record", link(p.personNo)) + row("Gender", esc(p.gender)) + row("Date of death", esc(fmtIso(p.dateOfDeath)))
+            + row("Age", esc(p.age ?? "")) + row("Place", esc(p.place)) + row("Burial", esc(fmtIso(p.burialDate)))
+            + row("Officiating clergy", who(p.officiant, p.officiantName)) + row("Informant", esc(p.informant)) + row("Notes", esc(p.notes));
+    } else {
+        body += row("Gender", esc(p.gender)) + row("Date of birth", esc(fmtIso(p.dob))) + row("Age", esc(ageOf(p.dob)));
+        if (kind === "births") body += row("Place of birth", esc(p.place)) + row("Father", who(p.fatherNo, p.fatherName)) + row("Mother", who(p.motherNo, p.motherName))
+            + row("Naming ceremony", esc(fmtIso(p.namingDate))) + row("Officiating clergy", who(p.officiant, p.officiantName));
+        else body += row("Parent / guardian", esc(p.parentName)) + row("Parent phone", esc(p.parentPhone)) + row("Address", esc(p.address));
+        body += row("Came from", link(p.fromNo)) + row("Moved to", link(p.movedTo)) + row("Moved on", esc((p.movedAt || "").slice(0, 10)))
+            + row("Called to glory", link(p.deathId));
+    }
+    $("recordBody").innerHTML = body + "</div>";
+    const btn = (label, fn, cls) => `<button onclick="${fn}" class="px-3 py-2 rounded font-semibold ${cls}">${label}</button>`;
+    let actions = "";
+    if (YOUNG[kind] && p.status === "Active") actions += btn("Edit", `openYoungForm('${kind}', current.rec)`, "bg-blue-600 text-white");
+    if (kind === "births") actions += btn('<i class="fa-solid fa-print"></i> Birth certificate', `showCertificate('births','${esc(p.no)}')`, "bg-emerald-700 text-white");
+    if (kind === "deaths") actions += btn('<i class="fa-solid fa-print"></i> Death certificate', `showCertificate('deaths','${esc(p.no)}')`, "bg-gray-800 text-white");
+    if (YOUNG[kind] && p.status === "Active") actions += btn("Called to glory", `openDeathForm('${kind}')`, "bg-gray-800 text-white");
+    $("recordActions").innerHTML = actions + btn("Close", "closeModal('recordModal')", "border");
+    openModal("recordModal");
+}
+function openAnyRecord(no) {
+    const kind = kindOfNo(no);
+    return ["members", "clergy"].includes(kind) ? openRecord(kind, no) : openYoungRecord(kind, no);
+}
+
+// ---- deaths: one record, the linked person is marked "Called to glory" in the same write (never deleted)
+let dform = { kind: "", rec: null };
+function openDeathForm(kind) {
+    dform = kind ? { kind, rec: current.rec } : { kind: "", rec: null };
+    const r = dform.rec || {};
+    const no = r.no || r.memberNo || "";
+    ["x_name", "x_age", "x_place", "x_burial", "x_officiantOther", "x_informant", "x_notes"].forEach(id => $(id).value = "");
+    $("x_link").value = no; $("x_link").readOnly = !!no;
+    $("x_name").value = r.fullName || ""; $("x_gender").value = r.gender || ""; $("x_date").value = today();
+    closeModal("recordModal");
+    openModal("deathModal");
+    fillOfficiants("x_officiant").catch(() => {});
+}
+async function saveDeath() {
+    const dateOfDeath = $("x_date").value;
+    let personNo = normNo(val("x_link"));
+    if (val("x_link") && !personNo) return alert("The number should look like CCC-MBR-001 (or leave it blank).");
+    if (!dateOfDeath) return alert("Enter the date of death.");
+    await busy("saveDeathBtn", async () => {
+        try {
+            let kind = "", rec = null;
+            if (personNo) {
+                kind = kindOfNo(personNo);
+                if (!kind || kind === "deaths") throw new Error("That number cannot be used here.");
+                const d = await parishRef().collection(kind).doc(personNo).get();
+                if (!d.exists) throw new Error(personNo + " is not in this parish.");
+                rec = d.data();
+                const ok = kind === "members" ? ["Active", "Diaspora"].includes(rec.status) : rec.status === "Active";
+                if (!ok) throw new Error(personNo + " cannot be marked (status: " + rec.status + ").");
+            }
+            const fullName = rec ? rec.fullName : val("x_name");
+            if (!fullName) throw new Error("Enter the name of the deceased.");
+            let age = $("x_age").value ? Number($("x_age").value) : null;
+            const dob = rec ? (rec.dob || (rec.dobYear ? `${rec.dobYear}-${String(rec.dobMonth).padStart(2, "0")}-${String(rec.dobDay).padStart(2, "0")}` : "")) : "";
+            if (age == null && dob) age = ageOf(dob, dateOfDeath);
+            const data = { fullName, nameLower: fullName.toLowerCase(), personNo, gender: rec ? rec.gender : val("x_gender"), dateOfDeath, age,
+                place: val("x_place"), burialDate: $("x_burial").value, informant: val("x_informant"), notes: val("x_notes").slice(0, 500),
+                ...officiantOf("x_officiant", "x_officiantOther"), createdAt: nowIso(), updatedAt: nowIso() };
+            const depts = kind === "members" ? await currentDeptDocs(personNo) : [];
+            const id = await createRecord("deaths", data, (t, newId) => {
+                if (!kind) return;
+                const ref = parishRef().collection(kind).doc(personNo);
+                if (kind === "clergy") {
+                    t.update(ref, { status: "Former", leftDate: dateOfDeath, leaveReason: "Called to glory", deathId: newId, updatedAt: nowIso(),
+                        serviceRecord: (rec.serviceRecord || []).map(r => r.to ? r : { ...r, to: dateOfDeath }) });
+                    t.set(statsRef(), { clergyCount: inc(-1), formerClergyCount: inc(1) }, { merge: true });
+                } else {
+                    t.update(ref, { status: "Called to glory", deathId: newId, updatedAt: nowIso() });
+                    const stat = kind === "members" ? (rec.status === "Diaspora" ? "diasporaCount" : "memberCount") : SERIES[kind].stat;
+                    t.set(statsRef(), { [stat]: inc(-1) }, { merge: true });
+                    depts.forEach(x => t.update(x.ref, { status: "Former", leftDate: dateOfDeath, updatedAt: nowIso() }));
+                }
+            });
+            closeModal("deathModal");
+            await loadParishData();
+            showSection("deaths");
+            await openYoungRecord("deaths", id);
+        } catch (e) { alert("Not saved: " + e.message); }
+    });
+}
+
+// ---- printable certificates (browser print -> "Save as PDF")
+async function showCertificate(kind, id) {
+    const d = await parishRef().collection(kind).doc(id).get();
+    if (!d.exists) return;
+    const p = d.data(), parish = localState.parish || {};
+    const certNo = certNoOf(p.no);
+    if (!certNo) return alert("Certificates need the parish lettering (e.g. IJY-ABK). Ask the Super Admin to set it for your parish.");
+    const logo = parish.logo ? `<img src="${esc(parish.logo)}" alt="Parish logo" class="w-20 h-20 rounded-full object-cover mx-auto border">`
+        : `<div class="w-20 h-20 mx-auto rounded-full bg-blue-900 text-yellow-300 flex items-center justify-center font-extrabold">CCC</div>`;
+    const line = (k, v) => `<tr><td class="py-1 pr-2 text-gray-600 align-top w-2/5">${esc(k)}</td><td class="py-1 font-semibold border-b border-dotted border-gray-400">${esc(v || "-")}</td></tr>`;
+    const isBirth = kind === "births";
+    const rows = isBirth
+        ? line("Name of child", p.fullName) + line("Gender", p.gender) + line("Date of birth", fmtIso(p.dob)) + line("Place of birth", p.place)
+          + line("Father", [p.fatherName, p.fatherNo && `(${p.fatherNo})`].filter(Boolean).join(" ")) + line("Mother", [p.motherName, p.motherNo && `(${p.motherNo})`].filter(Boolean).join(" "))
+          + line("Naming ceremony", fmtIso(p.namingDate)) + line("Officiating clergy", p.officiantName)
+        : line("Name of deceased", p.fullName) + line("Church number", p.personNo) + line("Gender", p.gender) + line("Date of death", fmtIso(p.dateOfDeath))
+          + line("Age", p.age ?? "") + line("Place of death", p.place) + line("Date of burial", fmtIso(p.burialDate)) + line("Officiating clergy", p.officiantName);
+    $("certPrint").innerHTML = `<div class="border-4 border-double ${isBirth ? "border-emerald-800" : "border-gray-800"} p-5 space-y-3 bg-white text-gray-900">
+        <div class="text-center space-y-1">${logo}
+            <p class="text-lg font-black tracking-wider text-blue-950">CELESTIAL CHURCH OF CHRIST</p>
+            <p class="text-[10px] tracking-[0.3em] text-gray-600">WORLD-WIDE</p>
+            <p class="text-sm font-bold">${esc(parish.name || "")}</p>
+            <p class="text-[11px] text-gray-600">${esc([parish.address, parish.city, parish.state, parish.country].filter(Boolean).join(", "))}</p></div>
+        <p class="text-center text-xl font-serif font-bold uppercase tracking-widest ${isBirth ? "text-emerald-800" : "text-gray-800"}">${isBirth ? "Certificate of Birth" : "Certificate of Death"}</p>
+        <p class="text-center text-xs">Certificate No. <span id="certNo" class="font-mono font-bold">${esc(certNo)}</span></p>
+        <p class="text-xs italic text-center">${isBirth ? "This is to certify that the child named below was born and named in this parish." : "This is to certify that the person named below was called to glory and laid to rest by this parish."}</p>
+        <table class="w-full text-xs">${rows}</table>
+        <div class="grid grid-cols-2 gap-6 pt-10 text-[11px] text-center">
+            <div><div class="border-t border-gray-700 pt-1">Shepherd-in-charge</div></div>
+            <div><div class="border-t border-gray-700 pt-1">${isBirth ? "Officiating clergy" : "Parish secretary"}</div></div></div>
+        <p class="text-[10px] text-gray-500 text-center">Issued ${esc(fmtIso(today()))} · Parish seal:</p></div>`;
+    closeModal("recordModal");
+    document.body.classList.add("cert-mode");
+    openModal("certModal");
+}
+function closeCertificate() { document.body.classList.remove("cert-mode"); closeModal("certModal"); }
+
+// ---- pending moves by age. There is no server: on app load the parish admin's browser lists who is due,
+// and one tap moves them all. Each move is one transaction (new record + new number + old record marked
+// Moved -> new id, with movedAt / movedBy), and the Firestore rules re-check the age against the server date.
+let pending = [];
+async function checkPendingMoves() {
+    if (localState.role !== "parish_admin") return;
+    const snaps = await Promise.all(Object.entries(YOUNG).map(([kind, y]) =>
+        parishRef().collection(kind).where("status", "==", "Active").where("dob", "<=", yearsBefore(y.age)).limit(50).get()
+            .then(s => s.docs.map(d => ({ kind, rec: d.data() })))));
+    pending = snaps.flat();
+    const box = $("pendingMoves");
+    box.classList.toggle("hidden", !pending.length);
+    box.innerHTML = pending.length ? `<p class="font-bold"><i class="fa-solid fa-arrow-up-right-dots"></i> ${pending.length} ${pending.length === 1 ? "person is" : "people are"} due to move up by age</p>
+        <div class="space-y-1">${pending.map(x => `<div class="pending-row flex justify-between gap-2 bg-white rounded p-2"><span><b>${esc(x.rec.fullName)}</b> <span class="font-mono text-gray-500">${esc(x.rec.no)}</span> · age ${ageOf(x.rec.dob)}</span><span class="text-right">→ ${esc(YOUNG[x.kind].nextName)}</span></div>`).join("")}</div>
+        <button id="moveAllBtn" onclick="moveAllPending()" class="w-full py-2.5 bg-violet-700 text-white rounded-lg font-bold">Move them all now</button>` : "";
+}
+async function moveOne(kind, rec) {
+    const y = YOUNG[kind];
+    const stamp = { createdAt: nowIso(), updatedAt: nowIso(), consentGiven: true, consentDate: rec.consentDate };
+    let person;
+    if (y.next === "members") {
+        const [yr, mo, da] = rec.dob.split("-").map(Number);
+        person = { fullName: rec.fullName, nameLower: rec.nameLower, gender: rec.gender, maritalStatus: "Single", address: rec.address || "",
+            phone: "", phoneDigits: "", email: "", rank: "", occupation: "", dobDay: da, dobMonth: mo, dobYear: yr,
+            nokName: rec.parentName || "", nokPhone: rec.parentPhone || "", nokAddress: rec.address || "", photo: "", important: false,
+            status: "Active", fromNo: rec.no, ...stamp };
+    } else {
+        person = { fullName: rec.fullName, nameLower: rec.nameLower, gender: rec.gender, dob: rec.dob, status: "Active", fromNo: rec.no,
+            parentName: rec.parentName || [rec.fatherName, rec.motherName].filter(Boolean).join(" & ").slice(0, 250),
+            parentPhone: rec.parentPhone || "", address: rec.address || "", ...stamp };
+    }
+    return createRecord(y.next, person, (t, newId) => {
+        t.update(parishRef().collection(kind).doc(rec.no), { status: "Moved", movedTo: newId, movedAt: nowIso(), movedBy: localState.user.uid, updatedAt: nowIso() });
+        t.set(statsRef(), { [SERIES[kind].stat]: inc(-1) }, { merge: true });
+    });
+}
+async function moveAllPending() {
+    if (!pending.length) return;
+    await busy("moveAllBtn", async () => {
+        const done = [], failed = [];
+        // Oldest stage first, so a record is never moved twice in one tap.
+        for (const x of [...pending].sort((a, b) => YOUNG[b.kind].age - YOUNG[a.kind].age)) {
+            try { done.push(`${x.rec.no} → ${await moveOne(x.kind, x.rec)}`); }
+            catch (e) { failed.push(`${x.rec.no}: ${e.message}`); }
+        }
+        alert(`Moved ${done.length}:\n${done.join("\n")}` + (failed.length ? `\n\nNot moved ${failed.length}:\n${failed.join("\n")}` : ""));
+        await loadParishData();
+    });
 }

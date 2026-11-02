@@ -42,21 +42,33 @@ service cloud.firestore {
     }
     function isEmail(v) { return v is string && v.size() <= 120 && v.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'); }
 
-    // ---- Numbers: CCC-CLG-001 / CCC-MBR-001, from parishes/{p}/meta/counters ----
+    // ---- Numbers: CCC-{PARISH}-{CITY}-MBR-001 / -CLG-001 (lettering from the parish doc), from parishes/{p}/meta/counters.
+    // Old records keep their old-style ids (CCC-MBR-001); new numbers continue the same counter, so no clash.
+    function lettering(p) { return get(docAt('parishes/' + p)).data.parishLetters + '-' + get(docAt('parishes/' + p)).data.cityLetters; }
+    function numId(p, tail, n) { return 'CCC-' + lettering(p) + '-' + tail + pad3(n); }
+    // Type of a number, old or new style: 'MBR', 'CLG', 'BRT', 'CHD', 'TEN', 'DTH'.
+    function noType(no) { return no.split('-')[no.split('-').size() - 2]; }
+    function isNo(v, types) { return v is string && v.matches('^CCC-([A-Z]{2,4}-[A-Z]{2,4}-)?(' + types + ')-[0-9]{3,}$'); }
     function pad3(n) { return n < 10 ? '00' + string(n) : (n < 100 ? '0' + string(n) : string(n)); }
     function counterPath(p) { return /databases/$(database)/documents/parishes/$(p)/meta/counters; }
     function counterBefore(p, k) { return get(counterPath(p)).data[k]; }
     function counterAfter(p, k) { return getAfter(counterPath(p)).data[k]; }
     // Creating record `id` must take exactly the next number in the same write.
     function takesNextNumber(p, k, prefix, id) {
-      return counterAfter(p, k) == counterBefore(p, k) + 1 && id == prefix + pad3(counterAfter(p, k));
+      return counterAfter(p, k) == counterBefore(p, k) + 1 && id == numId(p, prefix, counterAfter(p, k));
     }
 
     // ---- Member / clergy record ----
-    // The 28 ranks (male line). One regex = one expression (a 28-item list costs ~30).
-    function isRank(r) {
+    // Rank lines by gender. One regex = one expression (a 28-item list costs ~30).
+    // Male line: 28 ranks (batch 1). Female line: 9 ranks (batch 8, confirmed). 'Lace Elder Sister / Lace Senior Elder Sister'
+    // is ONE rank (the name differs by region).
+    function isMaleRank(r) {
       return r.matches('^(Brother|Elder Brother|Cape Elder Brother|Full Elder Brother|Senior Elder Brother|Superior Senior Elder Brother|Assistant Leader|Leader|Senior Leader|Superior Senior Leader|Honorary Assistant Evangelist|Assistant Evangelist|Honorary Evangelist|Evangelist|Honorary Senior Evangelist|Senior Evangelist|Special Most Senior Evangelist|Most Senior Evangelist|Special Venerable Most Senior Evangelist|Venerable Most Senior Evangelist|Assistant Superior Evangelist|Superior Evangelist|Assistant Venerable Superior Evangelist|Venerable Superior Evangelist|Assistant Most Superior Evangelist|Most Superior Evangelist|Supreme Evangelist|Pastor Reverend)$');
     }
+    function isFemaleRank(r) {
+      return r.matches('^(Sister|Elder Sister|Cape Elder Sister|Senior Elder Sister|Lace Elder Sister / Lace Senior Elder Sister|Superior Senior Elder Sister|Lace Superior Senior Elder Sister|Assistant Mother Celestial|Mother Celestial)$');
+    }
+    function isRank(r, g) { return g == 'Male' ? isMaleRank(r) : isFemaleRank(r); }
     function personKeys() {
       return ['memberNo', 'fullName', 'nameLower', 'gender', 'maritalStatus', 'address', 'phone', 'phoneDigits',
         'email', 'rank', 'occupation', 'dobDay', 'dobMonth', 'dobYear', 'anointDay', 'anointMonth', 'anointYear',
@@ -74,7 +86,7 @@ service cloud.firestore {
         && s(d.get('occupation', ''), 80) && s(d.get('nokName', ''), 120) && s(d.get('nokAddress', ''), 200)
         && s(d.get('nokPhone', ''), 20)
         && (d.get('email', '') == '' || (isEmail(d.email) && d.email == d.email.lower()))
-        && (d.get('rank', '') == '' || isRank(d.rank))
+        && (d.get('rank', '') == '' || isRank(d.rank, d.gender))
         && n(d.dobDay, 1, 31) && d.dobDay != null && n(d.dobMonth, 1, 12) && d.dobMonth != null
         && n(d.get('dobYear', null), 1900, 2100) && n(d.get('anointDay', null), 1, 31)
         && n(d.get('anointMonth', null), 1, 12) && n(d.get('anointYear', null), 1900, 2100)
@@ -86,12 +98,12 @@ service cloud.firestore {
     // TransferredOut (sent to another parish; history link only).
     function validMember(d, id) {
       return d.keys().hasOnly(personKeys().concat(['ordainedAs', 'abroadCountry', 'abroadCity', 'abroadParish',
-          'abroadSince', 'transferId', 'lifeNo', 'lifeParishCode']))
-        && validPerson(d, id) && d.status in ['Active', 'Ordained', 'Diaspora', 'TransferredOut']
-        && (d.status != 'Ordained' || str(d.get('ordainedAs', ''), 20))
+          'abroadSince', 'transferId', 'lifeNo', 'lifeParishCode', 'fromNo', 'deathId']))
+        && validPerson(d, id) && d.status in ['Active', 'Ordained', 'Diaspora', 'TransferredOut', 'Called to glory']
+        && (d.status != 'Ordained' || str(d.get('ordainedAs', ''), 30))
         && (d.status != 'Diaspora' || (str(d.get('abroadCountry', ''), 80) && s(d.get('abroadCity', ''), 80)
               && s(d.get('abroadParish', ''), 120) && isDate(d.get('abroadSince', ''))))
-        && s(d.get('lifeNo', ''), 20) && s(d.get('lifeParishCode', ''), 12) && s(d.get('transferId', ''), 40);
+        && s(d.get('lifeNo', ''), 30) && s(d.get('lifeParishCode', ''), 12) && s(d.get('transferId', ''), 40);
     }
     // Allowed status moves for an existing member record.
     function memberMoveOk(p, id) {
@@ -100,6 +112,8 @@ service cloud.firestore {
       return (o.status == 'Active' && d.status in ['Active', 'Ordained', 'Diaspora', 'TransferredOut'])
         || (o.status == 'Diaspora' && d.status in ['Active', 'Diaspora', 'TransferredOut'])
         || (o.status == 'Ordained' && d.status == 'Ordained')
+        // Called to glory: only with a death record for this exact member in the same write. Never deleted.
+        || (o.status in ['Active', 'Diaspora'] && d.status == 'Called to glory' && diedHere(p, d, id))
         // Back home only if the transfer was declined or cancelled.
         || (o.status == 'TransferredOut' && d.status == 'Active'
             && get(docAt('transfers/' + o.transferId)).data.status in ['Declined', 'Cancelled'])
@@ -129,7 +143,7 @@ service cloud.firestore {
     // Active member (not Ordained, not abroad, not transferred) may be Current.
     function validDeptMember(p, d, id) {
       return d.keys().hasOnly(['dept', 'memberNo', 'fullName', 'role', 'status', 'joinedDate', 'leftDate', 'updatedAt'])
-        && isUnit(p, d.dept) && d.memberNo is string && d.memberNo.matches('^CCC-MBR-[0-9]{3,}$')
+        && isUnit(p, d.dept) && isNo(d.memberNo, 'MBR')
         && id == d.dept + '_' + d.memberNo && str(d.fullName, 120) && s(d.get('role', ''), 40)
         && isDate(d.joinedDate) && d.status in ['Current', 'Former']
         && (d.status == 'Former' ? isDate(d.get('leftDate', ''))
@@ -141,12 +155,12 @@ service cloud.firestore {
     }
     function validClergy(d, id) {
       return d.keys().hasOnly(personKeys().concat(['formerMemberNo', 'joinedDate', 'leftDate', 'leaveReason',
-          'transferredTo', 'letterId', 'serviceRecord']))
+          'transferredTo', 'letterId', 'serviceRecord', 'deathId']))
         && validPerson(d, id) && d.status in ['Active', 'Former']
         // Clergy must carry an email so the clergy-not-admin rule can be enforced.
         && d.email != '' && !isAdminEmail(d.email)
         && getAfter(docAt('clergyIndex/' + d.email)).data.parishId != null
-        && s(d.get('formerMemberNo', ''), 20) && s(d.get('transferredTo', ''), 120) && s(d.get('letterId', ''), 60)
+        && s(d.get('formerMemberNo', ''), 30) && s(d.get('transferredTo', ''), 120) && s(d.get('letterId', ''), 60)
         && s(d.get('joinedDate', ''), 10) && s(d.get('leftDate', ''), 10)
         && d.get('leaveReason', '') in ['', 'Transfer', 'Retired', 'Called to glory', 'Other']
         && d.get('serviceRecord', []) is list && d.get('serviceRecord', []).size() <= 40
@@ -156,6 +170,86 @@ service cloud.firestore {
     function keepsIdentity() {
       return request.resource.data.memberNo == resource.data.memberNo
         && request.resource.data.consentDate == resource.data.consentDate;
+    }
+
+
+    // ---- Births (0-2), Sunday School Children (2-12), Teenagers (12-18), Deaths (Phase 4) ----
+    // Own number series, one counter doc each: parishes/{p}/meta/{brt|chd|ten|dth} = { n }.
+    function seriesInfo() {
+      return { 'brt': ['births', 'BRT-'], 'chd': ['children', 'CHD-'], 'ten': ['teens', 'TEN-'], 'dth': ['deaths', 'DTH-'] };
+    }
+    function takesNextIn(p, k, id) {
+      return getAfter(docAt('parishes/' + p + '/meta/' + k)).data.n
+          == (exists(docAt('parishes/' + p + '/meta/' + k)) ? get(docAt('parishes/' + p + '/meta/' + k)).data.n : 0) + 1
+        && id == numId(p, seriesInfo()[k][1], getAfter(docAt('parishes/' + p + '/meta/' + k)).data.n);
+    }
+    // Dates as yyyymmdd numbers; 'today' is the server's UTC date, so nobody can fake an age.
+    function ymdNum(v) { return int(v.split('-')[0]) * 10000 + int(v.split('-')[1]) * 100 + int(v.split('-')[2]); }
+    function todayNum() { return request.time.year() * 10000 + request.time.month() * 100 + request.time.day(); }
+    function ageAtLeast(dob, years) { return todayNum() >= ymdNum(dob) + years * 10000; }
+    function youngKeys() {
+      return ['no', 'fullName', 'nameLower', 'gender', 'dob', 'status', 'fromNo', 'movedTo', 'movedAt', 'movedBy', 'deathId',
+        'consentGiven', 'consentDate', 'createdAt', 'updatedAt'];
+    }
+    // Full date of birth (with year) is REQUIRED here: moves happen by age.
+    function validYoung(d, id) {
+      return d.no == id && str(d.fullName, 120) && d.nameLower == d.fullName.lower() && d.gender in ['Male', 'Female']
+        && isDate(d.dob) && ymdNum(d.dob) <= todayNum() + 1
+        && d.status in ['Active', 'Moved', 'Called to glory'] && s(d.get('fromNo', ''), 30)
+        && d.consentGiven == true && isDate(d.consentDate);
+    }
+    // A linked parent / clergy number must exist in this parish (or be left blank and typed as free text).
+    function linkOk(p, v) {
+      return v == '' || (isNo(v, 'MBR') && exists(docAt('parishes/' + p + '/members/' + v)))
+        || (isNo(v, 'CLG') && exists(docAt('parishes/' + p + '/clergy/' + v)));
+    }
+    function validBirth(p, d, id) {
+      return d.keys().hasOnly(youngKeys().concat(['place', 'fatherNo', 'fatherName', 'motherNo', 'motherName',
+          'namingDate', 'officiant', 'officiantName']))
+        && validYoung(d, id) && s(d.get('place', ''), 120) && s(d.get('fatherName', ''), 120) && s(d.get('motherName', ''), 120)
+        && optDate(d, 'namingDate') && s(d.get('officiantName', ''), 160)
+        && linkOk(p, d.get('fatherNo', '')) && linkOk(p, d.get('motherNo', ''))
+        && (d.get('officiant', '') == '' || linkOk(p, d.officiant));
+    }
+    function validKid(d, id) {
+      return d.keys().hasOnly(youngKeys().concat(['parentName', 'parentPhone', 'address']))
+        && validYoung(d, id) && s(d.get('parentName', ''), 250) && s(d.get('parentPhone', ''), 20) && s(d.get('address', ''), 200);
+    }
+    // Created by an automatic move: the older record is marked Moved -> this id in the same write.
+    function arrivesFrom(p, col, d, id) {
+      return !('fromNo' in d)
+        || (get(docAt('parishes/' + p + '/' + col + '/' + d.fromNo)).data.status == 'Active'
+            && getAfter(docAt('parishes/' + p + '/' + col + '/' + d.fromNo)).data.status == 'Moved'
+            && getAfter(docAt('parishes/' + p + '/' + col + '/' + d.fromNo)).data.movedTo == id);
+    }
+    function diedHere(p, d, id) { return getAfter(docAt('parishes/' + p + '/deaths/' + d.get('deathId', 'x'))).data.personNo == id; }
+    // Status changes: Active -> Moved (only at the right age, new record created in the same write, nothing else changes),
+    // Active -> Called to glory (with a death record). Moved and Called to glory are final: records are never deleted.
+    function youngMoveOk(p, nextCol, age, id) {
+      let o = resource.data;
+      let d = request.resource.data;
+      return d.no == o.no && d.consentDate == o.consentDate && d.get('fromNo', '') == o.get('fromNo', '') && o.status == 'Active'
+        && (d.status == 'Active'
+          || (d.status == 'Called to glory' && diedHere(p, d, id))
+          || (d.status == 'Moved' && ageAtLeast(o.dob, age)
+              && d.diff(o).affectedKeys().hasOnly(['status', 'movedTo', 'movedAt', 'movedBy', 'updatedAt'])
+              && d.movedBy == request.auth.uid && d.movedTo is string
+              && getAfter(docAt('parishes/' + p + '/' + nextCol + '/' + d.movedTo)).data.fromNo == id
+              && !exists(docAt('parishes/' + p + '/' + nextCol + '/' + d.movedTo))));
+    }
+    function colOf(no) { return { 'MBR': 'members', 'CLG': 'clergy', 'BRT': 'births', 'CHD': 'children', 'TEN': 'teens' }[noType(no)]; }
+    function validDeath(p, d, id) {
+      return d.keys().hasOnly(['no', 'fullName', 'nameLower', 'personNo', 'gender', 'dateOfDeath', 'age', 'place', 'burialDate',
+          'officiant', 'officiantName', 'informant', 'notes', 'createdAt', 'updatedAt'])
+        && d.no == id && str(d.fullName, 120) && d.nameLower == d.fullName.lower()
+        && d.get('gender', '') in ['', 'Male', 'Female'] && isDate(d.dateOfDeath)
+        && n(d.get('age', null), 0, 130) && s(d.get('place', ''), 120) && optDate(d, 'burialDate')
+        && s(d.get('officiantName', ''), 160) && (d.get('officiant', '') == '' || linkOk(p, d.officiant))
+        && s(d.get('informant', ''), 120) && s(d.get('notes', ''), 500)
+        // A linked person is marked Called to glory (clergy: Former) in the same write.
+        && (d.get('personNo', '') == ''
+            || (isNo(d.personNo, 'MBR|CLG|BRT|CHD|TEN')
+                && getAfter(docAt('parishes/' + p + '/' + colOf(d.personNo) + '/' + d.personNo)).data.get('deathId', '') == id));
     }
 
     // ---- Attendance (Phase 3) ----
@@ -218,7 +312,9 @@ service cloud.firestore {
     function nonNegInt(d, k) { return d.get(k, 0) is int && d.get(k, 0) >= 0; }
     function validStats(d) {
       return d.keys().hasOnly(['memberCount', 'clergyCount', 'formerClergyCount', 'attendanceTotal', 'serviceCount',
-          'financeTotal', 'financeCount', 'diasporaCount', 'byType', 'visitorCount', 'updatedAt'])
+          'financeTotal', 'financeCount', 'diasporaCount', 'byType', 'visitorCount', 'updatedAt',
+          'birthCount', 'childCount', 'teenCount', 'deathCount'])
+        && nonNegInt(d, 'birthCount') && nonNegInt(d, 'childCount') && nonNegInt(d, 'teenCount') && nonNegInt(d, 'deathCount')
         && (!('byType' in d) || (d.byType is map && d.byType.size() <= 20))
         && nonNegInt(d, 'visitorCount')
         && nonNegInt(d, 'diasporaCount')
@@ -226,9 +322,19 @@ service cloud.firestore {
         && nonNegInt(d, 'attendanceTotal') && nonNegInt(d, 'serviceCount') && nonNegInt(d, 'financeCount')
         && (d.get('financeTotal', 0) is int || d.get('financeTotal', 0) is float) && d.get('financeTotal', 0) >= 0;
     }
+    // Parish lettering (e.g. IJY + ABK) goes on every new number: CCC-IJY-ABK-MBR-001, -CLG-, -BRT-, -DTH-... Unique worldwide through
+    // parishLettering/{PARISH-CITY}, created in the same write. Set once by super_admin; never changed after.
+    function letteringOk(pid) {
+      let d = request.resource.data;
+      let o = resource == null ? {} : resource.data;
+      return (d.get('parishLetters', '') == o.get('parishLetters', '') && d.get('cityLetters', '') == o.get('cityLetters', ''))
+        || (o.get('parishLetters', '') == '' && d.parishLetters.matches('^[A-Z]{2,4}$') && d.cityLetters.matches('^[A-Z]{2,4}$')
+            && getAfter(docAt('parishLettering/' + d.parishLetters + '-' + d.cityLetters)).data.parishId == pid
+            && !exists(docAt('parishLettering/' + d.parishLetters + '-' + d.cityLetters)));
+    }
     function parishFieldKeys() { return ['name', 'address', 'mapsUrl', 'city', 'state', 'country', 'continent', 'logo', 'updatedAt']; }
     function validParish(d) {
-      return d.keys().hasOnly(parishFieldKeys().concat(['status', 'createdAt', 'code']))
+      return d.keys().hasOnly(parishFieldKeys().concat(['status', 'createdAt', 'code', 'parishLetters', 'cityLetters']))
         && (!('code' in d) || (d.code is string && d.code.matches('^[A-Z0-9]{6}$')))
         && str(d.name, 120) && d.status in ['Approved', 'Suspended']
         && optStr(d, 'address', 200) && optStr(d, 'city', 80) && optStr(d, 'state', 80) && optStr(d, 'country', 80)
@@ -303,8 +409,8 @@ service cloud.firestore {
 
     match /parishes/{parishId} {
       allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
-      allow create: if isSuper() && validParish(request.resource.data);
-      allow update: if (isSuper() && validParish(request.resource.data))
+      allow create: if isSuper() && validParish(request.resource.data) && letteringOk(parishId);
+      allow update: if (isSuper() && validParish(request.resource.data) && letteringOk(parishId))
         || (isParishAdminOf(parishId) && validParish(request.resource.data)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(parishFieldKeys()));
       allow delete: if isSuper();
@@ -315,11 +421,58 @@ service cloud.firestore {
         // Exactly one counter moves up by exactly 1, and the record with that number is created in the same write.
         allow update: if isParishAdminOf(parishId) && request.resource.data.keys().hasOnly(['clg', 'mbr'])
           && ((request.resource.data.clg == resource.data.clg + 1 && request.resource.data.mbr == resource.data.mbr
-                && existsAfter(docAt('parishes/' + parishId + '/clergy/CCC-CLG-' + pad3(request.resource.data.clg)))
-                && !exists(docAt('parishes/' + parishId + '/clergy/CCC-CLG-' + pad3(request.resource.data.clg))))
+                && existsAfter(docAt('parishes/' + parishId + '/clergy/' + numId(parishId, 'CLG-', request.resource.data.clg)))
+                && !exists(docAt('parishes/' + parishId + '/clergy/' + numId(parishId, 'CLG-', request.resource.data.clg))))
            || (request.resource.data.mbr == resource.data.mbr + 1 && request.resource.data.clg == resource.data.clg
-                && existsAfter(docAt('parishes/' + parishId + '/members/CCC-MBR-' + pad3(request.resource.data.mbr)))
-                && !exists(docAt('parishes/' + parishId + '/members/CCC-MBR-' + pad3(request.resource.data.mbr)))));
+                && existsAfter(docAt('parishes/' + parishId + '/members/' + numId(parishId, 'MBR-', request.resource.data.mbr)))
+                && !exists(docAt('parishes/' + parishId + '/members/' + numId(parishId, 'MBR-', request.resource.data.mbr)))));
+      }
+
+      // Number series for births, children, teens and deaths: each goes up by exactly 1 with its record.
+      match /meta/{k} {
+        allow read: if k in seriesInfo() && isParishAdminOf(parishId);
+        allow create, update: if k in seriesInfo() && isParishAdminOf(parishId)
+          && request.resource.data.keys().hasOnly(['n'])
+          && request.resource.data.n == (resource == null ? 0 : resource.data.n) + 1
+          && existsAfter(docAt('parishes/' + parishId + '/' + seriesInfo()[k][0] + '/' + numId(parishId, seriesInfo()[k][1], request.resource.data.n)))
+          && !exists(docAt('parishes/' + parishId + '/' + seriesInfo()[k][0] + '/' + numId(parishId, seriesInfo()[k][1], request.resource.data.n)));
+      }
+      // Births (0-2), Sunday School Children (2-12), Teenagers (12-18), Deaths: private to the parish.
+      // Super Admin and HQ see only the totals in parishStats.
+      match /births/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validBirth(parishId, request.resource.data, id)
+          && request.resource.data.status == 'Active' && !('fromNo' in request.resource.data)
+          && takesNextIn(parishId, 'brt', id);
+        allow update: if isParishAdminOf(parishId) && validBirth(parishId, request.resource.data, id)
+          && youngMoveOk(parishId, 'children', 2, id);
+        allow delete: if false;
+      }
+      match /children/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validKid(request.resource.data, id)
+          && request.resource.data.status == 'Active' && takesNextIn(parishId, 'chd', id)
+          && arrivesFrom(parishId, 'births', request.resource.data, id);
+        allow update: if isParishAdminOf(parishId) && validKid(request.resource.data, id)
+          && youngMoveOk(parishId, 'teens', 12, id);
+        allow delete: if false;
+      }
+      match /teens/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validKid(request.resource.data, id)
+          && request.resource.data.status == 'Active' && takesNextIn(parishId, 'ten', id)
+          && arrivesFrom(parishId, 'children', request.resource.data, id);
+        allow update: if isParishAdminOf(parishId) && validKid(request.resource.data, id)
+          && youngMoveOk(parishId, 'members', 18, id);
+        allow delete: if false;
+      }
+      match /deaths/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validDeath(parishId, request.resource.data, id)
+          && takesNextIn(parishId, 'dth', id);
+        allow update: if isParishAdminOf(parishId) && validDeath(parishId, request.resource.data, id)
+          && request.resource.data.get('personNo', '') == resource.data.get('personNo', '');
+        allow delete: if false;
       }
 
       // Church members: private to the parish; super_admin reads only those flagged important.
@@ -327,8 +480,9 @@ service cloud.firestore {
         allow read: if isParishAdminOf(parishId) || (isSuper() && resource.data.important == true);
         allow create: if isParishAdminOf(parishId) && validMember(request.resource.data, memberId)
           && request.resource.data.status == 'Active'
-          && takesNextNumber(parishId, 'mbr', 'CCC-MBR-', memberId)
-          && arrivesByTransfer(parishId, request.resource.data);
+          && takesNextNumber(parishId, 'mbr', 'MBR-', memberId)
+          && arrivesByTransfer(parishId, request.resource.data)
+          && arrivesFrom(parishId, 'teens', request.resource.data, memberId) && !('deathId' in request.resource.data);
         allow update: if isParishAdminOf(parishId) && validMember(request.resource.data, memberId) && keepsIdentity()
           && request.resource.data.get('lifeNo', '') == resource.data.get('lifeNo', '')
           && memberMoveOk(parishId, memberId) && sendsTransfer(parishId, memberId);
@@ -339,7 +493,7 @@ service cloud.firestore {
         allow read: if isParishAdminOf(parishId) || isSuper();
         allow create: if isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId)
           && request.resource.data.status == 'Active'
-          && takesNextNumber(parishId, 'clg', 'CCC-CLG-', clergyId);
+          && takesNextNumber(parishId, 'clg', 'CLG-', clergyId);
         allow update: if isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId) && keepsIdentity();
         allow delete: if false;
       }
@@ -348,7 +502,7 @@ service cloud.firestore {
         allow read: if isParishAdminOf(parishId);
         allow create: if isParishAdminOf(parishId)
           && request.resource.data.keys().hasOnly(['clergyId', 'image', 'createdAt'])
-          && str(request.resource.data.clergyId, 20) && optImage(request.resource.data, 'image', 400000);
+          && str(request.resource.data.clergyId, 30) && optImage(request.resource.data, 'image', 400000);
         allow update, delete: if false;
       }
       // Departments: term dates per department, and one membership doc per (department, member).
@@ -414,6 +568,17 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ---- Parish lettering index: one doc per PARISH-CITY lettering, so no two parishes share it ----
+    match /parishLettering/{id} {
+      allow get: if isSuper() || role() == 'parish_admin';
+      allow list: if isSuper();
+      allow create: if isSuper() && request.resource.data.keys().hasOnly(['parishId'])
+        && id.matches('^[A-Z]{2,4}-[A-Z]{2,4}$')
+        && getAfter(docAt('parishes/' + request.resource.data.parishId)).data.parishLetters + '-'
+           + getAfter(docAt('parishes/' + request.resource.data.parishId)).data.cityLetters == id;
+      allow update, delete: if false;
+    }
+
     // ---- Member transfers between parishes (with the member's consent) ----
     // Old parish sends (member becomes TransferredOut in the same write). New parish accepts by
     // creating its own record that keeps the life-long number. Super admin never reads these.
@@ -422,7 +587,7 @@ service cloud.firestore {
           'toParish', 'toCode', 'person', 'consentGiven', 'consentDate', 'status', 'createdAt'])
         && isParishAdminOf(d.fromParish) && d.status == 'Pending'
         && d.consentGiven == true && isDate(d.consentDate) && d.person is map
-        && str(d.lifeNo, 20) && str(d.lifeParishCode, 12)
+        && str(d.lifeNo, 30) && str(d.lifeParishCode, 12)
         && d.toParish == get(docAt('parishCodes/' + d.toCode)).data.parishId && d.toParish != d.fromParish
         && getAfter(docAt('parishes/' + d.fromParish + '/members/' + d.memberNo)).data.status == 'TransferredOut'
         && d.fromCity == get(docAt('parishes/' + d.fromParish)).data.get('city', '')

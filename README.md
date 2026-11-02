@@ -41,6 +41,20 @@ with the invited email + code.
   `units/u_xxx` = admin-defined units. Absent 3+ weeks is worked out per unit; Follow-up rolls it up with a wa.me link.
   `visitors/{id}` (consent required; "Make member" creates the member in the same transaction). `cleaning/{saturday}`.
   `parishStats` gains `byType` (per service type) and `visitorCount`; Super Admin/HQ see only these totals.
+- **Parish lettering** (Phase 4): `parishes/{p}.parishLetters` + `cityLetters` (2-4 capital letters each, e.g. IJY + ABK).
+  Unique worldwide through `parishLettering/{IJY-ABK}`, written in the same batch. Super Admin sets it when creating a parish
+  (or once, with "Set parish lettering", for an existing one); it never changes. Every NEW number carries it:
+  `CCC-IJY-ABK-MBR-001`, `-CLG-`, `-BRT-`, `-CHD-`, `-TEN-`, `-DTH-`. No lettering, no new numbers. Old `CCC-MBR-001` records keep working.
+- **Female rank line** (Phase 4): the rank dropdown shows the male line (28) for men and the female line (9) for women; the rules check it.
+- **Births** (0-2) `births/{no}`, **Sunday School Children** (2-12) `children/{no}`, **Teenagers** (12-18) `teens/{no}`: each its own
+  section and number series (`meta/brt|chd|ten` = `{n}`), full date of birth required. **Deaths** `deaths/{no}` (`meta/dth`).
+- **Moves by age**: on load the parish admin sees "pending moves"; one tap moves them all. Each move is one transaction:
+  the new record (with `fromNo`) + the old one marked `Moved`, `movedTo`, `movedAt`, `movedBy`. At 18 a teen becomes a member with a
+  new CCC-MBR number. The rules re-check the age against the server date. Needs the composite indexes in `firestore.indexes.json`.
+- **Called to glory**: saving a death with a church number marks that record `Called to glory` (clergy: Former, reason Called to glory)
+  in the same write. It leaves the counts and is never deleted.
+- **Certificates**: birth and death certificates (church name, parish logo, number, signature lines). Print / Save as PDF from the browser.
+  Issued by the parish admin only. parishStats gains birthCount, childCount, teenCount, deathCount (Super Admin / HQ: totals only).
 - `flows/{id}` - places + year only (no names); Super Admin's "Diaspora Flows" summary.
 
 ## Set up Firebase later (on your phone)

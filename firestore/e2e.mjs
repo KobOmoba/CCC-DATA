@@ -130,6 +130,7 @@ try {
   await page.fill('#np_maps', 'https://maps.app.goo.gl/test123');
   await page.fill('#np_city', 'Ikeja'); await page.fill('#np_state', 'Lagos'); await page.fill('#np_country', 'Nigeria');
   await page.selectOption('#np_continent', 'Africa');
+  await page.fill('#np_pletters', 'tcp'); await page.fill('#np_cletters', 'ikj');
   await page.fill('#np_email', 'admin@test.local');
   await page.click('#createParishBtn');
   await page.waitForSelector('#inviteCode');
@@ -180,7 +181,7 @@ try {
   await nav('members');
   await page.waitForFunction(() => document.querySelectorAll('#membersTable .person-row').length === 5);
   const nos = await page.$$eval('#membersTable .person-row', els => els.map(e => e.dataset.no));
-  assert.deepEqual(nos, ['CCC-MBR-001', 'CCC-MBR-002', 'CCC-MBR-003', 'CCC-MBR-004', 'CCC-MBR-005']);
+  assert.deepEqual(nos, ['CCC-TCP-IKJ-MBR-001', 'CCC-TCP-IKJ-MBR-002', 'CCC-TCP-IKJ-MBR-003', 'CCC-TCP-IKJ-MBR-004', 'CCC-TCP-IKJ-MBR-005']);
   await fullShot('06-members-list');
 
   // Photos really were compressed to ~60KB JPEG and stored in Firestore.
@@ -195,7 +196,7 @@ try {
   await addPerson('clergy', 7, { name: 'TEST Ev Gbenga Lawal', gender: 'Male', marital: 'Married', phone: '0803 222 0002', email: 'gbenga@test.local', rank: 'Evangelist', occupation: 'Clergy', dob: [7, 4], initials: 'GL', color: '#a16207' });
   await nav('clergy');
   await page.waitForFunction(() => document.querySelectorAll('#clergyTable .person-row').length === 2);
-  assert.deepEqual(await page.$$eval('#clergyTable .person-row', els => els.map(e => e.dataset.no)), ['CCC-CLG-001', 'CCC-CLG-002']);
+  assert.deepEqual(await page.$$eval('#clergyTable .person-row', els => els.map(e => e.dataset.no)), ['CCC-TCP-IKJ-CLG-001', 'CCC-TCP-IKJ-CLG-002']);
   await fullShot('08-clergy-list');
 
   // Clergy-not-admin: the admin's own email cannot be used for clergy.
@@ -206,7 +207,7 @@ try {
 
   // 8. Transfer clergy 001 to Former, with a letter photo. Number kept, shown "· Former".
   await nav('clergy');
-  await page.click('#clergyTable .person-row[data-no="CCC-CLG-001"]');
+  await page.click('#clergyTable .person-row[data-no="CCC-TCP-IKJ-CLG-001"]');
   await page.waitForSelector('#recordModal:not(.hidden)');
   await page.click('text=Transfer / move to Former');
   await page.waitForSelector('#transferModal:not(.hidden)');
@@ -218,26 +219,26 @@ try {
   await page.click('#saveTransferBtn');
   await modalClosed('transferModal');
   await page.waitForSelector('#recordModal:not(.hidden)');
-  await page.waitForSelector('#recordTitle:has-text("CCC-CLG-001 · Former")');
+  await page.waitForSelector('#recordTitle:has-text("CCC-TCP-IKJ-CLG-001 · Former")');
   await page.click('text=View transfer letter');
   await page.waitForSelector('#letterImg:not(.hidden)');
   await fullShot('10-former-service-record');
   await page.evaluate(() => closeModal('recordModal'));
   await nav('former');
-  await page.waitForSelector('#formerTable .person-row[data-no="CCC-CLG-001"]');
-  assert.match(await page.textContent('#formerTable'), /CCC-CLG-001 · Former/);
+  await page.waitForSelector('#formerTable .person-row[data-no="CCC-TCP-IKJ-CLG-001"]');
+  assert.match(await page.textContent('#formerTable'), /CCC-TCP-IKJ-CLG-001 · Former/);
   await nav('clergy');
   await page.waitForFunction(() => document.querySelectorAll('#clergyTable .person-row').length === 1);
   await shot('11-former-clergy-list');
 
-  // 9. Ordain member 005: new CCC-CLG-003, MBR-005 retired with a history link.
+  // 9. Ordain member 005: new CCC-TCP-IKJ-CLG-003, MBR-005 retired with a history link.
   await nav('members');
-  await page.click('#membersTable .person-row[data-no="CCC-MBR-005"]');
+  await page.click('#membersTable .person-row[data-no="CCC-TCP-IKJ-MBR-005"]');
   await page.waitForSelector('#recordModal:not(.hidden)');
   promptAnswer = 'emeka@test.local';
   await page.click('text=Ordain as clergy');
-  await page.waitForSelector('#recordTitle:has-text("CCC-CLG-003")');
-  assert.match(await page.textContent('#recordBody'), /Ordained from CCC-MBR-005/);
+  await page.waitForSelector('#recordTitle:has-text("CCC-TCP-IKJ-CLG-003")');
+  assert.match(await page.textContent('#recordBody'), /Ordained from CCC-TCP-IKJ-MBR-005/);
   await shot('12-ordained-new-number');
   await page.evaluate(() => closeModal('recordModal'));
 
@@ -245,14 +246,14 @@ try {
   await nav('families');
   await page.click('#addFamilyBtn');
   await page.fill('#f_name', 'TEST Ogun family');
-  await page.fill('#f_husband', 'CCC-MBR-001');
-  await page.fill('#f_wife', 'ccc-mbr-002');
-  await page.fill('#f_children', 'CCC-MBR-003');
+  await page.fill('#f_husband', 'CCC-TCP-IKJ-MBR-001');
+  await page.fill('#f_wife', 'ccc-tcp-ikj-mbr-002');
+  await page.fill('#f_children', 'CCC-TCP-IKJ-MBR-003');
   await page.click('#saveFamilyBtn');
   await modalClosed('familyModal');
   await page.waitForFunction(() => document.querySelectorAll('.family-card .person-row').length === 3);
   await fullShot('13-family-view');
-  await page.click('.family-card .person-row[data-no="CCC-MBR-003"]');           // each member separately
+  await page.click('.family-card .person-row[data-no="CCC-TCP-IKJ-MBR-003"]');           // each member separately
   await page.waitForSelector('#recordBody:has-text("TEST Ogun family")');
   await shot('14-family-member-alone');
   await page.evaluate(() => closeModal('recordModal'));
@@ -264,10 +265,10 @@ try {
     await shot(name);
   };
   await gsearch('test ogun', [], '15a-search-none');      // prefix search: "test ogun" is not a name prefix
-  await gsearch('TEST Adebayo', ['CCC-MBR-001'], '15-search-name');
-  await gsearch('0803 222 0002', ['CCC-CLG-002'], '16-search-phone');
-  await gsearch('ccc-mbr-4', ['CCC-MBR-004'], '17-search-number');
-  await gsearch('TEST Ven', ['CCC-CLG-001'], '17b-search-former-clergy');
+  await gsearch('TEST Adebayo', ['CCC-TCP-IKJ-MBR-001'], '15-search-name');
+  await gsearch('0803 222 0002', ['CCC-TCP-IKJ-CLG-002'], '16-search-phone');
+  await gsearch('ccc-tcp-ikj-mbr-4', ['CCC-TCP-IKJ-MBR-004'], '17-search-number');
+  await gsearch('TEST Ven', ['CCC-TCP-IKJ-CLG-001'], '17b-search-former-clergy');
   await page.fill('#globalSearch', '');
 
   // 12. Dashboard counts: 4 members (005 ordained), 2 active clergy (001 former), total 6.
@@ -290,17 +291,17 @@ try {
   };
   await page.click('#nav-dept-choir');
   await page.waitForSelector('#section-dept:not(.hidden)');
-  await deptAdd('TEST Bisola', 'CCC-MBR-002', 'Head');
-  await deptAdd('ccc-mbr-1', 'CCC-MBR-001');
-  await deptAdd('CCC-MBR-004', 'CCC-MBR-004');
+  await deptAdd('TEST Bisola', 'CCC-TCP-IKJ-MBR-002', 'Head');
+  await deptAdd('ccc-tcp-ikj-mbr-1', 'CCC-TCP-IKJ-MBR-001');
+  await deptAdd('CCC-TCP-IKJ-MBR-004', 'CCC-TCP-IKJ-MBR-004');
   // Clergy cannot join: CLG number refused, ordained member (005, now clergy) disabled.
-  await page.fill('#d_find', 'CCC-CLG-002');
+  await page.fill('#d_find', 'CCC-TCP-IKJ-CLG-002');
   await page.waitForSelector('#d_matches:has-text("Clergy cannot join a department")');
   await page.fill('#d_find', 'TEST Emeka');
-  await page.waitForSelector('#d_matches .dept-match[data-no="CCC-MBR-005"][disabled]');
+  await page.waitForSelector('#d_matches .dept-match[data-no="CCC-TCP-IKJ-MBR-005"][disabled]');
   await shot('22-dept-clergy-refused');
   // Rules refuse it too, even if the UI were bypassed.
-  const bypass = await page.evaluate(() => parishRef().collection('deptMembers').doc('choir_CCC-CLG-002').set({ dept: 'choir', memberNo: 'CCC-CLG-002', fullName: 'x', role: '', status: 'Current', joinedDate: today(), updatedAt: nowIso() }).then(() => 'WROTE', e => e.code));
+  const bypass = await page.evaluate(() => parishRef().collection('deptMembers').doc('choir_CCC-TCP-IKJ-CLG-002').set({ dept: 'choir', memberNo: 'CCC-TCP-IKJ-CLG-002', fullName: 'x', role: '', status: 'Current', joinedDate: today(), updatedAt: nowIso() }).then(() => 'WROTE', e => e.code));
   assert.equal(bypass, 'permission-denied', 'clergy blocked by rules');
   await page.fill('#d_find', '');
   // Choir term ended 1 Oct 2026 -> overdue banner. Move 001 to Former members.
@@ -309,14 +310,14 @@ try {
   assert.equal(await page.inputValue('#d_termEnd'), '2026-10-01', 'term end = start + 2 years');
   await page.click('#saveTermBtn');
   await page.waitForSelector('#deptBanner:has-text("OVERDUE")');
-  await page.click('#deptMembersList .dept-row[data-no="CCC-MBR-001"] button:has-text("Remove")');
+  await page.click('#deptMembersList .dept-row[data-no="CCC-TCP-IKJ-MBR-001"] button:has-text("Remove")');
   await page.waitForFunction(() => document.getElementById('deptFormerCount').textContent === '1' && document.getElementById('deptCount').textContent === '2');
   await page.click('#section-dept details summary');
   await fullShot('23-dept-choir-members-former');
   // Parochial: term ends 1 Dec 2026 -> due within 60 days.
   await page.click('#nav-dept-parochial');
   await page.waitForFunction(() => document.getElementById('deptTitle').textContent === 'Parochial Committee');
-  await deptAdd('TEST Adebayo', 'CCC-MBR-001', 'Chairman');
+  await deptAdd('TEST Adebayo', 'CCC-TCP-IKJ-MBR-001', 'Chairman');
   await page.fill('#d_termStart', '2024-12-01'); await page.dispatchEvent('#d_termStart', 'change');
   await page.click('#saveTermBtn');
   await page.waitForSelector('#deptBanner:has-text("Election due in")');
@@ -328,14 +329,14 @@ try {
 
   // ---------------- PHASE 2: members in diaspora ----------------
   await nav('members');
-  await page.click('#membersTable .person-row[data-no="CCC-MBR-004"]');
+  await page.click('#membersTable .person-row[data-no="CCC-TCP-IKJ-MBR-004"]');
   await page.waitForSelector('#recordBody:has-text("Choir")');
   await page.click('#recordActions button:has-text("Moved abroad")');
   await page.fill('#ab_country', 'United Kingdom'); await page.fill('#ab_city', 'Manchester'); await page.fill('#ab_parish', 'CCC Manchester Parish');
   await page.fill('#ab_date', '2026-10-15');
   await shot('26-moved-abroad-form');
   await page.click('#saveAbroadBtn');
-  await page.waitForSelector('#section-diaspora:not(.hidden) .abroad-row[data-no="CCC-MBR-004"]');
+  await page.waitForSelector('#section-diaspora:not(.hidden) .abroad-row[data-no="CCC-TCP-IKJ-MBR-004"]');
   await page.waitForFunction(() => document.getElementById('abroadCount').textContent === '1');
   await fullShot('27-diaspora-list');
   await page.evaluate(() => loadParishData());
@@ -349,7 +350,7 @@ try {
   await shot('19-super-dashboard');
   await nav('register');
   await page.waitForFunction(() => document.querySelectorAll('#registerList .world-row').length === 3);
-  assert.match(await page.textContent('#registerList'), /CCC-CLG-001 · Former/);
+  assert.match(await page.textContent('#registerList'), /CCC-TCP-IKJ-CLG-001 · Former/);
   await fullShot('20-super-clergy-register');
   await nav('important');
   await page.waitForFunction(() => document.querySelectorAll('#importantList .world-row').length === 1);
@@ -358,7 +359,7 @@ try {
   const leak = await page.evaluate(async (p) => {
     const r = {};
     for (const [k, fn] of Object.entries({
-      ordinaryMember: () => db.collection('parishes').doc(p).collection('members').doc('CCC-MBR-002').get(),
+      ordinaryMember: () => db.collection('parishes').doc(p).collection('members').doc('CCC-TCP-IKJ-MBR-002').get(),
       allMembers: () => db.collection('parishes').doc(p).collection('members').get(),
       finances: () => db.collection('parishes').doc(p).collection('finances').get(),
       families: () => db.collection('parishes').doc(p).collection('families').get(),
@@ -370,6 +371,7 @@ try {
   await nav('parishes');
   const b2 = dialogs.length;
   await page.fill('#np_name', 'TEST Second Parish');
+  await page.fill('#np_pletters', 'TSP'); await page.fill('#np_cletters', 'IKJ');
   await page.fill('#np_email', 'gbenga@test.local');
   await page.click('#createParishBtn');
   await page.waitForFunction(() => !document.getElementById('createParishBtn').disabled);
@@ -379,6 +381,7 @@ try {
   // ---------------- PHASE 2: member transfer between parishes ----------------
   await page.fill('#np_name', 'TEST London Parish');
   await page.fill('#np_city', 'London'); await page.fill('#np_country', 'United Kingdom'); await page.selectOption('#np_continent', 'Europe');
+  await page.fill('#np_pletters', 'TLP'); await page.fill('#np_cletters', 'LDN');
   await page.fill('#np_email', 'london@test.local');
   await page.click('#createParishBtn');
   await page.waitForSelector('#newParishCode');
@@ -395,7 +398,7 @@ try {
   // Old parish sends member 003 with consent, by the London parish code.
   await login('admin@test.local');
   await nav('members');
-  await page.click('#membersTable .person-row[data-no="CCC-MBR-003"]');
+  await page.click('#membersTable .person-row[data-no="CCC-TCP-IKJ-MBR-003"]');
   await page.waitForSelector('#recordModal:not(.hidden)');
   await page.click('#recordActions button:has-text("Transfer to another parish")');
   await page.fill('#st_code', londonCode.toLowerCase());
@@ -410,16 +413,16 @@ try {
   await login('london@test.local');
   await nav('diaspora');
   await page.waitForSelector('.incoming-row');
-  assert.match(await page.textContent('#incomingList'), /Life no\. CCC-MBR-003/);
+  assert.match(await page.textContent('#incomingList'), /Life no\. CCC-TCP-IKJ-MBR-003/);
   await shot('30-incoming-transfer');
   await page.click('.incoming-row button:has-text("Accept")');
   await page.waitForSelector('#recordModal:not(.hidden) #recordBody:has-text("Life-long number")');
-  assert.match(await page.textContent('#recordBody'), /CCC-MBR-003 \(/);
-  assert.match(await page.textContent('#recordTitle'), /^CCC-MBR-001$/);
+  assert.match(await page.textContent('#recordBody'), /CCC-TCP-IKJ-MBR-003 \(/);
+  assert.match(await page.textContent('#recordTitle'), /^CCC-TLP-LDN-MBR-001$/);
   await shot('31-accepted-life-number');
   await page.evaluate(() => closeModal('recordModal'));
   await nav('members');
-  await page.waitForSelector('#membersTable .person-row:has-text("Life no. CCC-MBR-003")');
+  await page.waitForSelector('#membersTable .person-row:has-text("Life no. CCC-TCP-IKJ-MBR-003")');
   await shot('32-new-parish-members');
   await logout();
 
@@ -480,7 +483,7 @@ try {
   await page.selectOption('#da_dept', 'choir');
   await page.waitForSelector('#daList .da-row');
   const old = await page.evaluate(() => addDays(localToday(), -35));
-  await page.evaluate(d => parishRef().collection('deptAttendance').doc('choir_' + d).set({ dept: 'choir', date: d, kind: 'Practice', present: ['CCC-MBR-002'], notes: '', updatedAt: nowIso() }), old);
+  await page.evaluate(d => parishRef().collection('deptAttendance').doc('choir_' + d).set({ dept: 'choir', date: d, kind: 'Practice', present: ['CCC-TCP-IKJ-MBR-002'], notes: '', updatedAt: nowIso() }), old);
   await page.selectOption('#da_kind', 'Practice');
   await page.click('#saveDeptAttBtn');  // nobody ticked today
   await page.waitForSelector('#daAbsent .absent-row');
@@ -516,7 +519,7 @@ try {
   await page.selectOption('#p_dobDay', '5'); await page.selectOption('#p_dobMonth', '5');
   await page.check('#p_consent');
   await page.click('#savePersonBtn');
-  await page.waitForSelector('.visitor-row:has-text("Member CCC-MBR-")');
+  await page.waitForSelector('.visitor-row:has-text("Member CCC-TCP-IKJ-MBR-")');
   await shot('46-visitor-converted');
 
   // Saturday cleaning rota.
@@ -548,6 +551,167 @@ try {
   await fullShot('50-report-print-view');
   await page.emulateMedia({ media: 'screen' });
   await logout();
+
+  // ---------------------------------------------------------------- Phase 4
+  await login('admin@test.local');
+  const isoYearsAgo = (y, days = 0) => { const d = new Date(); d.setUTCFullYear(d.getUTCFullYear() - y); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
+  // Female rank line: the dropdown follows the gender.
+  await nav('members');
+  await page.click('#addMemberBtn');
+  await page.waitForSelector('#personModal:not(.hidden)');
+  const rankOpts = () => page.$$eval('#p_rank option', os => os.map(o => o.value).filter(Boolean));
+  assert.equal((await rankOpts()).length, 0, 'no ranks before gender');
+  await page.selectOption('#p_gender', 'Female');
+  let ro = await rankOpts();
+  assert.ok(ro.includes('Mother Celestial') && ro.includes('Lace Elder Sister / Lace Senior Elder Sister') && !ro.includes('Evangelist'), 'female line');
+  assert.equal(ro.length, 9);
+  await page.selectOption('#p_rank', 'Senior Elder Sister');
+  await page.locator('#p_rank').scrollIntoViewIfNeeded();
+  await shot('60-female-rank-line');
+  await page.selectOption('#p_gender', 'Male');
+  ro = await rankOpts();
+  assert.ok(ro.includes('Supreme Evangelist') && !ro.includes('Mother Celestial') && ro.length === 28, 'male line');
+  assert.equal(await page.inputValue('#p_rank'), '', 'rank cleared when gender changes');
+  await page.click('#personModal button:has-text("Cancel")');
+
+  // Births: record with a linked father (member number) and free-text mother, then the certificate.
+  async function fillYoung(kind, name, gender, dob) {
+    await nav(kind);
+    await page.click('#add-' + kind);
+    await page.waitForSelector('#youngModal:not(.hidden)');
+    await page.fill('#y_name', name); await page.selectOption('#y_gender', gender);
+    if (dob) await page.fill('#y_dob', dob);
+  }
+  await fillYoung('births', 'TEST Baby Ayomide Ogun', 'Female', isoYearsAgo(1));
+  await page.fill('#y_place', 'Ikeja General Hospital');
+  await page.fill('#y_father', 'CCC-TCP-IKJ-MBR-001');
+  await page.fill('#y_mother', 'TEST Bisola Ogun');
+  await page.fill('#y_naming', isoYearsAgo(1, 8));
+  await page.waitForFunction(() => document.querySelectorAll('#y_officiant option').length > 1);
+  await page.selectOption('#y_officiant', { index: 1 });
+  await page.check('#y_consent');
+  await fullShot('61-birth-form');
+  await page.click('#saveYoungBtn');
+  await page.waitForSelector('#recordModal:not(.hidden)');
+  assert.match(await page.textContent('#recordTitle'), /CCC-TCP-IKJ-BRT-001/);
+  assert.match(await page.textContent('#recordBody'), /TEST Adebayo Ogun/, 'father linked by number');
+  await shot('62-birth-record');
+  await page.click('#recordActions button:has-text("Birth certificate")');
+  await page.waitForSelector('#certModal:not(.hidden)');
+  assert.equal(await page.textContent('#certNo'), 'CCC-TCP-IKJ-BRT-001');
+  assert.match(await page.textContent('#certPrint'), /CELESTIAL CHURCH OF CHRIST[\s\S]*Certificate of Birth[\s\S]*Shepherd-in-charge/i);
+  await page.locator('#certPrint').screenshot({ path: join(SHOTS, '63-birth-certificate.png') });
+  await page.emulateMedia({ media: 'print' });
+  await shot('64-birth-certificate-print-view');
+  await page.pdf({ path: join(SHOTS, 'birth-certificate-CCC-TCP-IKJ-BRT-001.pdf'), format: 'A4', printBackground: true });
+  await page.emulateMedia({ media: 'screen' });
+  await page.click('#certModal button:has-text("Close")');
+
+  // Children / teens need a FULL date of birth.
+  await fillYoung('children', 'TEST No Year Child', 'Male', '');
+  await page.check('#y_consent');
+  let dn = dialogs.length;
+  await page.click('#saveYoungBtn');
+  await page.waitForTimeout(300);
+  assert.ok(dialogs.length > dn && /full date of birth/.test(dialogs.at(-1)), 'dob required');
+  await page.click('#youngModal button:has-text("Cancel")');
+
+  // People who reach the age: a 2-year-old baby, a 12-year-old child, an 18-year-old teen.
+  await fillYoung('births', 'TEST Toddler Two', 'Male', isoYearsAgo(2, -3));
+  await page.check('#y_consent'); await page.click('#saveYoungBtn'); await page.waitForSelector('#recordModal:not(.hidden)');
+  await page.click('#recordActions button:has-text("Close")');
+  await fillYoung('children', 'TEST Child Twelve', 'Female', isoYearsAgo(12, -1));
+  await page.fill('#y_parent', 'TEST Bisola Ogun'); await page.fill('#y_parentPhone', '0803 111 0002');
+  await page.check('#y_consent'); await page.click('#saveYoungBtn'); await page.waitForSelector('#recordModal:not(.hidden)');
+  await page.click('#recordActions button:has-text("Close")');
+  await fillYoung('children', 'TEST Child Seven', 'Male', isoYearsAgo(7));
+  await page.check('#y_consent'); await page.click('#saveYoungBtn'); await page.waitForSelector('#recordModal:not(.hidden)');
+  await page.click('#recordActions button:has-text("Close")');
+  await fillYoung('teens', 'TEST Teen Eighteen', 'Male', isoYearsAgo(18, -2));
+  await page.fill('#y_parent', 'TEST Adebayo Ogun'); await page.fill('#y_address', '1 Ikorodu Road');
+  await page.check('#y_consent'); await page.click('#saveYoungBtn'); await page.waitForSelector('#recordModal:not(.hidden)');
+  await page.click('#recordActions button:has-text("Close")');
+  await nav('children');
+  await page.waitForSelector('#childrenList .young-row');
+  await fullShot('65-sunday-school-children');
+
+  // Pending moves on app load: list first, then one tap moves them all.
+  await page.reload();
+  await page.waitForSelector('#pendingMoves .pending-row');
+  assert.equal(await page.locator('#pendingMoves .pending-row').count(), 3, 'baby 2, child 12, teen 18 (not the 1-year-old or the 7-year-old)');
+  await fullShot('66-pending-moves');
+  dn = dialogs.length;
+  await page.click('#moveAllBtn');
+  await page.waitForSelector('#pendingMoves.hidden', { state: 'attached', timeout: 20000 });
+  assert.match(dialogs.at(-1), /Moved 3/);
+  assert.match(dialogs.at(-1), /CCC-TCP-IKJ-TEN-001 → CCC-TCP-IKJ-MBR-\d{3}/);
+  assert.match(dialogs.at(-1), /CCC-TCP-IKJ-CHD-001 → CCC-TCP-IKJ-TEN-002/);
+  assert.match(dialogs.at(-1), /CCC-TCP-IKJ-BRT-002 → CCC-TCP-IKJ-CHD-003/);
+  const newMbr = dialogs.at(-1).match(/CCC-TCP-IKJ-TEN-001 → (CCC-TCP-IKJ-MBR-\d{3})/)[1];
+  const hist = await page.evaluate(async (no) => (await parishRef().collection('members').doc(no).get()).data(), newMbr);
+  assert.equal(hist.fromNo, 'CCC-TCP-IKJ-TEN-001'); assert.equal(hist.fullName, 'TEST Teen Eighteen');
+  await nav('teens');
+  await page.waitForSelector('#teensList .young-row');
+  await page.click('#teensList [data-no="CCC-TCP-IKJ-TEN-001"]');
+  await page.waitForSelector('#recordModal:not(.hidden)');
+  assert.match(await page.textContent('#recordBody'), new RegExp('Moved to\\s*' + newMbr));
+  await shot('67-teen-moved-to-member-history');
+  await page.click(`#recordBody button:has-text("${newMbr}")`);
+  await page.waitForFunction(no => document.querySelector('#recordTitle').textContent.startsWith(no), newMbr);
+  await page.waitForSelector('#recordBody:has-text("Moved up from Teenagers")');
+  await page.click('#recordActions button:has-text("Close")');
+
+  // Deaths: from a member's record; the member becomes "Called to glory" (kept, not counted).
+  const before4 = await page.evaluate(async () => (await statsRef().get()).data());
+  await page.evaluate(no => openRecord('members', no), newMbr);
+  await page.waitForSelector('#recordModal:not(.hidden)');
+  await page.click('#recordActions button:has-text("Called to glory")');
+  await page.waitForSelector('#deathModal:not(.hidden)');
+  assert.equal(await page.inputValue('#x_link'), newMbr);
+  await page.fill('#x_date', isoYearsAgo(0, -2)); await page.fill('#x_burial', isoYearsAgo(0, 5));
+  await page.fill('#x_place', 'Lagos'); await page.fill('#x_informant', 'TEST Adebayo Ogun');
+  await page.waitForFunction(() => document.querySelectorAll('#x_officiant option').length > 1);
+  await page.selectOption('#x_officiant', { index: 1 });
+  await fullShot('68-death-form');
+  await page.click('#saveDeathBtn');
+  await page.waitForFunction(() => /CCC-TCP-IKJ-DTH-001/.test(document.querySelector('#recordTitle').textContent) && !document.querySelector('#recordModal').classList.contains('hidden'));
+  const after4 = await page.evaluate(async () => (await statsRef().get()).data());
+  assert.equal(after4.memberCount, before4.memberCount - 1, 'not counted');
+  assert.equal(after4.deathCount, 1);
+  const dead = await page.evaluate(async (no) => (await parishRef().collection('members').doc(no).get()).data(), newMbr);
+  assert.equal(dead.status, 'Called to glory'); assert.equal(dead.deathId, 'CCC-TCP-IKJ-DTH-001');
+  await page.click('#recordActions button:has-text("Death certificate")');
+  await page.waitForSelector('#certModal:not(.hidden)');
+  assert.equal(await page.textContent('#certNo'), 'CCC-TCP-IKJ-DTH-001');
+  assert.match(await page.textContent('#certPrint'), /Certificate of Death[\s\S]*TEST Teen Eighteen/i);
+  await page.locator('#certPrint').screenshot({ path: join(SHOTS, '69-death-certificate.png') });
+  await page.emulateMedia({ media: 'print' });
+  await shot('70-death-certificate-print-view');
+  await page.pdf({ path: join(SHOTS, 'death-certificate-CCC-TCP-IKJ-DTH-001.pdf'), format: 'A4', printBackground: true });
+  await page.emulateMedia({ media: 'screen' });
+  await page.click('#certModal button:has-text("Close")');
+  await nav('deaths');
+  await page.waitForSelector('#deathsList .young-row');
+  await shot('71-deaths-list');
+  await nav('dashboard');
+  await page.waitForFunction(() => document.querySelector('#metricDeaths').textContent === '1');
+  assert.equal(await page.textContent('#metricBirths'), '1');   // 1-year-old left; the 2-year-old moved up
+  assert.equal(await page.textContent('#metricChildren'), '2');  // child 7 + toddler moved in (child 12 moved out)
+  assert.equal(await page.textContent('#metricTeens'), '1');
+  await fullShot('72-dashboard-phase4-counts');
+  await logout();
+
+  await login('super@test.local');
+  await page.waitForSelector('#worldTable:not(.hidden)');
+  assert.equal(await page.textContent('#metricDeaths'), '1');
+  assert.match(await page.textContent('#worldTable'), /Births[\s\S]*Deaths/);
+  for (const col of ['births', 'children', 'teens', 'deaths']) {
+    const r = await page.evaluate(async ([p, c]) => { try { await db.collection('parishes').doc(p).collection(c).get(); return 'READ'; } catch (e) { return e.code; } }, [parishId, col]);
+    assert.equal(r, 'permission-denied', 'super cannot read ' + col);
+  }
+  await fullShot('73-super-phase4-totals');
+  await logout();
+  console.log('E2E PASS (phase 4): female rank line by gender, births + birth certificate (print + PDF), full DOB required, pending moves by age (2/12/18, one tap, history links, new CCC-MBR), death marks member Called to glory + death certificate, counts on dashboard, super totals only.');
 
   // Super Admin / HQ: totals per service type, never the records.
   await login('super@test.local');
