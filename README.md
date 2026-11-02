@@ -101,3 +101,16 @@ Open the app with `?emulator=1` to point it at local emulators instead of the li
 - Review screen: one card per person, Edit for per-field fixes, duplicate warning (same name or phone, starts unticked),
   optional photo per card, consent required, **Save selected** uses the normal numbered `createRecord` path, so the rules apply.
 - Accuracy test: `firestore/ai-test/` (3 files + truth.json; `payloads.mjs`, `send.mjs`, `score.mjs`).
+
+## Monthly Returns (Phase 6)
+- Parish: **Monthly Returns** tab. Income per month in 6 categories (tithes, offerings, thanksgiving, harvest, building fund, other)
+  in the parish **currency** (set in Parish Settings; each return keeps the currency it was filed in). Optional receipt photo.
+  The app works out the amount due to HQ. Payments: date, amount, method (Bank transfer / Cash / POS), reference, optional teller photo.
+- `returns/{parishId}_{YYYY-MM}` (totals only, no giver names), `returns/../payments/p{v}`, `returns/../confirmations/c{v}`.
+  Status: Due -> Part paid -> Paid -> Confirmed, or Disputed (HQ). Nothing is deleted: corrections are new versions / negative entries with a reason.
+- `hqSettings/returns` = share per category as a fraction `{num, den}`. Default (no doc): **1/3 of tithes, 0 of the rest**. A filed return keeps its share.
+- `auditLog/{collection}_{docId}_v{version}`: every Phase 6 write bumps `version` and must add this entry in the same batch
+  (who: uid + email + name, when: server time, before/after, reason). Append-only. Super Admin must have a `name` on `users/{uid}`.
+- `returnRollups/{YYYY-MM}_{city|country|continent}_{key}`: per-currency totals, updated by each change; Super Admin **Rebuild** recomputes a month.
+- `alerts/{YYYY-MM}_{parishId}_{rule}`: **Run checks** (Super Admin) flags underpaid 2+ months, tithes -30% with attendance steady, no return by the 10th, big change.
+- Tests: `npm test` (rules) and `npm run test:e2e:p6` (390x844 phone, emulators).

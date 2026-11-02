@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "firebase emulators:exec --only firestore --project ccc-rules-lab \"node --test rules.test.mjs\"",
-    "test:e2e": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e.mjs\""
+    "test:e2e": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e.mjs\"",
+    "test:e2e:p6": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p6.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "6.0.0",
