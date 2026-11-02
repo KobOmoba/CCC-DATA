@@ -129,14 +129,14 @@ service cloud.firestore {
     // Active member (not Ordained, not abroad, not transferred) may be Current.
     function validDeptMember(p, d, id) {
       return d.keys().hasOnly(['dept', 'memberNo', 'fullName', 'role', 'status', 'joinedDate', 'leftDate', 'updatedAt'])
-        && isDept(d.dept) && d.memberNo is string && d.memberNo.matches('^CCC-MBR-[0-9]{3,}$')
+        && isUnit(p, d.dept) && d.memberNo is string && d.memberNo.matches('^CCC-MBR-[0-9]{3,}$')
         && id == d.dept + '_' + d.memberNo && str(d.fullName, 120) && s(d.get('role', ''), 40)
         && isDate(d.joinedDate) && d.status in ['Current', 'Former']
         && (d.status == 'Former' ? isDate(d.get('leftDate', ''))
             : getAfter(docAt('parishes/' + p + '/members/' + d.memberNo)).data.status == 'Active');
     }
-    function validTerm(d, id) {
-      return isDept(id) && d.keys().hasOnly(['termStart', 'termEnd', 'updatedAt'])
+    function validTerm(p, d, id) {
+      return isUnit(p, id) && d.keys().hasOnly(['termStart', 'termEnd', 'updatedAt'])
         && isDate(d.termStart) && isDate(d.termEnd) && d.termEnd > d.termStart;
     }
     function validClergy(d, id) {
@@ -158,10 +158,57 @@ service cloud.firestore {
         && request.resource.data.consentDate == resource.data.consentDate;
     }
 
-    function validAttendance(d) {
-      return d.keys().hasOnly(['serviceDate', 'serviceType', 'headcount'])
+    // ---- Attendance (Phase 3) ----
+    // Old simple records {serviceDate, serviceType, headcount} stay valid and readable.
+    // A scheduled service has id <date>_<serviceKey> and splits the headcount into men/women/children/visitors.
+    function isServiceKey(k) {
+      return k.matches('^(sunday|bible|vigil_sidemen|wakati|seekers|wed_evening|new_moon|vigil_prophets|fri_evening|special|other)$');
+    }
+    function cnt(d, k) { return d.get(k, -1) is int && d.get(k, -1) >= 0 && d.get(k, -1) <= 100000; }
+    function validAttendance(p, d, id) {
+      return d.keys().hasOnly(['serviceDate', 'serviceType', 'headcount', 'serviceKey', 'serviceTime', 'men', 'women',
+          'children', 'visitors', 'ledBy', 'ledByName', 'notes', 'specialId', 'updatedAt'])
         && isDate(d.serviceDate) && str(d.serviceType, 60)
-        && d.headcount is int && d.headcount >= 0 && d.headcount <= 100000;
+        && d.headcount is int && d.headcount >= 0 && d.headcount <= 100000
+        && (!('serviceKey' in d) || (isServiceKey(d.serviceKey) && id == d.serviceDate + '_' + d.serviceKey
+            + (d.serviceKey == 'special' ? '_' + d.get('specialId', '') : '')
+            && cnt(d, 'men') && cnt(d, 'women') && cnt(d, 'children') && cnt(d, 'visitors')
+            && d.headcount == d.men + d.women + d.children + d.visitors
+            && s(d.get('serviceTime', ''), 5) && s(d.get('notes', ''), 1000) && s(d.get('ledByName', ''), 160)
+            && (d.get('ledBy', '') == '' || exists(docAt('parishes/' + p + '/clergy/' + d.ledBy)))));
+    }
+    // Units: the six fixed departments plus admin-defined units (parishes/{p}/units/u_xxx).
+    // Named attendance and absenteeism live in each unit's own register (short lists), not a whole-church tick-list.
+    function isUnit(p, x) {
+      return isDept(x) || (x is string && x.matches('^u_[A-Za-z0-9]{1,30}$') && exists(docAt('parishes/' + p + '/units/' + x)));
+    }
+    function validDeptAttendance(p, d, id) {
+      return d.keys().hasOnly(['dept', 'date', 'kind', 'present', 'notes', 'updatedAt'])
+        && isUnit(p, d.dept) && isDate(d.date) && id == d.dept + '_' + d.date
+        && d.kind in ['Practice', 'Meeting', 'Class', 'Service duty', 'Other']
+        && d.present is list && d.present.size() <= 300 && s(d.get('notes', ''), 500);
+    }
+    function validCleaning(d, id) {
+      return d.keys().hasOnly(['date', 'assigned', 'came', 'names', 'notes', 'updatedAt'])
+        && isDate(d.date) && id == d.date
+        && d.assigned is list && d.assigned.size() <= 100 && d.came is list && d.came.size() <= 100
+        && d.names is map && d.names.size() <= 200 && s(d.get('notes', ''), 500);
+    }
+    function validSpecial(d) {
+      return d.keys().hasOnly(['name', 'date', 'time', 'notes', 'createdAt'])
+        && str(d.name, 60) && isDate(d.date) && d.time is string && d.time.matches('^[0-2][0-9]:[0-5][0-9]$')
+        && s(d.get('notes', ''), 500);
+    }
+    // Visitors are personal data too (NDPA): consent required, private to the parish.
+    function validVisitor(p, d) {
+      return d.keys().hasOnly(['name', 'nameLower', 'phone', 'phoneDigits', 'invitedBy', 'firstVisit', 'serviceType',
+          'status', 'notes', 'memberNo', 'consentGiven', 'createdAt', 'updatedAt'])
+        && str(d.name, 120) && d.nameLower == d.name.lower() && s(d.get('phone', ''), 20) && s(d.get('phoneDigits', ''), 20)
+        && s(d.get('invitedBy', ''), 120) && isDate(d.firstVisit) && s(d.get('serviceType', ''), 60)
+        && s(d.get('notes', ''), 500) && d.consentGiven == true
+        && d.status in ['New', 'Contacted', 'Returned', 'Member', 'Not interested']
+        && (d.status != 'Member' || (d.get('memberNo', '') is string
+            && existsAfter(docAt('parishes/' + p + '/members/' + d.get('memberNo', 'x')))));
     }
     function validFinance(d) {
       return d.keys().hasOnly(['transactionDate', 'contributorName', 'contributionType', 'amount'])
@@ -171,7 +218,9 @@ service cloud.firestore {
     function nonNegInt(d, k) { return d.get(k, 0) is int && d.get(k, 0) >= 0; }
     function validStats(d) {
       return d.keys().hasOnly(['memberCount', 'clergyCount', 'formerClergyCount', 'attendanceTotal', 'serviceCount',
-          'financeTotal', 'financeCount', 'diasporaCount', 'updatedAt'])
+          'financeTotal', 'financeCount', 'diasporaCount', 'byType', 'visitorCount', 'updatedAt'])
+        && (!('byType' in d) || (d.byType is map && d.byType.size() <= 20))
+        && nonNegInt(d, 'visitorCount')
         && nonNegInt(d, 'diasporaCount')
         && nonNegInt(d, 'memberCount') && nonNegInt(d, 'clergyCount') && nonNegInt(d, 'formerClergyCount')
         && nonNegInt(d, 'attendanceTotal') && nonNegInt(d, 'serviceCount') && nonNegInt(d, 'financeCount')
@@ -305,7 +354,7 @@ service cloud.firestore {
       // Departments: term dates per department, and one membership doc per (department, member).
       match /departments/{dept} {
         allow read: if isParishAdminOf(parishId);
-        allow create, update: if isParishAdminOf(parishId) && validTerm(request.resource.data, dept);
+        allow create, update: if isParishAdminOf(parishId) && validTerm(parishId, request.resource.data, dept);
         allow delete: if false;
       }
       match /deptMembers/{id} {
@@ -322,9 +371,33 @@ service cloud.firestore {
           && request.resource.data.memberNos is list && request.resource.data.memberNos.size() <= 30
           && request.resource.data.roles is map;
       }
+      // Attendance: parish admin only. Super admin and HQ see totals in parishStats, never these.
       match /attendance/{id} {
         allow read, delete: if isParishAdminOf(parishId);
-        allow create, update: if isParishAdminOf(parishId) && validAttendance(request.resource.data);
+        allow create, update: if isParishAdminOf(parishId) && validAttendance(parishId, request.resource.data, id);
+      }
+      match /units/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && id.matches('^u_[A-Za-z0-9]{1,30}$')
+          && request.resource.data.keys().hasOnly(['name', 'createdAt']) && str(request.resource.data.name, 60);
+        allow delete: if false; // registers keep pointing at it
+      }
+      match /deptAttendance/{id} {
+        allow read, delete: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validDeptAttendance(parishId, request.resource.data, id);
+      }
+      match /cleaning/{date} {
+        allow read, delete: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validCleaning(request.resource.data, date);
+      }
+      match /specialServices/{id} {
+        allow read, delete: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validSpecial(request.resource.data);
+      }
+      match /visitors/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validVisitor(parishId, request.resource.data);
+        allow delete: if isParishAdminOf(parishId); // NDPA: remove on request
       }
       match /finances/{id} {
         allow read, delete: if isParishAdminOf(parishId);

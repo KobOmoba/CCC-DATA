@@ -494,3 +494,96 @@ test('diaspora: member moved abroad needs a country + date; flow carries places 
   // Diaspora member can transfer on to a parish abroad.
   await assertSucceeds(send(a, 'T5'));
 });
+
+// ---------------------------------------------------------------- Phase 3: attendance
+const svc = (extra = {}) => ({ serviceDate: '2026-11-01', serviceType: 'Sunday Service', serviceKey: 'sunday', serviceTime: '10:00',
+  men: 40, women: 50, children: 20, visitors: 5, headcount: 115, ledBy: 'CCC-CLG-001', ledByName: 'Ven Olu', notes: 'Harvest preparations', ...extra });
+const SID = '2026-11-01_sunday';
+
+test('attendance: old simple records stay readable and writable', async () => {
+  const a = as.adminA();
+  await assertSucceeds(getDoc(doc(a, 'parishes/A/attendance/t1')));
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/attendance/t2'), att));
+});
+test('attendance: scheduled service with men/women/children/visitors, clergy leader and notes', async () => {
+  const a = as.adminA();
+  const b = writeBatch(a);
+  b.set(doc(a, `parishes/A/attendance/${SID}`), svc());
+  b.set(doc(a, 'parishStats/A'), { attendanceTotal: increment(115), serviceCount: increment(1), byType: { sunday: { services: increment(1), total: increment(115) } } }, { merge: true });
+  await assertSucceeds(b.commit());
+  await assertFails(setDoc(doc(a, `parishes/A/attendance/${SID}`), svc({ headcount: 999 })));          // split must add up
+  await assertFails(setDoc(doc(a, `parishes/A/attendance/${SID}`), svc({ men: -1, headcount: 74 })));   // no negatives
+  await assertFails(setDoc(doc(a, `parishes/A/attendance/${SID}`), svc({ ledBy: 'CCC-CLG-099' })));     // leader must be our clergy
+  await assertFails(setDoc(doc(a, `parishes/A/attendance/${SID}`), svc({ ledBy: 'CCC-MBR-001' })));     // a member is not clergy
+  await assertFails(setDoc(doc(a, 'parishes/A/attendance/random'), svc()));                            // id = date_key
+  await assertFails(setDoc(doc(a, `parishes/A/attendance/2026-11-01_party`), svc({ serviceKey: 'party' })));
+  await assertFails(setDoc(doc(a, `parishes/A/attendance/${SID}`), svc({ extra: 1 })));
+  // Special service (harvest): id carries the special service id.
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/specialServices/H1'), { name: 'Harvest', date: '2026-11-08', time: '10:00', notes: '', createdAt: 'now' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/specialServices/H2'), { name: 'Harvest', date: '2026-11-08', time: '10am' }));
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/attendance/2026-11-08_special_H1'), svc({ serviceDate: '2026-11-08', serviceKey: 'special', specialId: 'H1', serviceType: 'Harvest', ledBy: '' })));
+  await assertFails(setDoc(doc(a, 'parishes/A/attendance/2026-11-08_special'), svc({ serviceDate: '2026-11-08', serviceKey: 'special', specialId: 'H1', ledBy: '' })));
+});
+test('units: admin-defined unit with its own short register; no whole-church tick-list', async () => {
+  const a = as.adminA();
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/units/u_ushers'), { name: 'Ushers', createdAt: 'now' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/units/ushers'), { name: 'Ushers' }));                       // id must be u_xxx
+  await assertFails(setDoc(doc(as.adminB(), 'parishes/A/units/u_x'), { name: 'X' }));
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/deptMembers/u_ushers_CCC-MBR-001'), { dept: 'u_ushers', memberNo: 'CCC-MBR-001', fullName: 'Ade Bisi', role: '', status: 'Current', joinedDate: '2026-11-01' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/u_ghost_CCC-MBR-001'), { dept: 'u_ghost', memberNo: 'CCC-MBR-001', fullName: 'Ade Bisi', role: '', status: 'Current', joinedDate: '2026-11-01' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptMembers/u_ushers_CCC-CLG-001'), { dept: 'u_ushers', memberNo: 'CCC-CLG-001', fullName: 'Ven Olu', role: '', status: 'Current', joinedDate: '2026-11-01' })); // clergy still barred
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/deptAttendance/u_ushers_2026-11-01'), { dept: 'u_ushers', date: '2026-11-01', kind: 'Service duty', present: ['CCC-MBR-001'], notes: '' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptAttendance/u_ghost_2026-11-01'), { dept: 'u_ghost', date: '2026-11-01', kind: 'Service duty', present: [] }));
+  // The old per-person whole-church collections do not exist.
+  await assertFails(setDoc(doc(a, `parishes/A/checkins/${SID}_CCC-MBR-001`), { memberNo: 'CCC-MBR-001' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/presence/CCC-MBR-001'), { memberNo: 'CCC-MBR-001' }));
+});
+test('attendance: department sessions and the cleaning rota', async () => {
+  const a = as.adminA();
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/deptAttendance/choir_2026-10-31'), { dept: 'choir', date: '2026-10-31', kind: 'Practice', present: ['CCC-MBR-002'], notes: '' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptAttendance/band_2026-10-31'), { dept: 'band', date: '2026-10-31', kind: 'Practice', present: [] }));
+  await assertFails(setDoc(doc(a, 'parishes/A/deptAttendance/choir_2026-10-30'), { dept: 'choir', date: '2026-10-31', kind: 'Practice', present: [] }));
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/cleaning/2026-10-31'), { date: '2026-10-31', assigned: ['CCC-MBR-001', 'CCC-MBR-002'], came: ['CCC-MBR-001'], names: { 'CCC-MBR-001': 'Ade Bisi' }, notes: '' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/cleaning/2026-10-30'), { date: '2026-10-31', assigned: [], came: [], names: {} }));
+});
+test('visitors: consent, follow-up status, convert to member in the same write', async () => {
+  const a = as.adminA();
+  const v = { name: 'Kemi Ola', nameLower: 'kemi ola', phone: '0803', phoneDigits: '0803', invitedBy: 'Ade Bisi', firstVisit: '2026-11-01', serviceType: 'Sunday Service', status: 'New', notes: '', consentGiven: true, createdAt: 'now', updatedAt: 'now' };
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/visitors/V1'), v));
+  await assertFails(setDoc(doc(a, 'parishes/A/visitors/V2'), { ...v, consentGiven: false }));
+  await assertFails(setDoc(doc(a, 'parishes/A/visitors/V2'), { ...v, nameLower: 'other' }));
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/visitors/V1'), { status: 'Contacted' }));
+  await assertFails(updateDoc(doc(a, 'parishes/A/visitors/V1'), { status: 'Member', memberNo: 'CCC-MBR-003' })); // member not created
+  // Convert: new member + visitor marked Member, one transaction.
+  await assertSucceeds(runTransaction(a, async (t) => {
+    const cRef = doc(a, 'parishes/A/meta/counters');
+    const n = (await t.get(cRef)).data().mbr + 1;
+    const id = 'CCC-MBR-' + String(n).padStart(3, '0');
+    t.update(cRef, { mbr: n });
+    t.set(doc(a, `parishes/A/members/${id}`), person(id, { fullName: 'Kemi Ola', nameLower: 'kemi ola' }));
+    t.update(doc(a, 'parishes/A/visitors/V1'), { status: 'Member', memberNo: id });
+  }));
+  await assertSucceeds(deleteDoc(doc(a, 'parishes/A/visitors/V1')));
+});
+test('attendance privacy: other parish, super admin and HQ see totals only', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    const db = c.firestore();
+    await setDoc(doc(db, `parishes/A/attendance/${SID}`), svc());
+    await setDoc(doc(db, 'parishes/A/visitors/V1'), { name: 'Kemi' });
+    await setDoc(doc(db, 'parishes/A/units/u_ushers'), { name: 'Ushers' });
+    await setDoc(doc(db, 'parishes/A/deptAttendance/choir_2026-10-31'), { dept: 'choir' });
+    await setDoc(doc(db, 'parishes/A/cleaning/2026-10-31'), { date: '2026-10-31' });
+  });
+  const paths = [`attendance/${SID}`, 'visitors/V1', 'units/u_ushers', 'deptAttendance/choir_2026-10-31', 'cleaning/2026-10-31'];
+  for (const who of ['adminB', 'superA', 'hq', 'stranger', 'adminS']) {
+    for (const p of paths) await assertFails(getDoc(doc(as[who](), `parishes/A/${p}`)));
+    await assertFails(setDoc(doc(as[who](), `parishes/A/attendance/${SID}`), svc()));
+  }
+  await assertFails(getDocs(collectionGroup(as.superA(), 'deptAttendance')));
+  await assertFails(getDocs(collectionGroup(as.superA(), 'visitors')));
+  // Totals per service type are readable by super + HQ.
+  await assertSucceeds(updateDoc(doc(as.adminA(), 'parishStats/A'), { byType: { sunday: { services: 1, total: 115 } }, visitorCount: 1 }));
+  await assertFails(updateDoc(doc(as.adminA(), 'parishStats/A'), { visitorCount: -1 }));
+  await assertSucceeds(getDoc(doc(as.superA(), 'parishStats/A')));
+  await assertSucceeds(getDoc(doc(as.hq(), 'parishStats/A')));
+});

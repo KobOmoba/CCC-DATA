@@ -33,6 +33,14 @@ with the invited email + code.
 - **Transfers**: `transfers/{id}` (old parish sends with consent, new parish accepts by **parish code**,
   `parishCodes/{code}`). The new record keeps `lifeNo` + `lifeParishCode` (one member number for life).
   The old record stays as `TransferredOut`, so world totals count each person once.
+- **Attendance** (Phase 3), built on the CCC weekly timetable (Sun 10:00 Sunday Service ... Fri 18:00; first Thursday
+  = New Moon 22:00, other Thursdays = Prophets vigil 23:59; Saturday = cleaning rota).
+  `attendance/{date}_{serviceKey}` = men/women/children/visitors + headcount (must add up), ledBy (a clergy id), notes.
+  Old `{serviceDate, serviceType, headcount}` records stay valid. `specialServices/{id}` (harvest, anniversary...).
+  Named attendance is per **unit**, not a whole-church tick-list: `deptAttendance/{unit}_{date}` (present list);
+  `units/u_xxx` = admin-defined units. Absent 3+ weeks is worked out per unit; Follow-up rolls it up with a wa.me link.
+  `visitors/{id}` (consent required; "Make member" creates the member in the same transaction). `cleaning/{saturday}`.
+  `parishStats` gains `byType` (per service type) and `visitorCount`; Super Admin/HQ see only these totals.
 - `flows/{id}` - places + year only (no names); Super Admin's "Diaspora Flows" summary.
 
 ## Set up Firebase later (on your phone)

@@ -5,3 +5,11 @@ body {
 table th, table td {
     padding: 12px;
 }
+.att-tab.active { background: #1e3a8a; color: #fff; border-color: #1e3a8a; }
+/* Print-friendly attendance report: the browser's "Save as PDF" prints only the report. */
+@media print {
+    body * { visibility: hidden; }
+    #reportPrint, #reportPrint * { visibility: visible; }
+    #reportPrint { position: absolute; left: 0; top: 0; width: 100%; border: 0; }
+    .no-print { display: none !important; }
+}
