@@ -8,7 +8,7 @@ const CATS = [["tithes", "Tithes"], ["offerings", "Offerings"], ["thanksgiving",
 const DEFAULT_SHARES = { tithes: { num: 1, den: 3 }, offerings: { num: 0, den: 1 }, thanksgiving: { num: 0, den: 1 }, harvest: { num: 0, den: 1 }, building: { num: 0, den: 1 }, other: { num: 0, den: 1 } };
 const METHODS = ["Bank transfer", "Cash", "POS"];
 const LEVELS = [["continent", "Continent"], ["country", "Country"], ["city", "City"]];
-const ALERT_NAMES = { underpaid: "Remitted less than due, 2+ months", titheDrop: "Tithes down 30%+ (attendance steady)", notFiled: "No return by the 10th", bigChange: "Big one-off change" };
+const ALERT_NAMES = AlertsCore.RULE_NAMES;
 const STATUS_COLOR = { Due: "bg-gray-200", "Part paid": "bg-amber-200", Paid: "bg-blue-200", Confirmed: "bg-emerald-200", Disputed: "bg-rose-200" };
 const RET_PAGE = 20;
 
@@ -496,33 +496,8 @@ async function rebuildRollups() {
     });
 }
 
-// ---- Rule-based alerts. Pure function (testable); the Super Admin runs it for a month. ----
-// returnsByParish: { parishId: { 'YYYY-MM': return } }. parishes: [{ id, name, status, currency }]. today: 'YYYY-MM-DD'.
-function computeAlerts(m, parishes, returnsByParish, today) {
-    const out = [];
-    const prev = Array.from({ length: 6 }, (_, i) => addMonths(m, -(i + 1)));
-    const deadline = addMonths(m, 1) + "-10";
-    for (const p of parishes) {
-        if (p.status !== "Approved") continue;
-        const rs = returnsByParish[p.id] || {}, r = rs[m];
-        const add = (rule, detail) => out.push({ parishId: p.id, parishName: p.name || p.id, rule, detail, currency: (r && r.currency) || p.currency || "" });
-        if (!r) { if (today > deadline) add("notFiled", `No return for ${monthName(m)} by ${deadline}.`); continue; }
-        const r1 = rs[addMonths(m, -1)];
-        if (r.outstanding > 0.005 && r1 && r1.outstanding > 0.005)
-            add("underpaid", `Short ${money(r.currency, r.outstanding)} this month and ${money(r1.currency, r1.outstanding)} last month.`);
-        const hist = prev.map(x => rs[x]).filter(Boolean);
-        if (hist.length >= 3) {
-            const avg = f => hist.reduce((t, x) => t + f(x), 0) / hist.length;
-            const avgT = avg(x => x.income.tithes), avgA = avg(x => x.attendance), avgI = avg(x => totalIncome(x.income));
-            if (avgT > 0 && r.income.tithes < 0.7 * avgT && r.attendance >= 0.9 * avgA)
-                add("titheDrop", `Tithes ${money(r.currency, r.income.tithes)} vs 6-month average ${money(r.currency, avgT)} (${Math.round(100 - 100 * r.income.tithes / avgT)}% down); attendance ${r.attendance} vs ${Math.round(avgA)}.`);
-            const ti = totalIncome(r.income);
-            if (avgI > 0 && (ti > 2 * avgI || ti < 0.5 * avgI))
-                add("bigChange", `Total income ${money(r.currency, ti)} vs 6-month average ${money(r.currency, avgI)}.`);
-        }
-    }
-    return out;
-}
+// ---- Rule-based alerts: the checks live in alerts-core.js (shared with the scheduled server job, Phase 8). ----
+const computeAlerts = (m, parishes, returnsByParish, today) => AlertsCore.returnAlerts(m, parishes, returnsByParish, today);
 async function runAlertChecks() {
     if (needName()) return;
     const m = hq.month;

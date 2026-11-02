@@ -164,8 +164,18 @@ async function claimInvite() {
         const uid = cred.user.uid;
         const inv = await db.collection("invites").doc(code).get();
         if (!inv.exists) throw new Error("Invite code not found for this email.");
-        const { parishId } = inv.data();
+        const { parishId, role } = inv.data();
         const batch = db.batch();
+        if (role === "church_head") {
+            // Church Leader: no parish, no admin email (they may be clergy); the name comes from the Super Admin's assignment.
+            const l = await db.collection("leaders").doc(email).get();
+            if (!l.exists || l.data().status !== "Active") throw new Error("This leadership role is not active.");
+            batch.set(db.collection("users").doc(uid), { role, parishId: "", email, inviteCode: code, name: l.data().name });
+            batch.update(db.collection("invites").doc(code), { usedBy: uid });
+            await batch.commit();
+            $("invPassword").value = ""; claiming = false;
+            return await onAuthChanged(cred.user);
+        }
         batch.set(db.collection("users").doc(uid), { role: "parish_admin", parishId, email, inviteCode: code });
         batch.update(db.collection("invites").doc(code), { usedBy: uid });
         batch.set(db.collection("adminEmails").doc(email), { uid });
@@ -194,6 +204,7 @@ async function onAuthChanged(user) {
         const isParish = role === "parish_admin";
         document.querySelectorAll(".parish-only").forEach(el => el.classList.toggle("hidden", !isParish));
         document.querySelectorAll(".super-only").forEach(el => el.classList.toggle("hidden", role !== "super_admin"));
+        document.querySelectorAll(".leader-only").forEach(el => el.classList.toggle("hidden", !(role === "super_admin" || role === "church_head")));
         if (role === "super_admin" || role === "hq") $("circularComposer").classList.remove("hidden");
         if (isParish && !localState.currentParishId) {
             alert("Your account is not linked to a parish.");
@@ -204,6 +215,7 @@ async function onAuthChanged(user) {
         showSection("dashboard");
         if (isParish) await loadParishData();
         else await loadWorld();
+        if (role === "church_head") await loadLeadership();
         await loadCirculars();
     } catch (e) {
         alert("Access denied: your parish may be suspended.\n" + e.message);
@@ -224,6 +236,8 @@ function showSection(id) {
     if (id === "hqreturns") openHq().catch(e => alert("Could not load returns: " + e.message));
     if (id === "directory") loadDirectory().catch(e => alert("Could not load the directory: " + e.message));
     if (id === "staff") openStaff().catch(e => alert("Could not load staff: " + e.message));
+    if (id === "ai") openAiDashboard().catch(e => alert("Could not load the AI dashboard: " + e.message));
+    if (id === "postings") openPostings().catch(e => alert("Could not load postings: " + e.message));
     if (id === "committees") openCommittees().catch(e => alert("Could not load committees: " + e.message));
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
@@ -257,6 +271,10 @@ async function loadParishData() {
     $("memberSearch").value = "";
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
+    // Phase 8: record activity for the "no activity for 30 days" alert, and apply any clergy posting now due.
+    await markParishActive().catch(e => console.error("activity", e.message));
+    const moved = await applyDuePostings().catch(e => { console.error("postings", e.message); return 0; });
+    if (moved) await Promise.all([loadClergy(true), loadFormer(true), refreshTotals()]);
     // Phase 7: keep this parish's directory entries (Super Admin's church-wide directory) present and current.
     localState.dirSync = syncDirectory().catch(e => console.error("directory sync", e.message));
 }
@@ -707,7 +725,7 @@ async function saveParishSettings() {
 // ---------------------------------------------------------------- super admin / HQ world view
 let register = [];
 async function loadWorld() {
-    $("welcomeTitle").textContent = localState.role === "super_admin" ? "Shalom, Super Admin!" : "Shalom, HQ!";
+    $("welcomeTitle").textContent = localState.role === "super_admin" ? "Shalom, Super Admin!" : localState.role === "church_head" ? `Shalom, ${localState.name || "Church Head"}!` : "Shalom, HQ!";
     $("welcomeSub").textContent = "Totals for all parishes. Ordinary member records stay private to each parish.";
     $("dashParishName").textContent = "World-wide";
     const [parishes, stats] = await Promise.all([db.collection("parishes").get(), db.collection("parishStats").get()]);
@@ -1219,6 +1237,25 @@ function exportCsv(which) {
     document.body.appendChild(a); a.click(); a.remove();
 }
 
+// Phase 8: pick the giver from the parish member list so giving is matched by member number (name stays as typed).
+let finTimer = null;
+function findFinMember() {
+    setFinMember("", "", true);
+    clearTimeout(finTimer);
+    finTimer = setTimeout(async () => {
+        const t = val("fin_contrib").toLowerCase();
+        if (t.length < 2) return $("fin_memberFound").innerHTML = "";
+        const s = await parishRef().collection("members").orderBy("nameLower").startAt(t).endAt(t + "\uf8ff").limit(6).get();
+        $("fin_memberFound").innerHTML = s.docs.map(d => d.data()).filter(m => m.status === "Active" || m.status === "Diaspora")
+            .map(m => `<button type="button" data-no="${esc(m.memberNo)}" data-name="${esc(m.fullName)}" onclick="setFinMember(this.dataset.no, this.dataset.name)" class="fin-opt w-full text-left border rounded p-2 bg-emerald-50">${esc(m.fullName)} <span class="font-mono">${esc(m.memberNo)}</span></button>`).join("");
+    }, 250);
+}
+function setFinMember(no, name, keepText) {
+    $("fin_memberNo").value = no;
+    if (no && !keepText) $("fin_contrib").value = name;
+    $("fin_memberText").textContent = no ? "Member number: " + no : "Not linked to a member number (optional)";
+    $("fin_memberFound").innerHTML = "";
+}
 function openFinanceModal() { document.getElementById("addFinanceModal").classList.remove('hidden'); }
 function closeFinanceModal() { document.getElementById("addFinanceModal").classList.add('hidden'); }
 async function saveFinance() {
@@ -1231,12 +1268,14 @@ async function saveFinance() {
     try {
         const inc = firebase.firestore.FieldValue.increment;
         const batch = db.batch();
+        const memberNo = $("fin_memberNo").value;
         batch.set(parishRef().collection("finances").doc(), {
-            transactionDate: date, contributorName: contrib, contributionType: type, amount: amt
+            transactionDate: date, contributorName: contrib, contributionType: type, amount: amt, ...(memberNo ? { memberNo } : {})
         });
         batch.set(statsRef(), { financeTotal: inc(amt), financeCount: inc(1) }, { merge: true });
         await batch.commit();
         closeFinanceModal();
+        setFinMember("", "");
         loadParishData();
     } catch (e) {
         alert(`Failed to save transaction: ${e.message}`);

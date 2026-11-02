@@ -287,6 +287,10 @@ try {
   await fullShot('p7-11-staff-record');
   await page.click('#staffModal button[aria-label="Close"]');
   await fullShot('p7-12-staff-list-reports');
+  // Phase 8: CCC has no fixed retirement age; the report appears once HQ sets one.
+  assert.ok(await page.locator('#st_retireBox').isHidden());
+  await page.fill('#st_retireAge', '60'); await page.fill('#st_retireReason', 'Test policy'); await page.click('#st_retireSave');
+  await page.waitForSelector('#st_retireBox:not(.hidden) .retire-row');
   assert.match(await page.textContent('#st_retire'), /Kemi Adesanya/);
   assert.equal(await page.locator('#st_byDept .dept-count').count(), 2);
   await page.fill('#st_q', 'chaplain');

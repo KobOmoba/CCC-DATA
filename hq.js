@@ -5,7 +5,8 @@
 //  3. Committees: picked church-wide from the directory (members) and the clergy register (clergy).
 // Every Super Admin change is versioned and audited through writeAudit() from returns.js. Nothing is deleted.
 
-const RETIRE_AGE = 60;                 // HQ retirement age used by the "due to retire" report (change here if HQ policy differs)
+// CCC has NO fixed retirement age. HQ may set one (hqSettings/staff.retireAge); blank by default = no "due to retire" report.
+let retireAge = null, staffSettingsVersion = 0;
 const DOC_MAX = 250 * 1024;            // ~250KB per staff document
 const STAFF_STATUS = ["Active", "On leave", "Retired", "Left"];
 const LEAVE_TYPES = ["Annual", "Sick", "Maternity", "Paternity", "Study", "Compassionate", "Other"];
@@ -58,9 +59,10 @@ async function syncDirectory() {
             if (run[no] === undefined || run[no].next === i) { run[no] = { n: (run[no]?.n || 0) + 1, next: i + 1 }; r.streak = Math.max(r.streak, run[no].n); }
         }));
     });
-    // Giving: the finance book records the giver's name, so it is matched by name. Regular = gave in 3+ of the last 6 months.
+    // Giving: matched by member number first (Phase 8 entries); older entries without one fall back to the giver's name.
+    // Regular = gave in 3+ of the last 6 months.
     const since6 = addDays(localToday(), -183);
-    fin.docs.forEach(d => { const f = d.data(); const k = String(f.contributorName || "").trim().toLowerCase(); if (!k) return;
+    fin.docs.forEach(d => { const f = d.data(); const k = f.memberNo ? "#" + f.memberNo : String(f.contributorName || "").trim().toLowerCase(); if (!k) return;
         const g = gifts[k] ||= { byYear: {}, months: new Set() };
         const y = String(f.transactionDate).slice(0, 4); g.byYear[y] = (g.byYear[y] || 0) + (Number(f.amount) || 0);
         if (f.transactionDate >= since6) g.months.add(String(f.transactionDate).slice(0, 7)); });
@@ -69,7 +71,9 @@ async function syncDirectory() {
         const m = d.data(), o = old[m.memberNo] || {};
         const hist = (o.rankHistory || []).slice();
         if (m.rank && (!hist.length || hist[hist.length - 1].rank !== m.rank)) hist.push({ rank: m.rank, from: localToday() });
-        const g = gifts[m.nameLower] || { byYear: {}, months: new Set() };
+        const byNo = gifts["#" + m.memberNo], byName = gifts[m.nameLower];
+        const g = { byYear: {}, months: new Set([...(byNo?.months || []), ...(byName?.months || [])]) };
+        [byNo, byName].forEach(x => Object.entries(x?.byYear || {}).forEach(([y, v]) => g.byYear[y] = (g.byYear[y] || 0) + v));
         const att = seen[m.memberNo] || { lastSeen: "", sessions12w: 0, streak: 0 };
         const next = { ...dirProfile(m), departments: (depts[m.memberNo] || []).slice(0, 60), attendance: att, rankHistory: hist.slice(-40),
             giving: { regular: g.months.size >= 3, byYear: { ...(o.giving?.byYear || {}), ...g.byYear } } };
@@ -134,11 +138,36 @@ async function openDirEntry(id) {
 let staffAll = [], staffSel = null, staffForm = { photo: "", old: null };
 const staffRef = id => db.collection("hqStaff").doc(id);
 const yearsFrom = (dob, n) => { const [y, m, d] = dob.split("-").map(Number); return `${y + n}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`; };
-const retireDate = s => s.dob ? yearsFrom(s.dob, RETIRE_AGE) : "";
+const retireDate = s => s.dob && retireAge ? yearsFrom(s.dob, retireAge) : "";
+async function loadStaffSettings() {
+    const s = await db.collection("hqSettings").doc("staff").get();
+    retireAge = s.exists ? s.data().retireAge ?? null : null;
+    staffSettingsVersion = s.exists ? s.data().version : 0;
+    $("st_retireAge").value = retireAge || "";
+}
+async function saveRetireAge() {
+    if (needName()) return;
+    const raw = val("st_retireAge"), age = raw ? parseInt(raw, 10) : null;
+    if (raw && !(age >= 40 && age <= 100)) return alert("Enter an age between 40 and 100, or leave it blank for no retirement age.");
+    const reason = val("st_retireReason");
+    if (!reason) return alert("Give a reason for this change (it goes in the audit log).");
+    const ref = db.collection("hqSettings").doc("staff");
+    try {
+        await db.runTransaction(async t => {
+            const o = await t.get(ref);
+            const v = o.exists ? o.data().version + 1 : 1;
+            t.set(ref, { retireAge: age, version: v, updatedAt: nowIso(), updatedBy: localState.user.uid });
+            writeAudit(t, "hqSettings/staff", v, "settings", { retireAge: o.exists ? o.data().retireAge ?? null : null }, { retireAge: age }, reason);
+        });
+        $("st_retireReason").value = "";
+        await loadStaffSettings();
+        renderStaffReports();
+    } catch (e) { alert("Not saved: " + e.message); }
+}
 async function openStaff() {
     $("st_nameBox").classList.toggle("hidden", !!localState.name);
     if (!localState.name) return;
-    const s = await db.collection("hqStaff").orderBy("staffNo").get();
+    const [s] = await Promise.all([db.collection("hqStaff").orderBy("staffNo").get(), loadStaffSettings()]);
     staffAll = s.docs.map(d => d.data());
     renderStaff();
     renderStaffReports();
@@ -158,6 +187,9 @@ function renderStaffReports() {
     active.forEach(s => byDept[s.department] = (byDept[s.department] || 0) + 1);
     $("st_byDept").innerHTML = Object.entries(byDept).sort().map(([d, n]) => `<tr class="dept-count"><td class="p-2">${esc(d)}</td><td class="p-2 text-right font-bold">${n}</td></tr>`).join("")
         || `<tr><td class="p-2 text-gray-400 italic">No staff yet.</td></tr>`;
+    $("st_retireBox").classList.toggle("hidden", !retireAge);
+    $("st_retireHead").textContent = `Due to retire within 12 months (age ${retireAge || ""})`;
+    if (!retireAge) return;
     const until = yearsFrom(localToday(), 1);
     const due = active.filter(s => s.dob && retireDate(s) <= until).sort((a, b) => retireDate(a).localeCompare(retireDate(b)));
     const noDob = active.filter(s => !s.dob).length;

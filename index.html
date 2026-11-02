@@ -13,9 +13,11 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
     <link rel="stylesheet" href="styles.css">
+    <script src="alerts-core.js" defer></script>
     <script src="app.js" defer></script>
     <script src="returns.js" defer></script>
     <script src="hq.js" defer></script>
+    <script src="p8.js" defer></script>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
 
@@ -73,6 +75,8 @@
                 <button onclick="showSection('finance')" id="nav-finance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Finance</button>
                 <button onclick="showSection('returns')" id="nav-returns" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-hand-holding-dollar text-emerald-300 w-4"></i> Monthly Returns</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
+                <button onclick="showSection('ai')" id="nav-ai" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wand-magic-sparkles text-fuchsia-300 w-4"></i> AI Dashboard</button>
+                <button onclick="showSection('postings')" id="nav-postings" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-route text-amber-300 w-4"></i> Clergy Postings</button>
                 <button onclick="showSection('parishes')" id="nav-parishes" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-earth-africa text-emerald-400 w-4"></i> Parishes</button>
                 <button onclick="showSection('hqreturns')" id="nav-hqreturns" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-scale-balanced text-emerald-300 w-4"></i> Monthly Returns (HQ)</button>
                 <button onclick="showSection('directory')" id="nav-directory" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-address-book text-sky-300 w-4"></i> Member Directory</button>
@@ -129,6 +133,7 @@
                         <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Total giving</p><p id="metricGiving" class="text-lg font-bold">0</p></div>
                     </div>
                     <div class="grid grid-cols-4 gap-2 text-xs"><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Births</p><p id="metricBirths" class="text-lg font-bold text-rose-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Children</p><p id="metricChildren" class="text-lg font-bold text-amber-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Teens</p><p id="metricTeens" class="text-lg font-bold text-lime-700">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Deaths</p><p id="metricDeaths" class="text-lg font-bold text-gray-700">0</p></div></div>
+                    <div class="parish-only"><div id="parishPostings" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-2"></div></div>
                     <div id="pendingMoves" class="parish-only hidden bg-violet-50 border border-violet-300 rounded-xl p-3 text-xs space-y-2"></div>
                     <div id="electionBanners" class="parish-only space-y-2"></div>
                     <div class="parish-only">
@@ -439,7 +444,57 @@
                     <select id="st_status" onchange="renderStaff()" class="border p-2.5 rounded bg-white"><option value="">All</option><option>Active</option><option>On leave</option><option>Retired</option><option>Left</option></select></div>
                     <div id="st_list" class="space-y-2"></div>
                     <div class="bg-white border rounded-xl text-xs"><p class="font-bold p-3 pb-0">Staff per department (active + on leave)</p><table class="w-full"><tbody id="st_byDept" class="divide-y"></tbody></table></div>
-                    <div class="bg-white border rounded-xl p-3 text-xs space-y-1"><p class="font-bold">Due to retire within 12 months (age 60)</p><div id="st_retire"></div><p id="st_noDob" class="text-amber-700"></p></div>
+                    <div id="st_retireBox" class="hidden bg-white border rounded-xl p-3 text-xs space-y-1"><p id="st_retireHead" class="font-bold">Due to retire within 12 months</p><div id="st_retire"></div><p id="st_noDob" class="text-amber-700"></p></div>
+                    <div class="bg-white border rounded-xl p-3 text-xs space-y-1"><p class="font-bold">Retirement age (optional)</p><p class="text-gray-500">CCC has no fixed retirement age. Leave blank for none; set one only if HQ adopts a policy.</p>
+                    <div class="flex gap-1"><input id="st_retireAge" type="number" min="40" max="100" class="w-20 border p-2 rounded" placeholder="None"><input id="st_retireReason" class="flex-1 min-w-0 border p-2 rounded" placeholder="Reason for the change"></div>
+                    <button id="st_retireSave" onclick="saveRetireAge()" class="w-full py-2 border rounded bg-white font-bold">Save retirement age</button></div>
+                </section>
+
+                <!-- PHASE 8: AI dashboard (Super Admin + Church Head). Totals only; no names except parish names in alerts. -->
+                <section id="section-ai" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">AI Dashboard</h2><p class="text-gray-500">Church-wide totals from precomputed rollups, and alerts from the daily check.</p></div>
+                    <div class="bg-gradient-to-r from-fuchsia-900 to-indigo-900 text-white rounded-xl p-3 space-y-1"><p class="font-bold"><i class="fa-solid fa-wand-magic-sparkles"></i> AI summary of this month's alerts</p>
+                        <p id="ai_summary" class="text-sm leading-snug"></p><p id="ai_summaryMeta" class="text-[10px] text-indigo-200"></p>
+                        <button id="ai_summaryBtn" onclick="writeAiSummary()" class="px-3 py-1.5 bg-white text-indigo-900 rounded font-bold">Write summary</button>
+                        <p class="text-[10px] text-indigo-200">Only totals are sent to the AI (counts by alert type and country). Never names.</p></div>
+                    <div id="ai_tiles" class="grid grid-cols-3 gap-2"></div>
+                    <p id="ai_updated" class="text-gray-500"></p>
+                    <div id="ai_runBox" class="hidden bg-white border rounded-xl p-2 space-y-1"><p class="text-gray-600">The checks run every day on the server. If the server job is not set up yet, run them here.</p>
+                        <button id="ai_runBtn" onclick="runAiChecks()" class="w-full py-2 bg-blue-900 text-white rounded font-bold">Run checks now</button></div>
+                    <p class="font-bold">6-month trend (world)</p><div id="ai_trend" class="grid grid-cols-2 gap-2"></div>
+                    <div class="bg-white border rounded-xl p-2"><div class="flex justify-between items-center"><p class="font-bold">By place</p>
+                        <select id="ai_level" onchange="loadAiLevels()" class="border p-1.5 rounded"><option value="continent">Continent</option><option value="country">Country</option><option value="city">City</option></select></div>
+                        <table class="w-full table-fixed"><thead class="text-[9px] text-gray-500 uppercase"><tr><th class="p-1 text-left w-1/3">Place</th><th class="p-1 text-right">Parishes</th><th class="p-1 text-right">Members</th><th class="p-1 text-right">Attend.</th><th class="p-1 text-right">Born/ Died</th></tr></thead><tbody id="ai_levels" class="divide-y"></tbody></table></div>
+                    <div class="flex justify-between items-center"><p class="font-bold">Alert feed</p><select id="ai_rule" onchange="aiDash.cursor=null;loadAiAlerts()" class="border p-1.5 rounded"><option value="">All alerts</option>
+                        <option value="attendanceDrop">Attendance drop</option><option value="memberDecline">Membership decline</option><option value="inactive">No activity 30 days</option><option value="returnsGap">Returns gap</option>
+                        <option value="notFiled">No return by the 10th</option><option value="underpaid">Underpaid</option><option value="titheDrop">Tithe drop</option><option value="bigChange">Big change</option></select></div>
+                    <div id="ai_alerts" class="space-y-2"></div>
+                    <button id="ai_alertsMore" onclick="loadAiAlerts(true)" class="hidden w-full py-2 border rounded bg-white">Load more</button>
+                </section>
+
+                <section id="section-postings" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Clergy Postings</h2><p class="text-gray-500">Super Admin posts clergy between parishes. Both parishes see it; it applies on the effective date. Every step is logged.</p></div>
+                    <div id="po_nameBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2"><p class="font-bold">Named accounts only: add your full name first.</p>
+                        <input id="po_myName" class="w-full border p-2.5 rounded" placeholder="Your full name"><button onclick="$('hq_myName').value=$('po_myName').value;saveMyName().then(()=>showSection('postings'))" class="w-full py-2 bg-amber-600 text-white font-bold rounded">Save my name</button></div>
+                    <div class="po-super hidden bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">New posting</p><p id="po_rule" class="text-amber-800"></p>
+                        <input id="po_q" oninput="findPostClergy()" class="w-full border p-2.5 rounded" placeholder="Find clergy by name, number or parish">
+                        <div id="po_found" class="space-y-1"></div><input type="hidden" id="po_clergy"><p id="po_clergyText" class="font-bold">No clergy picked</p>
+                        <select id="po_to" class="w-full border p-2.5 rounded bg-white"></select>
+                        <label class="block">Effective date<input id="po_date" type="date" class="w-full border p-2.5 rounded"></label>
+                        <input id="po_reason" class="w-full border p-2.5 rounded" placeholder="Reason (e.g. needed as shepherd in London)">
+                        <label class="block">Posting letter (optional photo)<input id="po_letter" type="file" accept="image/*" onchange="pickPostLetter(this)" class="w-full"></label>
+                        <img id="po_letterPreview" alt="Letter" class="hidden max-h-32 border rounded">
+                        <button id="savePostingBtn" onclick="savePosting()" class="w-full py-2 bg-blue-900 text-white rounded font-bold">Post clergy</button></div>
+                    <div id="po_list" class="space-y-2"></div>
+                    <button id="po_more" onclick="loadPostings(true)" class="hidden w-full py-2 border rounded bg-white">Load more</button>
+                    <div class="po-super hidden bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">Church leadership role: <span class="leader-title">Church Head</span></p>
+                        <p class="text-gray-500">Read-only church-wide access plus posting approval. Several people can hold it. Only a Super Admin assigns it; every change is logged.</p>
+                        <div id="ld_list" class="space-y-1"></div>
+                        <input id="ld_title" class="w-full border p-2.5 rounded" placeholder="Title of the role (e.g. Church Head, Pastor)">
+                        <input id="ld_name" class="w-full border p-2.5 rounded" placeholder="Full name of the holder"><input id="ld_email" type="email" class="w-full border p-2.5 rounded" placeholder="Their email">
+                        <input id="ld_reason" class="w-full border p-2.5 rounded" placeholder="Reason (goes in the audit log)">
+                        <div class="flex gap-1"><button id="assignLeaderBtn" onclick="assignLeader()" class="flex-1 py-2 bg-blue-900 text-white rounded font-bold">Assign + invite</button><button id="ld_titleBtn" onclick="saveLeaderTitle()" class="flex-1 py-2 border rounded font-bold">Save title</button></div>
+                        <div id="ld_result" class="bg-emerald-50 rounded p-2"></div></div>
                 </section>
 
                 <section id="section-register" class="space-y-3 hidden">
@@ -963,7 +1018,9 @@
             </header>
             <div class="p-5 space-y-3">
                 <input type="date" id="fin_date" class="w-full border p-2.5 rounded text-xs">
-                <input type="text" id="fin_contrib" class="w-full border p-2.5 rounded text-xs" placeholder="Contributor Name">
+                <input type="text" id="fin_contrib" oninput="findFinMember()" class="w-full border p-2.5 rounded text-xs" placeholder="Contributor Name (type to pick a member)">
+                <input type="hidden" id="fin_memberNo"><p id="fin_memberText" class="text-[11px] text-gray-500">Not linked to a member number (optional)</p>
+                <div id="fin_memberFound" class="space-y-1 text-xs"></div>
                 <input type="text" id="fin_type" class="w-full border p-2.5 rounded text-xs" placeholder="Type (e.g., Tithe, Offering, Pledge)">
                 <input type="number" id="fin_amount" class="w-full border p-2.5 rounded text-xs" placeholder="Amount (e.g., 5000)">
             </div>

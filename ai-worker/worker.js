@@ -4,10 +4,17 @@
 // Secrets: GEMINI_API_KEY (required), GROQ_API_KEY (optional backup, images/text only).
 // Optional secret ACCURACY_TEST_KEY: lets a one-off accuracy test skip the Firebase login. Delete it after the test.
 // Route: POST /extract  JSON {text} or {file: <base64>, mime}
+// Route: POST /summary  JSON {totals}: counts only (Phase 8). Returns {text}: a short plain-language summary of the month's alerts.
+// Cron Trigger (Phase 8): daily church-wide checks -> parishMonthly, statsRollups, alerts (+ audit) in Firestore via the REST API.
+//   Needs secret FIREBASE_SERVICE_ACCOUNT (service-account JSON with Cloud Datastore User role). Without it the job does nothing.
 // Header: Authorization: Bearer <Firebase ID token of project ccc-data-aarinat>
 
+import './alerts-core.js'; // symlink to ../alerts-core.js (shared with the browser)
 const FIREBASE_PROJECT = 'ccc-data-aarinat';
-const ALLOWED = ['https://kobomoba.github.io', 'http://127.0.0.1:5055', 'http://localhost:5055'];
+const ALLOWED = ['https://kobomoba.github.io', 'https://ccc-parish-portal.vercel.app', 'http://127.0.0.1:5055', 'http://localhost:5055'];
+// Vercel preview deployments of the same project and team only.
+const PREVIEW = /^https:\/\/ccc-parish-portal-[a-z0-9-]+-aadesanya173-gmailcoms-projects\.vercel\.app$/;
+const allowedOrigin = o => ALLOWED.includes(o) || PREVIEW.test(o);
 const GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-3.8-flash', 'gemini-flash-latest'];
 const GROQ_MODEL = 'qwen/qwen3.8-27b';
 const MAX_FILE_CHARS = 8_000_000; // ~6 MB
@@ -37,7 +44,7 @@ const PROMPT = 'This is a member list from a Nigerian Celestial Church of Christ
 
 function cors(origin) {
   return {
-    'Access-Control-Allow-Origin': ALLOWED.includes(origin) ? origin : ALLOWED[0],
+    'Access-Control-Allow-Origin': allowedOrigin(origin) ? origin : ALLOWED[0],
     'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Vary': 'Origin',
@@ -157,20 +164,165 @@ function cleanPerson(x) {
   };
 }
 
+// ---------- Phase 8: AI summary (totals only) ----------
+// Keeps only numbers under short label keys (alert types, countries, world totals). Every string VALUE is dropped,
+// so a name can never reach the AI even if a client sends one.
+const KEY_OK = /^[A-Za-z0-9 _.,'()%+\/-]{1,60}$/;
+function cleanTotals(t, depth = 0) {
+  const out = {};
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return out;
+  for (const [k, v] of Object.entries(t).slice(0, 120)) {
+    if (!KEY_OK.test(k)) continue;
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    else if (depth < 2 && v && typeof v === 'object') out[k] = cleanTotals(v, depth + 1);
+    else if (k === 'month' && typeof v === 'string' && /^[A-Za-z]+ \d{4}$/.test(v)) out[k] = v;
+  }
+  return out;
+}
+const SUMMARY_PROMPT = 'You help the HQ of the Celestial Church of Christ, a worldwide church. Below are ONLY totals for one month: '
+  + 'counts of automatic alerts by type and by country, and church-wide totals. Write 3 to 5 short, plain sentences for a busy '
+  + 'church leader reading on a phone: what stands out, where to look first, and one practical next step. Be neutral and factual; '
+  + 'do not invent numbers or names; do not take sides in any leadership matter. Plain text, no lists, no markdown. Totals: ';
+async function summarize(env, totals) {
+  if (!env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not set');
+  const body = JSON.stringify({ contents: [{ parts: [{ text: SUMMARY_PROMPT + JSON.stringify(totals) }] }], generationConfig: { temperature: 0.2 } });
+  let last = '';
+  for (const model of GEMINI_MODELS) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body });
+    if (r.ok) {
+      const d = await r.json();
+      const text = (d?.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+      if (text) return { text: text.slice(0, 2000), engine: model };
+    }
+    last = model + ' ' + r.status;
+  }
+  throw new Error('Gemini failed: ' + last);
+}
+
+// ---------- Phase 8: scheduled church-wide checks (Firestore REST + service account) ----------
+async function saToken(sa) {
+  const enc = o => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned = enc({ alg: 'RS256', typ: 'JWT' }) + '.' + enc({ iss: sa.client_email, scope: 'https://www.googleapis.com/auth/datastore',
+    aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 });
+  const der = Uint8Array.from(atob(sa.private_key.replace(/-----[^-]+-----|\s/g, '')), c => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned)));
+  const jwt = unsigned + '.' + btoa(String.fromCharCode(...sig)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + jwt });
+  if (!r.ok) throw new Error('token ' + r.status);
+  return (await r.json()).access_token;
+}
+const fromValue = v => 'stringValue' in v ? v.stringValue : 'integerValue' in v ? Number(v.integerValue) : 'doubleValue' in v ? v.doubleValue
+  : 'booleanValue' in v ? v.booleanValue : 'nullValue' in v ? null : 'timestampValue' in v ? v.timestampValue
+  : 'mapValue' in v ? fromFields(v.mapValue.fields || {}) : 'arrayValue' in v ? (v.arrayValue.values || []).map(fromValue) : null;
+const fromFields = f => Object.fromEntries(Object.entries(f).map(([k, v]) => [k, fromValue(v)]));
+const toValue = v => v === null || v === undefined ? { nullValue: null } : typeof v === 'boolean' ? { booleanValue: v }
+  : typeof v === 'number' ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }) : typeof v === 'string' ? { stringValue: v }
+  : Array.isArray(v) ? { arrayValue: { values: v.map(toValue) } } : { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, toValue(x)])) } };
+
+// Firestore REST client. In tests, env.FIRESTORE_EMULATOR_HOST points it at the local emulator (no credential needed).
+async function firestore(env) {
+  const project = env.FIRESTORE_PROJECT || FIREBASE_PROJECT;
+  const emu = env.FIRESTORE_EMULATOR_HOST;
+  const root = `${emu ? 'http://' + emu : 'https://firestore.googleapis.com'}/v1/projects/${project}/databases/(default)/documents`;
+  const token = emu ? 'owner' : await saToken(JSON.parse(env.FIREBASE_SERVICE_ACCOUNT));
+  const call = async (url, init = {}) => {
+    const r = await fetch(url, { ...init, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' } });
+    if (!r.ok) throw new Error(`firestore ${r.status} ${(await r.text()).slice(0, 200)}`);
+    return r.json();
+  };
+  const name = d => d.name.split('/documents/')[1];
+  return {
+    root,
+    async list(col) {
+      const out = []; let page = '';
+      do {
+        const d = await call(`${root}/${col}?pageSize=300${page ? '&pageToken=' + page : ''}`);
+        (d.documents || []).forEach(x => out.push({ id: name(x).split('/').pop(), ...fromFields(x.fields || {}) }));
+        page = d.nextPageToken || '';
+      } while (page);
+      return out;
+    },
+    async query(col, field, op, value) {
+      const rows = await call(`${root}:runQuery`, { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: col }],
+        where: { fieldFilter: { field: { fieldPath: field }, op, value: toValue(value) } } } }) });
+      return rows.filter(x => x.document).map(x => ({ id: name(x.document).split('/').pop(), ...fromFields(x.document.fields || {}) }));
+    },
+    async commit(writes) {
+      for (let i = 0; i < writes.length; i += 400) {
+        await call(`${root}:commit`, { method: 'POST', body: JSON.stringify({ writes: writes.slice(i, i + 400).map(([path, data, serverAt]) => ({
+          update: { name: `projects/${project}/databases/(default)/documents/${path}`, fields: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, toValue(v)])) },
+          ...(serverAt ? { updateTransforms: [{ fieldPath: serverAt, setToServerValue: 'REQUEST_TIME' }] } : {}) })) }) });
+      }
+    },
+  };
+}
+
+// The daily job: same AlertsCore functions as the browser fallback. Returns counts (logged by the Cron Trigger).
+async function runChecks(env, today = new Date().toISOString().slice(0, 10)) {
+  if (!env.FIREBASE_SERVICE_ACCOUNT && !env.FIRESTORE_EMULATOR_HOST) return { skipped: 'FIREBASE_SERVICE_ACCOUNT not set' };
+  const A = globalThis.AlertsCore, fs = await firestore(env), m = today.slice(0, 7), lm = A.addMonths(m, -1), now = new Date().toISOString();
+  const [parishes, stats, rets, snaps, al1, al2] = await Promise.all([fs.list('parishes'), fs.list('parishStats'),
+    fs.query('returns', 'month', 'GREATER_THAN_OR_EQUAL', A.addMonths(m, -7)), fs.query('parishMonthly', 'month', 'GREATER_THAN_OR_EQUAL', A.addMonths(m, -5)),
+    fs.query('alerts', 'month', 'EQUAL', m), fs.query('alerts', 'month', 'EQUAL', lm)]);
+  const plist = parishes.map(({ logo, ...p }) => p);
+  const st = Object.fromEntries(stats.map(s => [s.id, s]));
+  const byParish = {}, sn = {};
+  rets.forEach(r => { (byParish[r.parishId] ||= {})[r.month] = r; });
+  snaps.forEach(s => { (sn[s.parishId] ||= {})[s.month] = s; });
+  const nowSnap = {}, prevSnap = {};
+  plist.forEach(p => { nowSnap[p.id] = A.snapshot(p, st[p.id], m, now); (sn[p.id] ||= {})[m] = nowSnap[p.id]; if (sn[p.id][lm]) prevSnap[p.id] = sn[p.id][lm]; });
+  const filed = new Set(plist.filter(p => byParish[p.id]?.[lm]).map(p => p.id));
+  const roll = A.rollups(m, plist, nowSnap, prevSnap, filed, now);
+  const found = [...A.returnAlerts(lm, plist, byParish, today).map(a => ({ ...a, month: lm })), ...A.statsAlerts(m, plist, sn, today).map(a => ({ ...a, month: m }))];
+  const existing = new Set([...al1, ...al2].map(a => a.id));
+  const fresh = found.filter(a => !existing.has(`${a.month}_${a.parishId}_${a.rule}`));
+  const writes = [
+    ...plist.map(p => [`parishMonthly/${p.id}_${m}`, nowSnap[p.id]]),
+    ...Object.entries(roll).map(([id, r]) => [`statsRollups/${id}`, r]),
+  ];
+  for (const a of fresh) {
+    const id = `${a.month}_${a.parishId}_${a.rule}`;
+    writes.push([`alerts/${id}`, { ...a, detail: a.detail.slice(0, 300), status: 'Open', version: 1, at: now, by: 'server-job' }]);
+    writes.push([`auditLog/alerts_${id}_v1`, { action: 'alert', target: 'alerts/' + id, targetVersion: 1, parishId: '', reason: '', before: null,
+      after: { rule: a.rule, parishId: a.parishId }, by: 'server-job', byEmail: '', byName: 'Scheduled check', role: 'server' }, 'at']);
+  }
+  await fs.commit(writes);
+  // AI summary of this month's alerts, from totals only.
+  let summary = 'skipped';
+  if (env.GEMINI_API_KEY) {
+    try {
+      const country = Object.fromEntries(plist.map(p => [p.id, p.country || 'Unknown']));
+      const all = [...found, ...[...al1, ...al2].filter(a => !found.some(f => `${f.month}_${f.parishId}_${f.rule}` === a.id))].map(a => ({ rule: a.rule, country: country[a.parishId] }));
+      const s = await summarize(env, cleanTotals(A.summaryTotals(m, all, roll[`${m}_world_all`])));
+      await fs.commit([[`aiSummaries/${m}`, { month: m, text: s.text, engine: s.engine, alertCount: all.length, at: now, by: 'server-job' }]]);
+      summary = 'written';
+    } catch (e) { summary = 'failed: ' + e.message; }
+  }
+  return { parishes: plist.length, alerts: found.length, fresh: fresh.length, rollups: Object.keys(roll).length, summary };
+}
+
 export default {
+  runChecks, cleanTotals, allowedOrigin, // exposed for the emulator test (ai-worker/checks.test.mjs)
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runChecks(env).then(r => console.log('ccc checks', JSON.stringify(r)), e => console.error('ccc checks failed', e.message)));
+  },
   async fetch(req, env) {
     const origin = req.headers.get('Origin') || '';
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors(origin) });
     const route = new URL(req.url).pathname.replace(/^\/+/, '');
     if (req.method === 'GET') return json({ name: 'CCC AI data entry', version: 1, engines: ['gemini', 'groq'] }, 200, origin);
-    if (route !== 'extract') return json({ error: 'unknown route' }, 404, origin);
+    if (route !== 'extract' && route !== 'summary') return json({ error: 'unknown route' }, 404, origin);
 
     const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     const testKey = req.headers.get('X-Test-Key');
     let uid;
     if (env.ACCURACY_TEST_KEY && testKey && testKey === env.ACCURACY_TEST_KEY) uid = 'accuracy-test';
     else {
-      if (!ALLOWED.includes(origin)) return json({ error: 'origin not allowed' }, 403, origin);
+      if (!allowedOrigin(origin)) return json({ error: 'origin not allowed' }, 403, origin);
       if (!token) return json({ error: 'sign in first' }, 401, origin);
       try { uid = await verifyIdToken(token); } catch (e) { return json({ error: 'invalid login: ' + e.message }, 401, origin); }
     }
@@ -178,6 +330,10 @@ export default {
 
     let body;
     try { body = await req.json(); } catch { return json({ error: 'bad JSON' }, 400, origin); }
+    if (route === 'summary') {
+      try { return json(await summarize(env, cleanTotals(body.totals)), 200, origin); }
+      catch (e) { return json({ error: 'summary failed: ' + String(e.message || e) }, 502, origin); }
+    }
     const input = {};
     if (body.text) {
       input.text = String(body.text).slice(0, MAX_TEXT_CHARS);
