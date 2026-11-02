@@ -31,7 +31,7 @@ const PHOTO = 'data:image/jpeg;base64,' + 'A'.repeat(80000);
 // Allocate the next number in a transaction, exactly like the app does.
 async function addRecord(db, parish, kind, data) {
   const key = kind === 'clergy' ? 'clg' : 'mbr';
-  const prefix = kind === 'clergy' ? 'CCC-CLG-' : 'CCC-MBR-';
+  const prefix = `CCC-${parish}${parish}${parish}-LAG-` + (kind === 'clergy' ? 'CLG-' : 'MBR-');
   return runTransaction(db, async (t) => {
     const cRef = doc(db, `parishes/${parish}/meta/counters`);
     const n = (await t.get(cRef)).data()[key] + 1;
@@ -63,7 +63,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'adminEmails/a@x.org'), { uid: 'uA' });
     await setDoc(doc(db, 'adminEmails/b@x.org'), { uid: 'uB' });
     for (const p of ['A', 'B', 'S']) {
-      await setDoc(doc(db, `parishes/${p}`), { name: 'Parish ' + p, status: p === 'S' ? 'Suspended' : 'Approved' });
+      await setDoc(doc(db, `parishes/${p}`), { name: 'Parish ' + p, status: p === 'S' ? 'Suspended' : 'Approved', parishLetters: p + p + p, cityLetters: 'LAG' });
       await setDoc(doc(db, `parishes/${p}/meta/counters`), { clg: 1, mbr: 2 });
     }
     await setDoc(doc(db, 'parishes/A/members/CCC-MBR-001'), member);
@@ -166,7 +166,7 @@ test('member search by name prefix and phone, own parish only', async () => {
 // ---- Phase 1: member record ----
 test('member record: full form accepted, bad fields refused', async () => {
   const a = as.adminA();
-  await assertSucceeds(addRecord(a, 'A', 'members', person('x', { photo: PHOTO, dobYear: 1980, anointDay: 1, anointMonth: 5, anointYear: 2024, rank: 'Senior Leader', email: 'ade@x.org' })));
+  await assertSucceeds(addRecord(a, 'A', 'members', person('x', { photo: PHOTO, dobYear: 1980, anointDay: 1, anointMonth: 5, anointYear: 2024, gender: 'Male', rank: 'Senior Leader', email: 'ade@x.org' })));
   await assertFails(addRecord(a, 'A', 'members', person('x', { rank: 'Archbishop' })));
   await assertFails(addRecord(a, 'A', 'members', person('x', { dobMonth: 13 })));
   await assertFails(addRecord(a, 'A', 'members', person('x', { dobDay: '4' })));
@@ -181,25 +181,26 @@ test('member record: full form accepted, bad fields refused', async () => {
 // ---- Phase 1: number allocation ----
 test('numbers: next number taken in a transaction, two series', async () => {
   const a = as.adminA();
-  assert(await addRecord(a, 'A', 'members', person('x')), 'CCC-MBR-003');
-  assert(await addRecord(a, 'A', 'clergy', clergy('x', 'new.clergy@x.org')), 'CCC-CLG-002');
-  assert(await addRecord(a, 'A', 'members', person('x')), 'CCC-MBR-004');
+  assert(await addRecord(a, 'A', 'members', person('x')), 'CCC-AAA-LAG-MBR-003');
+  assert(await addRecord(a, 'A', 'clergy', clergy('x', 'new.clergy@x.org')), 'CCC-AAA-LAG-CLG-002');
+  assert(await addRecord(a, 'A', 'members', person('x')), 'CCC-AAA-LAG-MBR-004');
   const c = await getDoc(doc(a, 'parishes/A/meta/counters'));
   assert(JSON.stringify(c.data()), JSON.stringify({ clg: 2, mbr: 4 }));
 });
 test('numbers: cannot skip, reuse, rewind, or delete', async () => {
   const a = as.adminA();
   const raw = (id, cnt) => { const b = writeBatch(a); b.set(doc(a, `parishes/A/members/${id}`), person(id)); if (cnt) b.update(doc(a, 'parishes/A/meta/counters'), cnt); return b.commit(); };
-  await assertFails(raw('CCC-MBR-003'));                              // no counter move
-  await assertFails(raw('CCC-MBR-009', { mbr: 9 }));                  // skip ahead
-  await assertFails(raw('CCC-MBR-005', { mbr: 3 }));                  // id does not match counter
-  await assertFails(raw('CCC-MBR-002', { mbr: 2 }));                  // reuse (counter not moved)
+  await assertFails(raw('CCC-AAA-LAG-MBR-003'));                              // no counter move
+  await assertFails(raw('CCC-AAA-LAG-MBR-009', { mbr: 9 }));                  // skip ahead
+  await assertFails(raw('CCC-AAA-LAG-MBR-005', { mbr: 3 }));                  // id does not match counter
+  await assertFails(raw('CCC-AAA-LAG-MBR-002', { mbr: 2 }));                  // reuse (counter not moved)
   await assertFails(updateDoc(doc(a, 'parishes/A/meta/counters'), { mbr: 1 }));   // rewind
   await assertFails(updateDoc(doc(a, 'parishes/A/meta/counters'), { mbr: 3 }));   // bump without record
   await assertFails(deleteDoc(doc(a, 'parishes/A/members/CCC-MBR-001')));
   await assertFails(deleteDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001')));
   await assertFails(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { memberNo: 'CCC-MBR-099' }));
-  await assertSucceeds(raw('CCC-MBR-003', { mbr: 3 }));
+  await assertSucceeds(raw('CCC-AAA-LAG-MBR-003', { mbr: 3 }));
+  await assertFails(raw('CCC-MBR-004', { mbr: 4 }));                  // new numbers must carry the parish lettering
 });
 test('clergy transfer keeps number, needs a leave date', async () => {
   const a = as.adminA();
@@ -317,7 +318,7 @@ function assert(actual, expected) { if (actual !== expected) throw new Error(`ex
 
 // Firestore caps each request at 1000 evaluated expressions. Fully filled records, in the
 // same multi-write shapes the app uses, must stay under it.
-const FULL = { photo: PHOTO, address: '12 Long Street, Ikeja, Lagos', email: 'full@x.org', rank: 'Venerable Most Senior Evangelist',
+const FULL = { gender: 'Male', photo: PHOTO, address: '12 Long Street, Ikeja, Lagos', email: 'full@x.org', rank: 'Venerable Most Senior Evangelist',
   occupation: 'Civil Engineer', dobYear: 1960, anointDay: 25, anointMonth: 12, anointYear: 2025, important: true,
   nokName: 'Kin Name', nokAddress: 'Ibadan', nokPhone: '0700 000 0000' };
 test('limits: full records in app-shaped writes (create, ordain, transfer, edit)', async () => {
@@ -329,11 +330,11 @@ test('limits: full records in app-shaped writes (create, ordain, transfer, edit)
   await assertSucceeds(runTransaction(a, async (t) => {
     const cRef = doc(a, 'parishes/A/meta/counters');
     const n = (await t.get(cRef)).data().clg + 1;
-    const id = 'CCC-CLG-' + String(n).padStart(3, '0');
+    const id = 'CCC-AAA-LAG-CLG-' + String(n).padStart(3, '0');
     t.update(cRef, { clg: n });
-    t.set(doc(a, `parishes/A/clergy/${id}`), clergy(id, 'ordained@x.org', { ...FULL, email: 'ordained@x.org', formerMemberNo: 'CCC-MBR-003' }));
+    t.set(doc(a, `parishes/A/clergy/${id}`), clergy(id, 'ordained@x.org', { ...FULL, email: 'ordained@x.org', formerMemberNo: 'CCC-AAA-LAG-MBR-003' }));
     t.set(doc(a, 'clergyIndex/ordained@x.org'), { parishId: 'A', clergyId: id });
-    t.update(doc(a, 'parishes/A/members/CCC-MBR-003'), { status: 'Ordained', ordainedAs: id });
+    t.update(doc(a, 'parishes/A/members/CCC-AAA-LAG-MBR-003'), { status: 'Ordained', ordainedAs: id });
     t.set(doc(a, 'parishStats/A'), { memberCount: increment(-1), clergyCount: increment(1) }, { merge: true });
   }));
   // Transfer a full clergy with a letter + stats in one batch.
@@ -385,8 +386,8 @@ test('departments: private to the parish (no other parish, no super, no hq)', as
 async function seedPlaces() {
   await env.withSecurityRulesDisabled(async (c) => {
     const db = c.firestore();
-    await setDoc(doc(db, 'parishes/A'), { name: 'Parish A', status: 'Approved', city: 'Lagos', country: 'Nigeria', code: 'AAAAA1' });
-    await setDoc(doc(db, 'parishes/B'), { name: 'Parish B', status: 'Approved', city: 'London', country: 'United Kingdom', code: 'BBBBB2' });
+    await setDoc(doc(db, 'parishes/A'), { name: 'Parish A', status: 'Approved', city: 'Lagos', country: 'Nigeria', code: 'AAAAA1', parishLetters: 'AAA', cityLetters: 'LAG' });
+    await setDoc(doc(db, 'parishes/B'), { name: 'Parish B', status: 'Approved', city: 'London', country: 'United Kingdom', code: 'BBBBB2', parishLetters: 'BBB', cityLetters: 'LAG' });
     await setDoc(doc(db, 'parishCodes/AAAAA1'), { parishId: 'A' });
     await setDoc(doc(db, 'parishCodes/BBBBB2'), { parishId: 'B' });
     await setDoc(doc(db, 'parishStats/B'), { memberCount: 0, clergyCount: 0 });
@@ -406,7 +407,7 @@ function accept(db, id = 'T1', life = 'CCC-MBR-001') {
   return runTransaction(db, async (t) => {
     const cRef = doc(db, 'parishes/B/meta/counters');
     const n = (await t.get(cRef)).data().mbr + 1;
-    const no = 'CCC-MBR-' + String(n).padStart(3, '0');
+    const no = 'CCC-BBB-LAG-MBR-' + String(n).padStart(3, '0');
     t.update(cRef, { mbr: n });
     t.set(doc(db, `parishes/B/members/${no}`), person(no, { transferId: id, lifeNo: life, lifeParishCode: 'AAAAA1' }));
     t.update(doc(db, `transfers/${id}`), { status: 'Accepted', newMemberNo: no, decidedAt: 'now' });
@@ -423,8 +424,9 @@ test('parish codes: any parish admin can look one up; only super creates', async
   await assertFails(getDoc(doc(as.stranger(), 'parishCodes/BBBBB2')));
   const sdb = as.superA();
   const b = writeBatch(sdb);
-  b.set(doc(sdb, 'parishes/C'), { name: 'Parish C', status: 'Approved', code: 'CCCCC3' });
+  b.set(doc(sdb, 'parishes/C'), { name: 'Parish C', status: 'Approved', code: 'CCCCC3', parishLetters: 'CCC', cityLetters: 'LAG' });
   b.set(doc(sdb, 'parishCodes/CCCCC3'), { parishId: 'C' });
+  b.set(doc(sdb, 'parishLettering/CCC-LAG'), { parishId: 'C' });
   await assertSucceeds(b.commit());
   await assertFails(setDoc(doc(as.superA(), 'parishCodes/WRONG1'), { parishId: 'C' }));  // code must match the parish
 });
@@ -437,7 +439,7 @@ test('transfer: send with consent, accept by code, one life-long number, flow fo
   await assertFails(getDoc(doc(as.superA(), 'transfers/T1')));
   await assertFails(getDoc(doc(as.hq(), 'transfers/T1')));
   const no = await accept(as.adminB());
-  assert(no, 'CCC-MBR-003');
+  assert(no, 'CCC-BBB-LAG-MBR-003');
   const rec = await getDoc(doc(as.adminB(), `parishes/B/members/${no}`));
   assert(rec.data().lifeNo, 'CCC-MBR-001');
   // Super sees the flow (places only), not the people.
@@ -553,12 +555,12 @@ test('visitors: consent, follow-up status, convert to member in the same write',
   await assertFails(setDoc(doc(a, 'parishes/A/visitors/V2'), { ...v, consentGiven: false }));
   await assertFails(setDoc(doc(a, 'parishes/A/visitors/V2'), { ...v, nameLower: 'other' }));
   await assertSucceeds(updateDoc(doc(a, 'parishes/A/visitors/V1'), { status: 'Contacted' }));
-  await assertFails(updateDoc(doc(a, 'parishes/A/visitors/V1'), { status: 'Member', memberNo: 'CCC-MBR-003' })); // member not created
+  await assertFails(updateDoc(doc(a, 'parishes/A/visitors/V1'), { status: 'Member', memberNo: 'CCC-AAA-LAG-MBR-003' })); // member not created
   // Convert: new member + visitor marked Member, one transaction.
   await assertSucceeds(runTransaction(a, async (t) => {
     const cRef = doc(a, 'parishes/A/meta/counters');
     const n = (await t.get(cRef)).data().mbr + 1;
-    const id = 'CCC-MBR-' + String(n).padStart(3, '0');
+    const id = 'CCC-AAA-LAG-MBR-' + String(n).padStart(3, '0');
     t.update(cRef, { mbr: n });
     t.set(doc(a, `parishes/A/members/${id}`), person(id, { fullName: 'Kemi Ola', nameLower: 'kemi ola' }));
     t.update(doc(a, 'parishes/A/visitors/V1'), { status: 'Member', memberNo: id });
@@ -585,5 +587,197 @@ test('attendance privacy: other parish, super admin and HQ see totals only', asy
   await assertSucceeds(updateDoc(doc(as.adminA(), 'parishStats/A'), { byType: { sunday: { services: 1, total: 115 } }, visitorCount: 1 }));
   await assertFails(updateDoc(doc(as.adminA(), 'parishStats/A'), { visitorCount: -1 }));
   await assertSucceeds(getDoc(doc(as.superA(), 'parishStats/A')));
+  await assertSucceeds(getDoc(doc(as.hq(), 'parishStats/A')));
+});
+
+// ---------------------------------------------------------------- Phase 4: parish lettering
+test('parish lettering: set once by super, unique worldwide, index in the same write', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    for (const p of ['X1', 'X2', 'X3']) await setDoc(doc(c.firestore(), `parishes/${p}`), { name: 'Ijaye', status: 'Approved' });
+  });
+  const s = as.superA();
+  const setL = (p, pl, cl) => { const b = writeBatch(s); b.update(doc(s, `parishes/${p}`), { parishLetters: pl, cityLetters: cl });
+    b.set(doc(s, `parishLettering/${pl}-${cl}`), { parishId: p }); return b.commit(); };
+  await assertSucceeds(setL('X1', 'IJY', 'ABK'));
+  await assertFails(setL('X2', 'IJY', 'ABK'));            // same lettering taken
+  await assertSucceeds(setL('X2', 'IJY', 'LAG'));         // same parish name, other city: fine
+  await assertFails(setL('X1', 'XYZ', 'ABK'));            // cannot change once set
+  await assertFails(updateDoc(doc(s, 'parishes/X3'), { parishLetters: 'ABC', cityLetters: 'DEF' }));  // no index doc
+  await assertFails(setL('X3', 'ab', 'CD'));              // uppercase 2-4 letters
+  await assertFails(setL('X3', 'ABCDE', 'CD'));
+  await assertFails(updateDoc(doc(as.adminA(), 'parishes/A'), { parishLetters: 'QQ' }));             // parish admin cannot
+  await assertFails(setDoc(doc(as.adminA(), 'parishLettering/QQ-RR'), { parishId: 'A' }));
+  await assertSucceeds(getDoc(doc(as.adminB(), 'parishLettering/IJY-ABK')));
+  const b = writeBatch(s);
+  b.set(doc(s, 'parishes/N'), { name: 'Ijaye', status: 'Approved', parishLetters: 'IJY', cityLetters: 'IBD' });
+  b.set(doc(s, 'parishLettering/IJY-IBD'), { parishId: 'N' });
+  await assertSucceeds(b.commit());
+});
+test('numbers: no lettering, no new number; old-style records keep working', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    await setDoc(doc(c.firestore(), 'parishes/A'), { name: 'Parish A', status: 'Approved' });
+  });
+  const a = as.adminA();
+  await assertFails(addRecord(a, 'A', 'members', person('x')));
+  // Old CCC-MBR-001 is still readable, editable and usable in a department.
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { phone: '0809' }));
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/deptMembers/choir_CCC-MBR-001'), dm('choir', 'CCC-MBR-001')));
+});
+
+// ---------------------------------------------------------------- Phase 4: female rank line
+test('ranks: dropdown line must match gender', async () => {
+  const a = as.adminA();
+  await assertSucceeds(addRecord(a, 'A', 'members', person('x', { gender: 'Female', rank: 'Mother Celestial' })));
+  await assertSucceeds(addRecord(a, 'A', 'members', person('x', { gender: 'Female', rank: 'Lace Elder Sister / Lace Senior Elder Sister' })));
+  await assertSucceeds(addRecord(a, 'A', 'members', person('x', { gender: 'Male', rank: 'Supreme Evangelist' })));
+  await assertFails(addRecord(a, 'A', 'members', person('x', { gender: 'Female', rank: 'Evangelist' })));
+  await assertFails(addRecord(a, 'A', 'members', person('x', { gender: 'Male', rank: 'Elder Sister' })));
+  await assertFails(addRecord(a, 'A', 'members', person('x', { gender: 'Female', rank: 'Lace Elder Sister' })));
+});
+
+// ---------------------------------------------------------------- Phase 4: births, children, teens, deaths
+const ymd = (d) => d.toISOString().slice(0, 10);
+const yearsAgo = (y, days = 0) => { const d = new Date(); d.setUTCFullYear(d.getUTCFullYear() - y); d.setUTCDate(d.getUTCDate() + days); return ymd(d); };
+const young = (no, dob, extra = {}) => ({ no, fullName: 'Baby Ade', nameLower: 'baby ade', gender: 'Female', dob, status: 'Active',
+  consentGiven: true, consentDate: '2026-11-01', createdAt: 'now', updatedAt: 'now', ...extra });
+const birth = (no, dob, extra = {}) => young(no, dob, { place: 'Ikeja', fatherNo: 'CCC-MBR-002', fatherName: 'Head Choir', motherNo: '', motherName: 'Ade Bisi',
+  namingDate: dob, officiant: 'CCC-CLG-001', officiantName: 'Evangelist Ven Olu', ...extra });
+const SER = { births: ['brt', 'CCC-AAA-LAG-BRT-'], children: ['chd', 'CCC-AAA-LAG-CHD-'], teens: ['ten', 'CCC-AAA-LAG-TEN-'], deaths: ['dth', 'CCC-AAA-LAG-DTH-'] };
+// Same shape as the app: counter doc meta/{k} = { n }, record, stats, extra writes, one transaction.
+async function addYoung(db, col, data, extra) {
+  const [k, prefix] = SER[col];
+  return runTransaction(db, async (t) => {
+    const cRef = doc(db, `parishes/A/meta/${k}`);
+    const c = await t.get(cRef);
+    const n = (c.exists() ? c.data().n : 0) + 1;
+    const id = prefix + String(n).padStart(3, '0');
+    t.set(cRef, { n });
+    t.set(doc(db, `parishes/A/${col}/${id}`), { ...data, no: id });
+    if (extra) extra(t, id);
+    return id;
+  });
+}
+const NEXT = { births: 'children', children: 'teens', teens: 'members' };
+async function moveUp(db, col, id, uid = 'uA') {
+  const rec = (await getDoc(doc(db, `parishes/A/${col}/${id}`))).data();
+  const next = NEXT[col];
+  const mark = (t, newId) => t.update(doc(db, `parishes/A/${col}/${id}`), { status: 'Moved', movedTo: newId, movedAt: 'now', movedBy: uid, updatedAt: 'now' });
+  if (next !== 'members') return addYoung(db, next, { ...young('x', rec.dob), fullName: rec.fullName, nameLower: rec.nameLower, fromNo: id }, mark);
+  const [y, m, d] = rec.dob.split('-').map(Number);
+  return runTransaction(db, async (t) => {
+    const cRef = doc(db, 'parishes/A/meta/counters');
+    const n = (await t.get(cRef)).data().mbr + 1;
+    const newId = 'CCC-AAA-LAG-MBR-' + String(n).padStart(3, '0');
+    t.update(cRef, { mbr: n });
+    t.set(doc(db, `parishes/A/members/${newId}`), person(newId, { dobDay: d, dobMonth: m, dobYear: y, maritalStatus: 'Single', fromNo: id }));
+    mark(t, newId);
+    return newId;
+  });
+}
+
+test('births: record with linked parents + clergy, own number series CCC-BRT-001', async () => {
+  const a = as.adminA();
+  const b1 = await addYoung(a, 'births', birth('x', yearsAgo(0, -10)));
+  assert(b1, 'CCC-AAA-LAG-BRT-001');
+  assert(await addYoung(a, 'births', birth('x', yearsAgo(1), { fatherNo: '', fatherName: 'Free Text Dad' })), 'CCC-AAA-LAG-BRT-002');
+  await assertFails(addYoung(a, 'births', birth('x', yearsAgo(1), { fatherNo: 'CCC-MBR-999' })));      // unknown parent
+  await assertFails(addYoung(a, 'births', birth('x', yearsAgo(1), { officiant: 'CCC-CLG-777' })));     // unknown clergy
+  await assertFails(addYoung(a, 'births', birth('x', yearsAgo(-1))));                                // born in the future
+  await assertFails(addYoung(a, 'births', birth('x', '2025-07')));                                   // full date required
+  await assertFails(addYoung(a, 'births', birth('x', yearsAgo(1), { consentGiven: false })));
+  // Cannot skip or rewind the series.
+  const raw = writeBatch(a);
+  raw.set(doc(a, 'parishes/A/meta/brt'), { n: 5 });
+  raw.set(doc(a, 'parishes/A/births/CCC-AAA-LAG-BRT-005'), birth('CCC-AAA-LAG-BRT-005', yearsAgo(1)));
+  await assertFails(raw.commit());
+  await assertFails(deleteDoc(doc(a, 'parishes/A/births/CCC-BRT-001')));
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/births/CCC-AAA-LAG-BRT-001'), { place: 'Lagos Island' }));
+});
+
+test('children + teens: full date of birth required; independent of members', async () => {
+  const a = as.adminA();
+  assert(await addYoung(a, 'children', { ...young('x', yearsAgo(5)), parentName: 'Ade Bisi', parentPhone: '080', address: 'Lagos' }), 'CCC-AAA-LAG-CHD-001');
+  assert(await addYoung(a, 'teens', young('x', yearsAgo(14))), 'CCC-AAA-LAG-TEN-001');
+  await assertFails(addYoung(a, 'children', young('x', '')));
+  await assertFails(addYoung(a, 'teens', { ...young('x', yearsAgo(14)), dobDay: 4 }));
+  // A child cannot pretend to come from a birth record that was not moved.
+  await addYoung(a, 'births', birth('x', yearsAgo(3)));
+  await assertFails(addYoung(a, 'children', { ...young('x', yearsAgo(3)), fromNo: 'CCC-BRT-001' }));
+});
+
+test('moves by age: birth -> child at 2, child -> teen at 12, teen -> member at 18 (CCC-MBR), history links', async () => {
+  const a = as.adminA();
+  const b = await addYoung(a, 'births', birth('x', yearsAgo(2, -1)));
+  const tooYoung = await addYoung(a, 'births', birth('x', yearsAgo(2, 1)));
+  const c = await moveUp(a, 'births', b);
+  assert(c, 'CCC-AAA-LAG-CHD-001');
+  await assertFails(moveUp(a, 'births', tooYoung));                                    // not 2 yet: server date decides
+  await assertFails(moveUp(a, 'births', b));                                           // already moved
+  const moved = (await getDoc(doc(a, `parishes/A/births/${b}`))).data();
+  assert(moved.movedTo, c);
+  assert((await getDoc(doc(a, `parishes/A/children/${c}`))).data().fromNo, b);
+  await assertFails(updateDoc(doc(a, `parishes/A/births/${b}`), { status: 'Active' }));  // Moved is final
+  await assertFails(moveUp(a, 'children', c));                                          // a 2-year-old is not 12
+  const c12 = await addYoung(a, 'children', young('x', yearsAgo(12)));
+  const t = await moveUp(a, 'children', c12);
+  await assertFails(moveUp(a, 'teens', t));                                             // 12 is not 18
+  const t18 = await addYoung(a, 'teens', young('x', yearsAgo(18, -3)));
+  const m = await moveUp(a, 'teens', t18);
+  assert(m, 'CCC-AAA-LAG-MBR-003');
+  assert((await getDoc(doc(a, `parishes/A/members/${m}`))).data().fromNo, t18);
+  // movedBy must be the person doing it (audit).
+  const t2 = await addYoung(a, 'teens', young('x', yearsAgo(19)));
+  await assertFails(moveUp(a, 'teens', t2, 'someoneElse'));
+  // Pending-moves query used on app load (needs the status+dob composite index on live).
+  await assertSucceeds(getDocs(query(collection(a, 'parishes/A/teens'), where('status', '==', 'Active'), where('dob', '<=', yearsAgo(18)), limit(50))));
+});
+
+test('deaths: linked member is marked Called to glory in the same write, never deleted; certificate number CCC-DTH-001', async () => {
+  const a = as.adminA();
+  const death = (no, extra = {}) => ({ no, fullName: 'Ade Bisi', nameLower: 'ade bisi', personNo: 'CCC-MBR-001', gender: 'Female',
+    dateOfDeath: '2026-10-30', age: 70, place: 'Lagos', burialDate: '2026-11-07', officiant: 'CCC-CLG-001', officiantName: 'Ev Ven Olu',
+    informant: 'Tunde Bisi', notes: '', createdAt: 'now', updatedAt: 'now', ...extra });
+  // Without marking the member, the death record is refused.
+  await assertFails(addYoung(a, 'deaths', death('x')));
+  // Member cannot be marked Called to glory without a death record.
+  await assertFails(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { status: 'Called to glory', deathId: 'CCC-DTH-009' }));
+  const d1 = await addYoung(a, 'deaths', death('x'), (t, id) => {
+    t.update(doc(a, 'parishes/A/members/CCC-MBR-001'), { status: 'Called to glory', deathId: id });
+    t.set(doc(a, 'parishStats/A'), { memberCount: increment(-1), deathCount: increment(1) }, { merge: true });
+  });
+  assert(d1, 'CCC-AAA-LAG-DTH-001');
+  assert((await getDoc(doc(a, 'parishes/A/members/CCC-MBR-001'))).data().status, 'Called to glory');
+  await assertFails(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { status: 'Active' }));   // final
+  await assertFails(deleteDoc(doc(a, 'parishes/A/members/CCC-MBR-001')));
+  await assertFails(deleteDoc(doc(a, `parishes/A/deaths/${d1}`)));
+  await assertSucceeds(updateDoc(doc(a, `parishes/A/deaths/${d1}`), { burialDate: '2026-11-08' }));
+  await assertFails(updateDoc(doc(a, `parishes/A/deaths/${d1}`), { personNo: 'CCC-MBR-002' }));
+  // Unlinked (free-text) death of a non-member.
+  assert(await addYoung(a, 'deaths', death('x', { personNo: '', fullName: 'Visitor X', nameLower: 'visitor x' })), 'CCC-AAA-LAG-DTH-002');
+  // Clergy: moved to Former with leaveReason 'Called to glory'.
+  await assertSucceeds(addYoung(a, 'deaths', death('x', { personNo: 'CCC-CLG-001', fullName: 'Ven Olu', nameLower: 'ven olu' }), (t, id) =>
+    t.update(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { status: 'Former', leftDate: '2026-10-30', leaveReason: 'Called to glory', deathId: id })));
+  // A baby (births record).
+  const b = await addYoung(a, 'births', birth('x', yearsAgo(1)));
+  await assertSucceeds(addYoung(a, 'deaths', death('x', { personNo: b, fullName: 'Baby Ade', nameLower: 'baby ade', age: 1 }), (t, id) =>
+    t.update(doc(a, `parishes/A/births/${b}`), { status: 'Called to glory', deathId: id })));
+  await assertFails(addYoung(a, 'deaths', death('x', { age: 200, personNo: '' })));
+});
+
+test('phase 4 privacy + totals: other parish, super and HQ see counts only', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    const db = c.firestore();
+    await setDoc(doc(db, 'parishes/A/births/CCC-BRT-001'), birth('CCC-BRT-001', '2026-01-01'));
+    await setDoc(doc(db, 'parishes/A/children/CCC-CHD-001'), young('CCC-CHD-001', '2020-01-01'));
+    await setDoc(doc(db, 'parishes/A/teens/CCC-TEN-001'), young('CCC-TEN-001', '2012-01-01'));
+    await setDoc(doc(db, 'parishes/A/deaths/CCC-DTH-001'), { no: 'CCC-DTH-001', fullName: 'X' });
+  });
+  for (const who of ['adminB', 'superA', 'hq', 'stranger', 'adminS']) {
+    for (const p of ['births/CCC-BRT-001', 'children/CCC-CHD-001', 'teens/CCC-TEN-001', 'deaths/CCC-DTH-001'])
+      await assertFails(getDoc(doc(as[who](), `parishes/A/${p}`)));
+  }
+  for (const g of ['births', 'children', 'teens', 'deaths']) await assertFails(getDocs(collectionGroup(as.superA(), g)));
+  await assertSucceeds(updateDoc(doc(as.adminA(), 'parishStats/A'), { birthCount: 1, childCount: 1, teenCount: 1, deathCount: 1 }));
+  await assertFails(updateDoc(doc(as.adminA(), 'parishStats/A'), { deathCount: -1 }));
   await assertSucceeds(getDoc(doc(as.hq(), 'parishStats/A')));
 });

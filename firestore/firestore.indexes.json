@@ -1,5 +1,9 @@
 {
-  "indexes": [],
+  "indexes": [
+    { "collectionGroup": "births", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "dob", "order": "ASCENDING" } ] },
+    { "collectionGroup": "children", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "dob", "order": "ASCENDING" } ] },
+    { "collectionGroup": "teens", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "dob", "order": "ASCENDING" } ] }
+  ],
   "fieldOverrides": [
     {
       "collectionGroup": "members",

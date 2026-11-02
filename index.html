@@ -61,6 +61,10 @@
                 <button onclick="showSection('clergy')" id="nav-clergy" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy</button>
                 <button onclick="showSection('former')" id="nav-former" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-slate-300 w-4"></i> Former Clergy</button>
                 <button onclick="showSection('families')" id="nav-families" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-roof text-pink-300 w-4"></i> Families</button>
+                <button onclick="showSection('births')" id="nav-births" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-baby text-rose-300 w-4"></i> Births</button>
+                <button onclick="showSection('children')" id="nav-children" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-child-reaching text-amber-300 w-4"></i> Sunday School Children</button>
+                <button onclick="showSection('teens')" id="nav-teens" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-user-graduate text-lime-300 w-4"></i> Teenagers</button>
+                <button onclick="showSection('deaths')" id="nav-deaths" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-dove text-gray-300 w-4"></i> Deaths</button>
                 <p class="parish-only hidden md:block px-3 pt-2 text-[10px] uppercase tracking-widest text-slate-400">Departments</p>
                 <button onclick="showSection('diaspora')" id="nav-diaspora" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-cyan-300 w-4"></i> Members in Diaspora</button>
                 <button onclick="showSection('attendance')" id="nav-attendance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance</button>
@@ -117,6 +121,8 @@
                         <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Services logged</p><p id="metricServices" class="text-lg font-bold">0</p></div>
                         <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Total giving</p><p id="metricGiving" class="text-lg font-bold">0</p></div>
                     </div>
+                    <div class="grid grid-cols-4 gap-2 text-xs"><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Births</p><p id="metricBirths" class="text-lg font-bold text-rose-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Children</p><p id="metricChildren" class="text-lg font-bold text-amber-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Teens</p><p id="metricTeens" class="text-lg font-bold text-lime-700">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Deaths</p><p id="metricDeaths" class="text-lg font-bold text-gray-700">0</p></div></div>
+                    <div id="pendingMoves" class="parish-only hidden bg-violet-50 border border-violet-300 rounded-xl p-3 text-xs space-y-2"></div>
                     <div id="electionBanners" class="parish-only space-y-2"></div>
                     <div class="parish-only">
                         <p class="text-[10px] uppercase font-semibold text-gray-500 mb-1">Departments</p>
@@ -162,6 +168,41 @@
                     <div id="familiesList" class="space-y-3"></div>
                 </section>
 
+                <section id="section-births" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Births</h2><p class="text-xs text-gray-500">Ages 0-2. Numbers CCC-BRT-001 onwards. Babies move to Sunday School at 2.</p></div>
+                        <button id="add-births" onclick="openYoungForm('births')" class="bg-rose-600 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Record Birth</button>
+                    </div>
+                    <div id="birthsList" class="space-y-2"></div>
+                    <button id="more-births" onclick="loadYoung('births', false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
+
+                <section id="section-children" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Sunday School Children</h2><p class="text-xs text-gray-500">Ages 2-12. Numbers CCC-CHD-001 onwards. Move to Teenagers at 12.</p></div>
+                        <button id="add-children" onclick="openYoungForm('children')" class="bg-amber-600 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Add Child</button>
+                    </div>
+                    <div id="childrenList" class="space-y-2"></div>
+                    <button id="more-children" onclick="loadYoung('children', false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
+
+                <section id="section-teens" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Teenagers</h2><p class="text-xs text-gray-500">Ages 12-18. Numbers CCC-TEN-001 onwards. Become Church Members (new CCC-MBR number) at 18.</p></div>
+                        <button id="add-teens" onclick="openYoungForm('teens')" class="bg-lime-700 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Add Teen</button>
+                    </div>
+                    <div id="teensList" class="space-y-2"></div>
+                    <button id="more-teens" onclick="loadYoung('teens', false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
+
+                <section id="section-deaths" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Deaths</h2><p class="text-xs text-gray-500">Called to glory. Numbers CCC-DTH-001 onwards. Records are kept, never deleted.</p></div>
+                        <button id="add-deaths" onclick="openDeathForm('')" class="bg-gray-800 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Record Death</button>
+                    </div>
+                    <div id="deathsList" class="space-y-2"></div>
+                    <button id="more-deaths" onclick="loadYoung('deaths', false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
                 <!-- DEPARTMENT (one section, filled for the chosen department) -->
                 <section id="section-dept" class="space-y-3 hidden">
                     <div class="pb-2 border-b"><h2 id="deptTitle" class="text-lg font-bold">Department</h2><p class="text-xs text-gray-500">Members serve a 2-year term. Clergy cannot join a department.</p></div>
@@ -243,6 +284,8 @@
                             <input id="np_country" class="border p-2.5 rounded" placeholder="Country">
                             <select id="np_continent" class="continent-select border p-2.5 rounded bg-white"></select>
                         </div>
+                        <div class="grid grid-cols-2 gap-2"><input id="np_pletters" maxlength="4" class="w-full border p-2.5 rounded uppercase font-mono" placeholder="Parish letters * (IJY)"><input id="np_cletters" maxlength="4" class="w-full border p-2.5 rounded uppercase font-mono" placeholder="City letters * (ABK)"></div>
+                        <p class="text-[11px] text-gray-500">Lettering goes on certificate numbers, e.g. CCC-IJY-ABK-BRT-001. Unique worldwide; cannot be changed later.</p>
                         <input id="np_email" type="email" class="w-full border p-2.5 rounded" placeholder="Parish admin email * (must not be clergy)">
                         <button id="createParishBtn" onclick="createParish()" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded">Create parish + invite</button>
                         <div id="inviteResult" class="hidden bg-emerald-50 border border-emerald-300 rounded p-3"></div>
@@ -441,7 +484,7 @@
                 </div>
                 <label class="block">Full name *<input id="p_name" class="w-full border p-2.5 rounded mt-1"></label>
                 <div class="grid grid-cols-2 gap-2">
-                    <label>Gender *<select id="p_gender" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Male</option><option>Female</option></select></label>
+                    <label>Gender *<select id="p_gender" onchange="fillRanks($('p_rank').value)" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Male</option><option>Female</option></select></label>
                     <label>Marital status *<select id="p_marital" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option><option>Separated</option></select></label>
                 </div>
                 <label class="block">Address<input id="p_address" class="w-full border p-2.5 rounded mt-1"></label>
@@ -475,6 +518,78 @@
     </div>
 
     <!-- RECORD VIEW -->
+    <!-- BIRTH / CHILD / TEEN FORM -->
+    <div id="youngModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg my-4 text-xs">
+            <div class="bg-rose-700 text-white p-3 rounded-t-xl flex justify-between items-center font-bold">
+                <span id="youngModalTitle">RECORD A BIRTH</span>
+                <button onclick="closeModal('youngModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-4 space-y-3">
+                <label class="block">Full name *<input id="y_name" class="w-full border p-2.5 rounded mt-1"></label>
+                <div class="grid grid-cols-2 gap-2">
+                    <label>Gender *<select id="y_gender" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Male</option><option>Female</option></select></label>
+                    <label>Date of birth * (full)<input id="y_dob" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                </div>
+                <label class="y-birth block">Place of birth<input id="y_place" class="w-full border p-2.5 rounded mt-1" placeholder="Hospital / town"></label>
+                <label class="y-birth block">Father<input id="y_father" class="w-full border p-2.5 rounded mt-1" placeholder="Member number (CCC-MBR-001) or full name"></label>
+                <label class="y-birth block">Mother<input id="y_mother" class="w-full border p-2.5 rounded mt-1" placeholder="Member number (CCC-MBR-001) or full name"></label>
+                <label class="y-birth block">Naming ceremony date<input id="y_naming" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="y-birth block">Officiating clergy<select id="y_officiant" class="w-full border p-2.5 rounded mt-1 bg-white"></select></label>
+                <input id="y_officiantOther" class="y-birth w-full border p-2.5 rounded mt-1" placeholder="...or type the clergy name">
+                <label class="y-kid block">Parent / guardian<input id="y_parent" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="y-kid block">Parent phone<input id="y_parentPhone" type="tel" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="y-kid block">Address<input id="y_address" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="flex gap-2 items-start"><input id="y_consent" type="checkbox" class="mt-0.5"> The parent / guardian agreed to these details being kept (NDPA 2023).</label>
+            </div>
+            <div class="p-3 border-t flex justify-end gap-2">
+                <button onclick="closeModal('youngModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="saveYoungBtn" onclick="saveYoung()" class="px-4 py-2 bg-rose-700 text-white rounded font-bold">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEATH FORM -->
+    <div id="deathModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg my-4 text-xs">
+            <div class="bg-gray-800 text-white p-3 rounded-t-xl flex justify-between items-center font-bold">
+                <span>RECORD A DEATH (CALLED TO GLORY)</span>
+                <button onclick="closeModal('deathModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-4 space-y-3">
+                <label class="block">Church number (if any)<input id="x_link" class="w-full border p-2.5 rounded mt-1 font-mono" placeholder="CCC-MBR-001, CCC-CLG-001, CCC-CHD-001..."></label>
+                <p class="text-[11px] text-gray-500">With a number, that record is marked "Called to glory": it leaves the counts but is never deleted.</p>
+                <label class="block">Name of the deceased<input id="x_name" class="w-full border p-2.5 rounded mt-1" placeholder="Filled from the number, or type it"></label>
+                <div class="grid grid-cols-2 gap-2">
+                    <label>Gender<select id="x_gender" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">-</option><option>Male</option><option>Female</option></select></label>
+                    <label>Age<input id="x_age" type="number" min="0" max="130" class="w-full border p-2.5 rounded mt-1" placeholder="Auto from DOB"></label>
+                    <label>Date of death *<input id="x_date" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                    <label>Burial date<input id="x_burial" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                </div>
+                <label class="block">Place of death<input id="x_place" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="block">Officiating clergy<select id="x_officiant" class="w-full border p-2.5 rounded mt-1 bg-white"></select></label>
+                <input id="x_officiantOther" class="w-full border p-2.5 rounded mt-1" placeholder="...or type the clergy name">
+                <label class="block">Informant (family contact)<input id="x_informant" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="block">Notes<input id="x_notes" class="w-full border p-2.5 rounded mt-1"></label>
+            </div>
+            <div class="p-3 border-t flex justify-end gap-2">
+                <button onclick="closeModal('deathModal')" class="px-4 py-2 border rounded">Cancel</button>
+                <button id="saveDeathBtn" onclick="saveDeath()" class="px-4 py-2 bg-gray-800 text-white rounded font-bold">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CERTIFICATE (print view: "Save as PDF") -->
+    <div id="certModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg my-4">
+            <div id="certPrint" class="p-3"></div>
+            <div class="no-print p-3 border-t flex justify-end gap-2 text-xs">
+                <button onclick="closeCertificate()" class="px-4 py-2 border rounded">Close</button>
+                <button id="printCertBtn" onclick="window.print()" class="px-4 py-2 bg-blue-700 text-white rounded font-bold"><i class="fa-solid fa-print"></i> Print / Save as PDF</button>
+            </div>
+        </div>
+    </div>
+
     <div id="recordModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
             <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
