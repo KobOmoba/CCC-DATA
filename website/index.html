@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>if (location.pathname === "/site") document.write('<base href="/site/">');</script>
+<title>Home · Celestial Church of Christ</title>
+<meta name="description" content="Celestial Church of Christ World-wide: find a parish, service times, events and sermons.">
+<meta name="theme-color" content="#1e3a8a">
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<main>
+<section class="hero">
+<h1>Welcome to the Celestial Church of Christ</h1>
+<p>A worldwide family of worship, prayer and healing. Find a parish near you and join us this Sunday.</p>
+<a class="btn" href="parishes.html">Find a parish</a> <a class="btn alt" href="services.html">Service times</a>
+</section>
+<div class="grid" style="margin-top:14px">
+<a class="card" href="about.html"><h3>About &amp; beliefs</h3><p class="muted">Who we are and what we believe.</p></a>
+<a class="card" href="sermons.html"><h3>Sermons</h3><p class="muted">Messages to watch, listen and read.</p></a>
+</div>
+<h2>Upcoming events</h2>
+<div id="events"><p class="empty">Loading…</p></div>
+<script>document.addEventListener("DOMContentLoaded", () => renderEvents(document.getElementById("events"), 3));</script>
+</main>
+</body>
+</html>

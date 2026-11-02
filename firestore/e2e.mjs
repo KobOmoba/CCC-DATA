@@ -507,7 +507,7 @@ try {
   await page.click('[data-tab="followup"]');
   await page.waitForSelector('#absentList .absent-row');
   const wa = await page.getAttribute('#absentList .wa-link', 'href');
-  assert.match(wa, /^https:\/\/wa\.me\/\d+\?text=Shalom/);
+  assert.match(wa, /^https:\/\/wa\.me\/\d+\?text=Halleluyah/);
   assert.match(await page.textContent('#absentList'), /Choir/);
   await fullShot('44-followup-rollup-whatsapp');
 
