@@ -47,6 +47,7 @@ function numberFor(tail, n) {
 }
 const noType = no => (String(no).toUpperCase().match(NO_RE) || [])[3] || "";
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const CURRENCIES = ["NGN", "GHS", "XOF", "XAF", "ZAR", "KES", "GBP", "EUR", "USD", "CAD", "AUD", "CHF", "SEK", "NOK", "DKK", "AED", "INR", "CNY", "JPY", "BRL"];
 const CONTINENTS = ["Africa", "Europe", "Asia", "North America", "South America", "Oceania", "Antarctica"];
 // New numbers carry the parish lettering: CCC-IJY-ABK-MBR-001. Old records keep CCC-MBR-001 and still work.
 const SERIES = { members: { key: "mbr", prefix: "MBR-", stat: "memberCount" }, clergy: { key: "clg", prefix: "CLG-", stat: "clergyCount" },
@@ -98,6 +99,7 @@ function fillSelects() {
     document.querySelectorAll(".month-select").forEach(s => s.innerHTML = opts(months, "Month"));
     document.querySelectorAll(".year-select").forEach(s => s.innerHTML = opts(years, "Year (optional)"));
     document.querySelectorAll(".continent-select").forEach(s => s.innerHTML = opts(CONTINENTS.map(c => [c, c]), "Continent"));
+    document.querySelectorAll(".currency-select").forEach(s => s.innerHTML = opts(CURRENCIES.map(c => [c, c]), "Currency"));
 }
 
 function renderDeptNav() {
@@ -187,8 +189,8 @@ async function onAuthChanged(user) {
             alert("This account has no parish yet. If you have an invite code, use 'First time? I have an invite code'.");
             return auth.signOut();
         }
-        const { role, parishId } = prof.data();
-        localState = { user, role, currentParishId: parishId || "", parish: {} };
+        const { role, parishId, name } = prof.data();
+        localState = { user, role, currentParishId: parishId || "", parish: {}, name: name || "" };
         const isParish = role === "parish_admin";
         document.querySelectorAll(".parish-only").forEach(el => el.classList.toggle("hidden", !isParish));
         document.querySelectorAll(".super-only").forEach(el => el.classList.toggle("hidden", role !== "super_admin"));
@@ -218,6 +220,8 @@ function showSection(id) {
     if (id === "diaspora") loadDiaspora();
     if (id === "flows") loadFlows();
     if (YOUNG[id] || id === "deaths") loadYoung(id, true).catch(e => alert("Could not load: " + e.message));
+    if (id === "returns") openReturns().catch(e => alert("Could not load returns: " + e.message));
+    if (id === "hqreturns") openHq().catch(e => alert("Could not load returns: " + e.message));
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -657,7 +661,7 @@ async function showFamily(id) {
 function fillSettingsForm(p) {
     const set = (id, v) => $(id).value = v || "";
     set("s_name", p.name); set("s_address", p.address); set("s_maps", p.mapsUrl); set("s_city", p.city);
-    set("s_state", p.state); set("s_country", p.country); set("s_continent", p.continent);
+    set("s_state", p.state); set("s_country", p.country); set("s_continent", p.continent); set("s_currency", p.currency);
     $("s_mapsOpen").classList.toggle("hidden", !p.mapsUrl);
     if (p.mapsUrl) $("s_mapsOpen").href = p.mapsUrl;
     pendingLogo = null;
@@ -673,6 +677,8 @@ async function pickLogo(input) {
 function readLocation(prefix) {
     const p = { name: val(prefix + "name"), address: val(prefix + "address"), mapsUrl: val(prefix + "maps"), city: val(prefix + "city"),
         state: val(prefix + "state"), country: val(prefix + "country"), continent: val(prefix + "continent") };
+    const cur = $(prefix + "currency");
+    if (cur && cur.value) p.currency = cur.value;
     if (p.mapsUrl && !/^https:\/\//.test(p.mapsUrl)) return { error: "The Google Maps link must start with https://" };
     if (!p.name) return { error: "The parish name is required." };
     return p;
@@ -705,6 +711,7 @@ async function loadWorld() {
     showTotals(sum);
     localState.worldDiaspora = sum.diasporaCount;
     localState.parishNames = Object.fromEntries(parishes.docs.map(d => [d.id, d.data().name]));
+    localState.parishList = parishes.docs.map(d => ({ id: d.id, ...d.data(), logo: "" }));
     $("worldTable").innerHTML = `<table class="w-full text-left text-xs"><thead class="bg-gray-100"><tr><th class="p-2">Parish</th><th class="p-2">Place</th><th class="p-2">Clergy</th><th class="p-2">Members</th><th class="p-2">Births</th><th class="p-2">Children</th><th class="p-2">Teens</th><th class="p-2">Deaths</th><th class="p-2">Attendance</th></tr></thead><tbody class="divide-y">` +
         parishes.docs.map(d => { const p = d.data(), s = byId[d.id] || {};
             return `<tr><td class="p-2 font-bold">${esc(p.name)}${p.status !== "Approved" ? " (" + esc(p.status) + ")" : ""}</td><td class="p-2">${esc([p.city, p.country].filter(Boolean).join(", "))}</td><td class="p-2">${s.clergyCount || 0}</td><td class="p-2">${s.memberCount || 0}</td><td class="p-2">${s.birthCount || 0}</td><td class="p-2">${s.childCount || 0}</td><td class="p-2">${s.teenCount || 0}</td><td class="p-2">${s.deathCount || 0}</td><td class="p-2">${s.attendanceTotal || 0}</td></tr>`; }).join("") + `</tbody></table>` + worldByType(stats.docs.map(d => d.data()));

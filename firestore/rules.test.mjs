@@ -2,13 +2,14 @@
 import { test, before, after, beforeEach } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, collectionGroup, getDocs, query, where, orderBy, limit, writeBatch, increment, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc, deleteDoc, collection, collectionGroup, getDocs, query, where, orderBy, limit, writeBatch, increment, runTransaction } from 'firebase/firestore';
 
 let env;
 const ctx = (uid, email) => env.authenticatedContext(uid, email ? { email } : {}).firestore();
 const as = {
   stranger: () => env.unauthenticatedContext().firestore(),
   superA: () => ctx('uSuper', 'super@x.org'),
+  named: () => ctx('uNamed', 'bayo@x.org'),
   hq: () => ctx('uHQ'),
   adminA: () => ctx('uA', 'a@x.org'),
   adminB: () => ctx('uB', 'b@x.org'),
@@ -56,6 +57,7 @@ beforeEach(async () => {
   await env.withSecurityRulesDisabled(async (c) => {
     const db = c.firestore();
     await setDoc(doc(db, 'users/uSuper'), { role: 'super_admin' });
+    await setDoc(doc(db, 'users/uNamed'), { role: 'super_admin', name: 'Bayo Adeyemi' });
     await setDoc(doc(db, 'users/uHQ'), { role: 'hq' });
     await setDoc(doc(db, 'users/uA'), { role: 'parish_admin', parishId: 'A', email: 'a@x.org' });
     await setDoc(doc(db, 'users/uB'), { role: 'parish_admin', parishId: 'B', email: 'b@x.org' });
@@ -63,7 +65,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'adminEmails/a@x.org'), { uid: 'uA' });
     await setDoc(doc(db, 'adminEmails/b@x.org'), { uid: 'uB' });
     for (const p of ['A', 'B', 'S']) {
-      await setDoc(doc(db, `parishes/${p}`), { name: 'Parish ' + p, status: p === 'S' ? 'Suspended' : 'Approved', parishLetters: p + p + p, cityLetters: 'LAG' });
+      await setDoc(doc(db, `parishes/${p}`), { name: 'Parish ' + p, status: p === 'S' ? 'Suspended' : 'Approved', parishLetters: p + p + p, cityLetters: 'LAG', city: 'Lagos', country: 'Nigeria', continent: 'Africa', currency: 'NGN' });
       await setDoc(doc(db, `parishes/${p}/meta/counters`), { clg: 1, mbr: 2 });
     }
     await setDoc(doc(db, 'parishes/A/members/CCC-MBR-001'), member);
@@ -780,4 +782,207 @@ test('phase 4 privacy + totals: other parish, super and HQ see counts only', asy
   await assertSucceeds(updateDoc(doc(as.adminA(), 'parishStats/A'), { birthCount: 1, childCount: 1, teenCount: 1, deathCount: 1 }));
   await assertFails(updateDoc(doc(as.adminA(), 'parishStats/A'), { deathCount: -1 }));
   await assertSucceeds(getDoc(doc(as.hq(), 'parishStats/A')));
+});
+
+// ================= Phase 6: Monthly Returns =================
+const CATS = ['tithes', 'offerings', 'thanksgiving', 'harvest', 'building', 'other'];
+const DEFAULT_SHARES = { tithes: { num: 1, den: 3 }, offerings: { num: 0, den: 1 }, thanksgiving: { num: 0, den: 1 }, harvest: { num: 0, den: 1 }, building: { num: 0, den: 1 }, other: { num: 0, den: 1 } };
+const eq = (a, b) => { if (a !== b) throw new Error(`expected ${b}, got ${a}`); };
+const r2 = x => Math.round(x * 100) / 100;
+const dueOf = (inc, sh = DEFAULT_SHARES) => r2(CATS.reduce((t, c) => t + inc[c] * sh[c].num / sh[c].den, 0));
+const statusOf = d => d.disputed ? 'Disputed' : (d.confirmations > 0 && d.confirmed >= d.due && d.remitted >= d.due) ? 'Confirmed'
+  : d.remitted >= d.due ? 'Paid' : d.remitted > 0 ? 'Part paid' : 'Due';
+const income = (t = 90000, o = 20000) => ({ tithes: t, offerings: o, thanksgiving: 0, harvest: 0, building: 5000, other: 0 });
+function newReturn(pid, month, extra = {}) {
+  const inc = extra.income || income();
+  const d = { parishId: pid, parishName: 'Parish ' + pid, city: 'Lagos', country: 'Nigeria', continent: 'Africa', month, currency: 'NGN',
+    income: inc, shares: DEFAULT_SHARES, due: dueOf(inc), attendance: 400, services: 12, note: '', remitted: 0, confirmed: 0, confirmations: 0,
+    disputed: false, disputeReason: '', version: 1, filedAt: '2026-11-03T00:00:00Z', filedBy: 'uA', updatedAt: '2026-11-03T00:00:00Z', ...extra };
+  d.outstanding = r2(d.due - d.remitted); d.status = statusOf(d);
+  return d;
+}
+const audit = (target, v, action, by, extra = {}) => ({ action, target, targetVersion: v, parishId: target.startsWith('returns/') ? target.split('/')[1].split('_')[0] : '',
+  reason: '', before: null, after: null, by: by.uid, byEmail: by.email, byName: by.name || '', role: by.role, at: serverTimestamp(), ...extra });
+const A = { uid: 'uA', email: 'a@x.org', role: 'parish_admin' };
+const B = { uid: 'uB', email: 'b@x.org', role: 'parish_admin' };
+const NAMED = { uid: 'uNamed', email: 'bayo@x.org', role: 'super_admin', name: 'Bayo Adeyemi' };
+const UNNAMED = { uid: 'uSuper', email: 'super@x.org', role: 'super_admin', name: '' };
+const auditId = (t, v) => t.replace('/', '_') + '_v' + v;
+
+async function fileReturn(db, who, pid, month, extra = {}, auditExtra = {}) {
+  const id = `${pid}_${month}`, b = writeBatch(db);
+  b.set(doc(db, 'returns/' + id), newReturn(pid, month, extra));
+  b.set(doc(db, 'auditLog/' + auditId('returns/' + id, 1)), audit('returns/' + id, 1, 'file', who, auditExtra));
+  return b.commit();
+}
+async function seedReturn(pid, month, extra = {}) {
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), `returns/${pid}_${month}`), newReturn(pid, month, extra)));
+}
+async function pay(db, who, id, old, amount, extra = {}, payExtra = {}) {
+  const v = old.version + 1, d = { ...old, remitted: r2(old.remitted + amount), version: v, ...extra };
+  d.outstanding = r2(d.due - d.remitted); d.status = statusOf(d);
+  const b = writeBatch(db);
+  b.update(doc(db, 'returns/' + id), d);
+  b.set(doc(db, `returns/${id}/payments/p${v}`), { returnId: id, amount, date: '2026-11-05', method: 'Bank transfer', reference: 'TLR-0001', by: who.uid, byEmail: who.email, at: serverTimestamp(), ...payExtra });
+  b.set(doc(db, 'auditLog/' + auditId('returns/' + id, v)), audit('returns/' + id, v, amount < 0 ? 'correct' : 'pay', who, amount < 0 ? { reason: payExtra.reason || '' } : {}));
+  return b.commit();
+}
+async function confirm(db, who, id, old, amount, extra = {}) {
+  const v = old.version + 1, d = { ...old, confirmed: r2(old.confirmed + amount), confirmations: old.confirmations + 1, version: v, ...extra };
+  d.status = statusOf(d);
+  const b = writeBatch(db);
+  b.update(doc(db, 'returns/' + id), d);
+  b.set(doc(db, `returns/${id}/confirmations/c${v}`), { returnId: id, amount, note: '', by: who.uid, byName: who.name || '', at: serverTimestamp() });
+  b.set(doc(db, 'auditLog/' + auditId('returns/' + id, v)), audit('returns/' + id, v, 'confirm', who));
+  return b.commit();
+}
+const getRet = async id => { let out; await env.withSecurityRulesDisabled(async c => { out = (await getDoc(doc(c.firestore(), 'returns/' + id))).data(); }); return out; };
+
+test('p6 file: parish files own return with due = 1/3 of tithes, currency from parish, audited', async () => {
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-10'));
+  const r = await getRet('A_2026-10');
+  eq(r.due, 30000); eq(r.status, 'Due'); eq(r.currency, 'NGN');
+  // wrong due, wrong currency, other parish, no audit, suspended parish, wrong id
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { due: 1000 }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { currency: 'USD' }));
+  await assertFails(fileReturn(as.adminB(), B, 'A', '2026-09'));
+  await assertFails(setDoc(doc(as.adminA(), 'returns/A_2026-09'), newReturn('A', '2026-09')));
+  await assertFails(fileReturn(as.adminS(), { ...A, uid: 'uS' }, 'S', '2026-09'));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-13'));
+  // cannot file as already-paid
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { remitted: 30000 }));
+});
+
+test('p6 privacy: super reads returns, HQ/other parish/stranger cannot; nobody but the parish reads individual giving', async () => {
+  await seedReturn('A', '2026-10');
+  await assertSucceeds(getDoc(doc(as.named(), 'returns/A_2026-10')));
+  await assertSucceeds(getDoc(doc(as.adminA(), 'returns/A_2026-10')));
+  await assertFails(getDoc(doc(as.adminB(), 'returns/A_2026-10')));
+  await assertFails(getDoc(doc(as.hq(), 'returns/A_2026-10')));
+  await assertFails(getDoc(doc(as.stranger(), 'returns/A_2026-10')));
+  // individual giver records (parish finances) stay parish-private
+  await assertFails(getDocs(collection(as.named(), 'parishes/A/finances')));
+  await assertFails(getDocs(collection(as.hq(), 'parishes/A/finances')));
+  await assertSucceeds(getDocs(collection(as.adminA(), 'parishes/A/finances')));
+  // a return cannot carry giver names (unknown keys refused)
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { givers: [{ name: 'Ade Bisi', amount: 5000 }] }));
+});
+
+test('p6 payments: part paid -> paid; amount must match; nothing deleted; negative = correction with reason', async () => {
+  await seedReturn('A', '2026-10');
+  const id = 'A_2026-10';
+  await assertFails(pay(as.adminA(), A, id, await getRet(id), 10000, { remitted: 15000 })); // remitted != payment
+  await assertSucceeds(pay(as.adminA(), A, id, await getRet(id), 10000));
+  eq((await getRet(id)).status, 'Part paid');
+  await assertSucceeds(pay(as.adminA(), A, id, await getRet(id), 20000));
+  eq((await getRet(id)).status, 'Paid');
+  await assertFails(pay(as.adminA(), A, id, await getRet(id), -5000)); // correction without reason
+  await assertSucceeds(pay(as.adminA(), A, id, await getRet(id), -5000, {}, { reason: 'Teller entered twice', corrects: 'p3' }));
+  eq((await getRet(id)).status, 'Part paid');
+  await assertFails(deleteDoc(doc(as.adminA(), `returns/${id}/payments/p2`)));
+  await assertFails(updateDoc(doc(as.adminA(), `returns/${id}/payments/p2`), { amount: 1 }));
+  await assertFails(deleteDoc(doc(as.adminA(), 'returns/' + id)));
+  await assertFails(deleteDoc(doc(as.named(), 'returns/' + id)));
+  await assertFails(pay(as.adminB(), B, id, await getRet(id), 1000));
+  // parish cannot confirm its own money or change shares
+  const r = await getRet(id);
+  await assertFails(confirm(as.adminA(), A, id, r, 5000));
+  await assertFails(pay(as.adminA(), A, id, r, 100, { shares: { ...DEFAULT_SHARES, tithes: { num: 1, den: 10 } }, due: 9000 }));
+});
+
+test('p6 corrections: income change needs a reason in the audit, version bump, due recomputed', async () => {
+  await seedReturn('A', '2026-10');
+  const id = 'A_2026-10', old = await getRet(id);
+  const fix = (reason, due) => {
+    const inc = income(120000); const d = { ...old, income: inc, due: due ?? dueOf(inc), version: 2 };
+    d.outstanding = r2(d.due - d.remitted); d.status = statusOf(d);
+    const db = as.adminA(), b = writeBatch(db);
+    b.update(doc(db, 'returns/' + id), d);
+    b.set(doc(db, 'auditLog/' + auditId('returns/' + id, 2)), audit('returns/' + id, 2, 'correct', A, { reason }));
+    return b.commit();
+  };
+  await assertFails(fix(''));
+  await assertFails(fix('Sunday count missed', 1));
+  await assertSucceeds(fix('Sunday count missed'));
+  eq((await getRet(id)).due, 40000);
+});
+
+test('p6 confirm + dispute: named super only; statuses Confirmed / Disputed', async () => {
+  await seedReturn('A', '2026-10', { remitted: 30000 });
+  const id = 'A_2026-10';
+  await assertFails(confirm(as.superA(), UNNAMED, id, await getRet(id), 30000)); // no name on the account
+  await assertFails(confirm(as.hq(), { uid: 'uHQ', email: '', role: 'hq', name: '' }, id, await getRet(id), 30000));
+  await assertSucceeds(confirm(as.named(), NAMED, id, await getRet(id), 30000));
+  eq((await getRet(id)).status, 'Confirmed');
+  const dispute = (reason) => { const o = { ...NAMED }; return (async () => {
+    const r = await getRet(id); const d = { ...r, disputed: true, disputeReason: reason, version: r.version + 1 }; d.status = statusOf(d);
+    const db = as.named(), b = writeBatch(db);
+    b.update(doc(db, 'returns/' + id), d);
+    b.set(doc(db, 'auditLog/' + auditId('returns/' + id, d.version)), audit('returns/' + id, d.version, 'dispute', o, { reason }));
+    return b.commit(); })(); };
+  await assertFails(dispute(''));
+  await assertSucceeds(dispute('Bank shows 25,000 only'));
+  eq((await getRet(id)).status, 'Disputed');
+  // super cannot touch the parish's figures
+  const r = await getRet(id);
+  await assertFails(pay(as.named(), NAMED, id, r, 1000));
+});
+
+test('p6 audit log: append-only, names the person, server time; parish sees only its own', async () => {
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-10'));
+  const aid = auditId('returns/A_2026-10', 1);
+  await assertSucceeds(getDoc(doc(as.named(), 'auditLog/' + aid)));
+  await assertSucceeds(getDocs(query(collection(as.adminA(), 'auditLog'), where('parishId', '==', 'A'))));
+  await assertFails(getDocs(query(collection(as.adminB(), 'auditLog'), where('parishId', '==', 'A'))));
+  await assertFails(getDocs(collection(as.hq(), 'auditLog')));
+  await assertFails(updateDoc(doc(as.named(), 'auditLog/' + aid), { reason: 'x' }));
+  await assertFails(deleteDoc(doc(as.named(), 'auditLog/' + aid)));
+  // forged author / time / orphan entry
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', {}, { byEmail: 'someone@else.org' }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-08', {}, { at: '2020-01-01T00:00:00Z' }));
+  await assertFails(setDoc(doc(as.adminA(), 'auditLog/' + auditId('returns/A_2026-07', 1)), audit('returns/A_2026-07', 1, 'file', A)));
+});
+
+test('p6 HQ settings: named super sets share fractions with an audit; parishes read; default 1/3 when unset', async () => {
+  const save = (db, who, shares, v = 1) => { const b = writeBatch(db);
+    b.set(doc(db, 'hqSettings/returns'), { shares, version: v, updatedAt: '2026-11-02', updatedBy: who.uid });
+    b.set(doc(db, 'auditLog/' + auditId('hqSettings/returns', v)), audit('hqSettings/returns', v, 'settings', who));
+    return b.commit(); };
+  await assertFails(save(as.superA(), UNNAMED, DEFAULT_SHARES));
+  await assertFails(save(as.adminA(), A, DEFAULT_SHARES));
+  await assertFails(save(as.named(), NAMED, { ...DEFAULT_SHARES, tithes: { num: 4, den: 3 } }));
+  const sh = { ...DEFAULT_SHARES, building: { num: 1, den: 10 } };
+  await assertSucceeds(save(as.named(), NAMED, sh));
+  await assertSucceeds(getDoc(doc(as.adminA(), 'hqSettings/returns')));
+  await assertFails(deleteDoc(doc(as.named(), 'hqSettings/returns')));
+  // returns must now use the new shares: 30000 + 10% of 5000 building
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-10'));
+  const inc = income();
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-10', { shares: sh, due: dueOf(inc, sh) }));
+  eq((await getRet('A_2026-10')).due, 30500);
+});
+
+test('p6 rollups + alerts: super reads; parish adds its own deltas; alerts super-only with audit', async () => {
+  const ru = { month: '2026-10', level: 'country', key: 'nigeria', name: 'Nigeria', country: 'Nigeria', continent: 'Africa', cur: { NGN: { due: increment(30000), returns: increment(1) } } };
+  await assertSucceeds(setDoc(doc(as.adminA(), 'returnRollups/2026-10_country_nigeria'), ru, { merge: true }));
+  await assertFails(setDoc(doc(as.adminA(), 'returnRollups/2026-10_country_ghana'), ru, { merge: true })); // id must match
+  await assertFails(setDoc(doc(as.adminS(), 'returnRollups/2026-10_country_nigeria'), ru, { merge: true }));
+  await assertSucceeds(getDocs(query(collection(as.named(), 'returnRollups'), where('month', '==', '2026-10'))));
+  await assertFails(getDocs(collection(as.adminA(), 'returnRollups')));
+  await assertFails(getDocs(collection(as.hq(), 'returnRollups')));
+  const al = { month: '2026-10', parishId: 'A', parishName: 'Parish A', rule: 'notFiled', detail: 'No return by 10 Nov', currency: 'NGN', status: 'Open', version: 1, at: '2026-11-11', by: 'uNamed' };
+  const raise = (db, who, a) => { const b = writeBatch(db);
+    b.set(doc(db, 'alerts/2026-10_A_notFiled'), a);
+    b.set(doc(db, 'auditLog/' + auditId('alerts/2026-10_A_notFiled', a.version)), audit('alerts/2026-10_A_notFiled', a.version, 'alert', who));
+    return b.commit(); };
+  await assertFails(raise(as.adminA(), A, al));
+  await assertSucceeds(raise(as.named(), NAMED, al));
+  await assertFails(getDoc(doc(as.adminA(), 'alerts/2026-10_A_notFiled')));
+  await assertFails(deleteDoc(doc(as.named(), 'alerts/2026-10_A_notFiled')));
+});
+
+test('p6 currency: parish sets an ISO currency code; returns keep their own currency', async () => {
+  await assertSucceeds(updateDoc(doc(as.adminA(), 'parishes/A'), { currency: 'GBP' }));
+  await assertFails(updateDoc(doc(as.adminA(), 'parishes/A'), { currency: 'pounds' }));
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-10', { currency: 'GBP' }));
 });

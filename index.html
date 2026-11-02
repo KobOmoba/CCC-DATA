@@ -14,6 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
+    <script src="returns.js" defer></script>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
 
@@ -69,8 +70,10 @@
                 <button onclick="showSection('diaspora')" id="nav-diaspora" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-cyan-300 w-4"></i> Members in Diaspora</button>
                 <button onclick="showSection('attendance')" id="nav-attendance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance</button>
                 <button onclick="showSection('finance')" id="nav-finance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Finance</button>
+                <button onclick="showSection('returns')" id="nav-returns" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-hand-holding-dollar text-emerald-300 w-4"></i> Monthly Returns</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('parishes')" id="nav-parishes" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-earth-africa text-emerald-400 w-4"></i> Parishes</button>
+                <button onclick="showSection('hqreturns')" id="nav-hqreturns" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-scale-balanced text-emerald-300 w-4"></i> Monthly Returns (HQ)</button>
                 <button onclick="showSection('register')" id="nav-register" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy Register</button>
                 <button onclick="showSection('important')" id="nav-important" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-star text-amber-300 w-4"></i> Important Members</button>
                 <button onclick="showSection('flows')" id="nav-flows" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-cyan-300 w-4"></i> Diaspora Flows</button>
@@ -249,6 +252,108 @@
                     <div id="flowsList" class="space-y-2"></div>
                 </section>
 
+
+                <!-- PHASE 6: MONTHLY RETURNS (parish) -->
+                <section id="section-returns" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Monthly Returns</h2><p class="text-xs text-gray-500">Your parish income for the month and what is due to HQ. Totals only, no giver names.</p></div>
+                    <p id="r_currencyNote" class="text-xs"></p>
+                    <label class="block text-xs font-semibold">Month<input type="month" id="r_month" onchange="loadReturn()" class="w-full border p-2.5 rounded mt-1 bg-white"></label>
+                    <div id="r_summary" class="bg-white border rounded-xl p-3 text-xs"></div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2 text-xs">
+                        <p class="font-bold">Income this month</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label>Tithes<input id="r_tithes" type="number" min="0" step="0.01" inputmode="decimal" oninput="returnDuePreview()" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Offerings<input id="r_offerings" type="number" min="0" step="0.01" inputmode="decimal" oninput="returnDuePreview()" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Thanksgiving<input id="r_thanksgiving" type="number" min="0" step="0.01" inputmode="decimal" oninput="returnDuePreview()" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Harvest<input id="r_harvest" type="number" min="0" step="0.01" inputmode="decimal" oninput="returnDuePreview()" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Building fund<input id="r_building" type="number" min="0" step="0.01" inputmode="decimal" oninput="returnDuePreview()" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Other<input id="r_other" type="number" min="0" step="0.01" inputmode="decimal" oninput="returnDuePreview()" class="w-full border p-2.5 rounded mt-1"></label>
+                        </div>
+                        <p>Attendance this month (from your attendance records): <b id="r_attendance">0</b></p>
+                        <div class="bg-emerald-50 border border-emerald-200 rounded p-2"><p>Due to HQ: <b id="r_due" class="text-base">0</b></p><p id="r_shareNote" class="text-gray-500"></p></div>
+                        <label class="block">Note (optional)<input id="r_note" maxlength="300" class="w-full border p-2.5 rounded mt-1"></label>
+                        <label class="block">Receipt / photo (optional)<input id="r_receipt" type="file" accept="image/*" onchange="pickReturnReceipt(this, 'receipt')" class="block w-full mt-1"></label>
+                        <img id="r_receiptPreview" alt="Receipt" class="hidden max-h-32 rounded border">
+                        <label id="r_reasonBox" class="hidden block">Reason for correction *<input id="r_reason" maxlength="300" class="w-full border p-2.5 rounded mt-1" placeholder="e.g. Sunday 12th count was missed"></label>
+                        <button id="saveReturnBtn" onclick="saveReturn()" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded">File return</button>
+                    </div>
+                    <div id="r_payBox" class="hidden bg-white border rounded-xl p-3 space-y-2 text-xs">
+                        <p class="font-bold">Payments to HQ</p>
+                        <div id="r_payments" class="space-y-1"></div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label>Date<input id="pay_date" type="date" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Amount<input id="pay_amount" type="number" min="0" step="0.01" inputmode="decimal" class="w-full border p-2.5 rounded mt-1"></label>
+                            <label>Method<select id="pay_method" class="w-full border p-2.5 rounded mt-1 bg-white"><option>Bank transfer</option><option>Cash</option><option>POS</option></select></label>
+                            <label>Reference / teller no.<input id="pay_ref" maxlength="60" class="w-full border p-2.5 rounded mt-1"></label>
+                        </div>
+                        <label class="block">Receipt / teller photo (optional)<input id="pay_receipt" type="file" accept="image/*" onchange="pickReturnReceipt(this, 'payReceipt')" class="block w-full mt-1"></label>
+                        <img id="pay_receiptPreview" alt="Payment receipt" class="hidden max-h-32 rounded border">
+                        <label class="flex items-center gap-2"><input id="pay_isCorrection" type="checkbox" onchange="togglePayCorrection()"> This corrects a wrong entry (takes the amount off)</label>
+                        <div id="pay_correctionBox" class="hidden space-y-2">
+                            <label class="block">Entry being corrected<select id="pay_corrects" class="w-full border p-2.5 rounded mt-1 bg-white"></select></label>
+                            <label class="block">Reason *<input id="pay_reason" maxlength="300" class="w-full border p-2.5 rounded mt-1"></label>
+                        </div>
+                        <button id="payBtn" onclick="recordPayment()" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded">Record payment</button>
+                        <p class="text-gray-500">Nothing is ever deleted. A mistake is fixed with a correction entry and a reason.</p>
+                    </div>
+                    <div class="bg-white border rounded-xl text-xs overflow-x-auto">
+                        <p class="font-bold p-3 pb-0">Past returns</p>
+                        <table class="w-full text-left"><thead class="bg-gray-100"><tr><th class="p-2">Month</th><th class="p-2">Due</th><th class="p-2">Remitted</th><th class="p-2">Status</th></tr></thead><tbody id="r_history" class="divide-y"></tbody></table>
+                        <button id="r_histMore" onclick="loadReturnHistory(true)" class="hidden w-full py-2 border-t font-semibold">Load more</button>
+                    </div>
+                </section>
+
+                <!-- PHASE 6: MONTHLY RETURNS (Super Admin) -->
+                <section id="section-hqreturns" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Monthly Returns (HQ)</h2><p class="text-xs text-gray-500">Parish money totals only. Individual giving stays private to each parish.</p><p id="hq_me" class="text-xs text-gray-500"></p></div>
+                    <div id="hq_nameBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-2">
+                        <p class="font-bold">Named accounts only: add your full name before any action.</p>
+                        <input id="hq_myName" class="w-full border p-2.5 rounded" placeholder="Your full name">
+                        <button onclick="saveMyName()" class="w-full py-2 bg-amber-600 text-white font-bold rounded">Save my name</button>
+                    </div>
+                    <label class="block text-xs font-semibold">Month<input type="month" id="hq_month" onchange="hq.cursors={};hqTab(hq.tab)" class="w-full border p-2.5 rounded mt-1 bg-white"></label>
+                    <div class="flex gap-1 overflow-x-auto text-xs whitespace-nowrap">
+                        <button data-tab="overview" onclick="hqTab('overview')" class="hq-tab px-3 py-2 border rounded">Totals</button>
+                        <button data-tab="parishes" onclick="hqTab('parishes')" class="hq-tab px-3 py-2 border rounded">Parishes</button>
+                        <button data-tab="arrears" onclick="hqTab('arrears')" class="hq-tab px-3 py-2 border rounded">Arrears</button>
+                        <button data-tab="alerts" onclick="hqTab('alerts')" class="hq-tab px-3 py-2 border rounded">Alerts</button>
+                        <button data-tab="log" onclick="hqTab('log')" class="hq-tab px-3 py-2 border rounded">Action log</button>
+                        <button data-tab="settings" onclick="hqTab('settings')" class="hq-tab px-3 py-2 border rounded">HQ share</button>
+                    </div>
+                    <div id="hq-overview" class="hq-pane space-y-2 text-xs">
+                        <div class="flex gap-2"><select id="hq_level" onchange="loadRollups()" class="flex-1 border p-2.5 rounded bg-white"><option value="continent">By continent</option><option value="country">By country</option><option value="city">By city</option></select>
+                        <button id="rebuildBtn" onclick="rebuildRollups()" class="px-3 border rounded bg-white">Rebuild</button></div>
+                        <p class="text-gray-500">Each currency is shown on its own line (no conversion).</p>
+                        <div id="hq_rollups" class="space-y-2"></div>
+                        <button id="hq_rollupsMore" onclick="loadRollups(true)" class="hidden w-full py-2 border rounded bg-white font-semibold">Load more</button>
+                    </div>
+                    <div id="hq-parishes" class="hq-pane hidden space-y-2 text-xs">
+                        <div id="hq_returns" class="space-y-2"></div>
+                        <button id="hq_returnsMore" onclick="loadMonthReturns(true)" class="hidden w-full py-2 border rounded bg-white font-semibold">Load more</button>
+                    </div>
+                    <div id="hq-arrears" class="hq-pane hidden space-y-2 text-xs">
+                        <p class="text-gray-500">All months, largest first.</p>
+                        <div id="hq_arrears" class="space-y-2"></div>
+                        <button id="hq_arrearsMore" onclick="loadArrears(true)" class="hidden w-full py-2 border rounded bg-white font-semibold">Load more</button>
+                    </div>
+                    <div id="hq-alerts" class="hq-pane hidden space-y-2 text-xs">
+                        <button id="runChecksBtn" onclick="runAlertChecks()" class="w-full py-2.5 bg-rose-600 text-white font-bold rounded">Run checks for this month</button>
+                        <div id="hq_alerts" class="space-y-2"></div>
+                        <button id="hq_alertsMore" onclick="loadAlerts(true)" class="hidden w-full py-2 border rounded bg-white font-semibold">Load more</button>
+                    </div>
+                    <div id="hq-log" class="hq-pane hidden space-y-2 text-xs">
+                        <div id="hq_log" class="space-y-2 bg-white border rounded-xl p-2"></div>
+                        <button id="hq_logMore" onclick="loadAuditLog(true)" class="hidden w-full py-2 border rounded bg-white font-semibold">Load more</button>
+                    </div>
+                    <div id="hq-settings" class="hq-pane hidden space-y-2 text-xs bg-white border rounded-xl p-3">
+                        <p class="font-bold">Share of each category due to HQ</p>
+                        <p class="text-gray-500">Default: 1/3 of tithes, nothing from the others. Returns already filed keep the share they were filed with.</p>
+                        <div id="hq_shares" class="space-y-1"></div>
+                        <input id="hq_shareReason" maxlength="300" class="w-full border p-2.5 rounded" placeholder="Reason for the change *">
+                        <button id="saveSharesBtn" onclick="saveShares()" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded">Save HQ share</button>
+                    </div>
+                </section>
+
                 <!-- PARISH SETTINGS -->
                 <section id="section-settings" class="space-y-3 hidden">
                     <div class="pb-2 border-b"><h2 class="text-lg font-bold">Parish Settings</h2><p class="text-xs text-gray-500">Name, logo and location of your parish.</p></div>
@@ -265,6 +370,7 @@
                             <label>State<input id="s_state" class="w-full border p-2.5 rounded mt-1"></label>
                             <label>Country<input id="s_country" class="w-full border p-2.5 rounded mt-1"></label>
                             <label>Continent<select id="s_continent" class="continent-select w-full border p-2.5 rounded mt-1 bg-white"></select></label>
+                            <label>Currency (for Monthly Returns)<select id="s_currency" class="currency-select w-full border p-2.5 rounded mt-1 bg-white"></select></label>
                         </div>
                         <a id="s_mapsOpen" target="_blank" rel="noopener" class="hidden text-blue-700 underline">Open pin in Google Maps</a>
                         <button id="saveParishBtn" onclick="saveParishSettings()" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded">Save parish details</button>
@@ -284,6 +390,7 @@
                             <input id="np_state" class="border p-2.5 rounded" placeholder="State">
                             <input id="np_country" class="border p-2.5 rounded" placeholder="Country">
                             <select id="np_continent" class="continent-select border p-2.5 rounded bg-white"></select>
+                            <select id="np_currency" class="currency-select border p-2.5 rounded bg-white"></select>
                         </div>
                         <div class="grid grid-cols-2 gap-2"><input id="np_pletters" maxlength="4" class="w-full border p-2.5 rounded uppercase font-mono" placeholder="Parish letters * (IJY)"><input id="np_cletters" maxlength="4" class="w-full border p-2.5 rounded uppercase font-mono" placeholder="City letters * (ABK)"></div>
                         <p class="text-[11px] text-gray-500">Lettering goes on certificate numbers, e.g. CCC-IJY-ABK-BRT-001. Unique worldwide; cannot be changed later.</p>
@@ -754,5 +861,28 @@
         </div>
     </div>
 
+
+    <!-- PHASE 6: return detail -->
+    <div id="returnModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center">
+        <div class="bg-white w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl text-xs">
+            <div class="sticky top-0 bg-blue-900 text-white p-3 flex justify-between items-center"><p id="rd_title" class="font-bold"></p><button onclick="closeModal('returnModal')" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+            <div id="rd_body" class="p-3"></div>
+            <div id="rd_superActions" class="hidden p-3 border-t space-y-2 bg-gray-50">
+                <p class="font-bold">HQ action</p>
+                <label class="block">Amount received<input id="rd_confirmAmt" type="number" step="0.01" inputmode="decimal" class="w-full border p-2.5 rounded mt-1"></label>
+                <label class="block">Note / reason<input id="rd_note" maxlength="300" class="w-full border p-2.5 rounded mt-1"></label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="rd_confirmBtn" onclick="confirmReceipt()" class="py-2.5 bg-emerald-600 text-white font-bold rounded">Confirm receipt</button>
+                    <button id="rd_disputeBtn" onclick="toggleDispute()" class="py-2.5 bg-rose-600 text-white font-bold rounded">Mark disputed</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="historyModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center">
+        <div class="bg-white w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl text-xs">
+            <div class="sticky top-0 bg-blue-900 text-white p-3 flex justify-between items-center"><p id="ph_title" class="font-bold"></p><button onclick="closeModal('historyModal')" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+            <div id="ph_body" class="p-3"></div>
+        </div>
+    </div>
 </body>
 </html>
