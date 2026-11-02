@@ -1125,3 +1125,169 @@ test('p7 committees: named super creates with audit; members from directory, cle
   const log = await getDocs(query(collection(db, 'auditLog'), where('target', '==', 'committeeMembers/c1_A_CCC-MBR-001')));
   assert(log.size, 2);
 });
+
+import { strict as nodeAssert } from 'node:assert';
+const same = (a, b) => nodeAssert.equal(a, b);
+// ================= Phase 8: retirement setting, giving member number, Church Head, clergy postings, AI dashboard =================
+const P8 = { ch: () => ctx('uCH', 'pastor@x.org') };
+const auditBy = (who) => who === 'ch' ? { by: 'uCH', byEmail: 'pastor@x.org', byName: 'Rev Pastor', role: 'church_head' }
+  : who === 'A' ? { by: 'uA', byEmail: 'a@x.org', byName: '', role: 'parish_admin' }
+  : who === 'B' ? { by: 'uB', byEmail: 'b@x.org', byName: '', role: 'parish_admin' } : {};
+const auditW = (b, db, target, v, action, who, reason = '') => { const a = audit7(db, target, v, action, { ...auditBy(who), reason }); b.set(a.ref, a.data); };
+async function assignLeader(db, email, status = 'Active', name = 'Rev Pastor') {
+  return runTransaction(db, async (t) => {
+    const lRef = doc(db, 'hqSettings/leadership'), o = await t.get(lRef);
+    const od = o.exists() ? o.data() : { roleName: 'Church Head', active: 0, version: 0 };
+    const pRef = doc(db, 'leaders/' + email), p = await t.get(pRef);
+    const v = p.exists() ? p.data().version + 1 : 1;
+    t.set(pRef, { name, email, status, note: 'by vote', version: v, updatedAt: 'x', updatedBy: 'uNamed' });
+    const nv = od.version + 1;
+    t.set(lRef, { roleName: od.roleName, active: od.active + (status === 'Active' ? 1 : -1), lastLeader: email, version: nv, updatedAt: 'x', updatedBy: 'uNamed' });
+    const a1 = audit7(db, 'leaders/' + email, v, 'leader'); t.set(a1.ref, a1.data);
+    const a2 = audit7(db, 'hqSettings/leadership', nv, 'leadership'); t.set(a2.ref, a2.data);
+  });
+}
+const postingDoc = (extra = {}) => ({ clergyNo: 'CCC-CLG-001', fullName: 'Ven Olu', email: 'olu@x.org', person: clergy('CCC-CLG-001', 'olu@x.org'),
+  fromParishId: 'A', fromParishName: 'Parish A', toParishId: 'B', toParishName: 'Parish B', effectiveDate: '2026-01-05', reason: 'Needed in B', letter: '',
+  status: 'Approved', departedAt: '', newClergyNo: '', approvedBy: '', approvedByName: '', decisionNote: '', version: 1,
+  createdAt: 'x', createdBy: 'uNamed', createdByName: 'Bayo Adeyemi', updatedAt: 'x', updatedBy: 'uNamed', ...extra });
+async function createPosting(db, id, extra) {
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'parishStats/B'), { memberCount: 0, clergyCount: 0 }, { merge: true })); const b = writeBatch(db); b.set(doc(db, 'postings/' + id), postingDoc(extra)); auditW(b, db, 'postings/' + id, 1, 'posting'); return b.commit(); }
+async function depart(db, id, who, uid) {
+  return runTransaction(db, async (t) => {
+    const ref = doc(db, 'postings/' + id), po = (await t.get(ref)).data();
+    const cRef = doc(db, `parishes/${po.fromParishId}/clergy/${po.clergyNo}`);
+    t.update(cRef, { status: 'Former', leftDate: po.effectiveDate, leaveReason: 'Posting', transferredTo: po.toParishName, postingId: id, updatedAt: 'y' });
+    t.set(doc(db, 'parishStats/' + po.fromParishId), { clergyCount: increment(-1), formerClergyCount: increment(1) }, { merge: true });
+    const next = { ...po, departedAt: po.effectiveDate, status: po.newClergyNo ? 'Applied' : 'Approved', version: po.version + 1, updatedBy: uid };
+    t.set(ref, next); auditW(t, db, 'postings/' + id, next.version, 'posting-depart', who);
+  });
+}
+async function arrive(db, id, who, uid) {
+  return runTransaction(db, async (t) => {
+    const ref = doc(db, 'postings/' + id), po = (await t.get(ref)).data();
+    const cnt = doc(db, `parishes/${po.toParishId}/meta/counters`), n = (await t.get(cnt)).data().clg + 1;
+    const p = (await t.get(doc(db, 'parishes/' + po.toParishId))).data();
+    const no = `CCC-${p.parishLetters}-${p.cityLetters}-CLG-${String(n).padStart(3, '0')}`;
+    t.update(cnt, { clg: n });
+    t.set(doc(db, `parishes/${po.toParishId}/clergy/${no}`), { ...po.person, memberNo: no, status: 'Active', joinedDate: po.effectiveDate, postingId: id, postedFrom: po.clergyNo, postedFromParishId: po.fromParishId });
+    t.set(doc(db, 'clergyIndex/' + po.email), { parishId: po.toParishId, clergyId: no });
+    const next = { ...po, newClergyNo: no, status: po.departedAt ? 'Applied' : 'Approved', version: po.version + 1, updatedBy: uid };
+    t.set(ref, next); auditW(t, db, 'postings/' + id, next.version, 'posting-arrive', who);
+    return no;
+  }).then(async no => { await setDoc(doc(db, 'parishStats/' + (await getDoc(doc(db, 'postings/' + id))).data().toParishId), { clergyCount: increment(1) }, { merge: true }); return no; });
+}
+
+test('p8 retirement age: optional HQ setting, blank by default, audited; parish cannot set it', async () => {
+  const db = as.named();
+  const set = (age, v) => { const b = writeBatch(db); b.set(doc(db, 'hqSettings/staff'), { retireAge: age, version: v, updatedAt: 'x', updatedBy: 'uNamed' }); auditW(b, db, 'hqSettings/staff', v, 'settings'); return b.commit(); };
+  await assertFails(set(30, 1));
+  await assertSucceeds(set(null, 1));
+  await assertSucceeds(set(65, 2));
+  await assertFails(setDoc(doc(db, 'hqSettings/staff'), { retireAge: 70, version: 3, updatedAt: 'x', updatedBy: 'uNamed' })); // no audit
+  await assertFails(setDoc(doc(as.adminA(), 'hqSettings/staff'), { retireAge: 60, version: 3, updatedAt: 'x', updatedBy: 'uA' }));
+});
+test('p8 giving: optional member number from the member list', async () => {
+  await assertSucceeds(setDoc(doc(as.adminA(), 'parishes/A/finances/f3'), { ...fin, memberNo: 'CCC-MBR-001' }));
+  await assertSucceeds(setDoc(doc(as.adminA(), 'parishes/A/finances/f4'), fin));
+  await assertFails(setDoc(doc(as.adminA(), 'parishes/A/finances/f5'), { ...fin, memberNo: 'Ade Bisi' }));
+});
+test('p8 Church Head: only a named super assigns; read-only church-wide; no parish edits; revoked = no access', async () => {
+  await assertFails(assignLeader(as.adminA(), 'pastor@x.org'));
+  await assertFails(assignLeader(as.superA(), 'pastor@x.org'));       // unnamed super
+  await assertSucceeds(assignLeader(as.named(), 'pastor@x.org'));
+  await assertSucceeds(assignLeader(as.named(), 'second@x.org', 'Active', 'Rev Second'));   // more than one holder
+  same((await getDoc(doc(as.named(), 'hqSettings/leadership'))).data().active, 2);
+  // Invite + claim.
+  const sdb = as.named(), nb = writeBatch(sdb); nb.set(doc(sdb, 'invites/LEADERINVITE-00000001'), { email: 'pastor@x.org', parishId: '', role: 'church_head', usedBy: null, createdAt: 'x' });
+  await assertSucceeds(nb.commit());
+  const ch = P8.ch();
+  await assertFails(setDoc(doc(ch, 'users/uCH'), { role: 'church_head', parishId: '', email: 'pastor@x.org', inviteCode: 'LEADERINVITE-00000001', name: 'Someone Else' }));
+  const cb = writeBatch(ch);
+  cb.set(doc(ch, 'users/uCH'), { role: 'church_head', parishId: '', email: 'pastor@x.org', inviteCode: 'LEADERINVITE-00000001', name: 'Rev Pastor' });
+  cb.update(doc(ch, 'invites/LEADERINVITE-00000001'), { usedBy: 'uCH' });
+  await assertSucceeds(cb.commit());
+  for (const p of ['parishes/A', 'parishStats/A', 'hqSettings/leadership']) await assertSucceeds(getDoc(doc(ch, p)));
+  await assertSucceeds(getDocs(collection(ch, 'alerts')));
+  await assertSucceeds(getDocs(collectionGroup(ch, 'clergy')));
+  for (const p of ['parishes/A/members/CCC-MBR-001', 'parishes/A/finances/f1', 'hqStaff/CCC-HQ-STF-001']) await assertFails(getDoc(doc(ch, p)));
+  await assertFails(getDocs(collection(ch, 'directory')));
+  await assertFails(updateDoc(doc(ch, 'parishes/A'), { name: 'X' }));
+  await assertFails(setDoc(doc(ch, 'parishStats/A'), { memberCount: 1 }));
+  await assertFails(assignLeader(ch, 'third@x.org'));
+  // A self-made church_head profile without an Active leaders doc gets nothing.
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'users/uX'), { role: 'church_head', name: 'Fake' }));
+  await assertFails(getDoc(doc(ctx('uX', 'fake@x.org'), 'parishStats/A')));
+  // Revoke: access ends at once; nothing deleted.
+  await assertSucceeds(assignLeader(as.named(), 'pastor@x.org', 'Revoked'));
+  await assertFails(getDoc(doc(ch, 'parishStats/A')));
+  await assertFails(deleteDoc(doc(as.named(), 'leaders/pastor@x.org')));
+  same((await getDoc(doc(as.named(), 'hqSettings/leadership'))).data().active, 1);
+});
+test('p8 postings: needs Church Head approval when one exists; halves apply on the date; new lettered CLG linked; audited', async () => {
+  await env.withSecurityRulesDisabled(async c => { const db = c.firestore();
+    await setDoc(doc(db, 'users/uCH'), { role: 'church_head', parishId: '', email: 'pastor@x.org', name: 'Rev Pastor' }); });
+  await assignLeader(as.named(), 'pastor@x.org');
+  const sup = as.named(), ch = P8.ch(), a = as.adminA(), b = as.adminB();
+  await assertFails(createPosting(sup, 'p1', { status: 'Approved' }));          // a Church Head exists -> must wait
+  await assertFails(createPosting(a, 'p1', { status: 'Pending approval' }));    // only super posts
+  await assertSucceeds(createPosting(sup, 'p1', { status: 'Pending approval' }));
+  await assertSucceeds(getDoc(doc(a, 'postings/p1')));
+  await assertSucceeds(getDoc(doc(b, 'postings/p1')));
+  await assertSucceeds(getDocs(query(collection(b, 'postings'), where('toParishId', '==', 'B'))));
+  await assertFails(getDoc(doc(as.adminS(), 'postings/p1')));
+  await assertFails(getDoc(doc(as.hq(), 'postings/p1')));
+  await assertFails(arrive(b, 'p1', 'B', 'uB'));                                 // not approved yet
+  const decide = (db, who, uid, status, name) => runTransaction(db, async t => { const ref = doc(db, 'postings/p1'), po = (await t.get(ref)).data();
+    t.set(ref, { ...po, status, approvedBy: uid, approvedByName: name, decisionNote: 'ok', version: po.version + 1, updatedBy: uid }); auditW(t, db, 'postings/p1', po.version + 1, 'posting-approve', who); });
+  await assertFails(decide(sup, '', 'uNamed', 'Approved', 'Bayo Adeyemi'));    // super cannot approve
+  await assertSucceeds(decide(ch, 'ch', 'uCH', 'Approved', 'Rev Pastor'));
+  // Old parish half (parish A admin), then new parish half (parish B admin).
+  await assertFails(arrive(a, 'p1', 'A', 'uA'));
+  await assertSucceeds(depart(a, 'p1', 'A', 'uA'));
+  const old = (await getDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'))).data();
+  same(old.status, 'Former'); same(old.leaveReason, 'Posting');
+  const no = await arrive(b, 'p1', 'B', 'uB');
+  same(no, 'CCC-BBB-LAG-CLG-002');
+  const nu = (await getDoc(doc(b, 'parishes/B/clergy/' + no))).data();
+  same(nu.postedFrom, 'CCC-CLG-001'); same(nu.status, 'Active');
+  const po = (await getDoc(doc(sup, 'postings/p1'))).data();
+  same(po.status, 'Applied'); same(po.newClergyNo, no);
+  same((await getDocs(query(collection(sup, 'auditLog'), where('target', '==', 'postings/p1')))).size, 4);
+  await assertFails(deleteDoc(doc(sup, 'postings/p1')));
+  await assertFails(deleteDoc(doc(b, 'parishes/B/clergy/' + no)));
+});
+test('p8 postings: no Church Head -> approved at once; super applies both halves; future date waits; cancel', async () => {
+  const sup = as.named();
+  await assertSucceeds(createPosting(sup, 'p2'));
+  await assertSucceeds(depart(sup, 'p2', '', 'uNamed'));
+  await assertSucceeds(arrive(as.adminB(), 'p2', 'B', 'uB'));
+  same((await getDoc(doc(sup, 'postings/p2'))).data().status, 'Applied');
+  // A posting dated in the future cannot be applied yet; it can be cancelled.
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'parishes/B/clergy/CCC-CLG-009'), clergy('CCC-CLG-009', 'ife@x.org')));
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'clergyIndex/ife@x.org'), { parishId: 'B', clergyId: 'CCC-CLG-009' }));
+  await assertSucceeds(createPosting(sup, 'p3', { clergyNo: 'CCC-CLG-009', email: 'ife@x.org', person: clergy('CCC-CLG-009', 'ife@x.org'), fromParishId: 'B', toParishId: 'A', effectiveDate: '2099-01-01' }));
+  await assertFails(depart(as.adminB(), 'p3', 'B', 'uB'));
+  await assertSucceeds(runTransaction(sup, async t => { const ref = doc(sup, 'postings/p3'), po = (await t.get(ref)).data();
+    t.set(ref, { ...po, status: 'Cancelled', decisionNote: 'changed plan', version: 2 }); auditW(t, sup, 'postings/p3', 2, 'posting-cancel'); }));
+  // Super cannot edit clergy records outside a posting.
+  await assertFails(updateDoc(doc(sup, 'parishes/B/clergy/CCC-CLG-009'), { status: 'Former', leaveReason: 'Posting', leftDate: '2026-01-01', postingId: 'p3' }));
+});
+test('p8 AI dashboard data: rollups + snapshots + summaries readable by super and Church Head only', async () => {
+  const sup = as.named();
+  await assertSucceeds(setDoc(doc(sup, 'statsRollups/2026-11_world_all'), { month: '2026-11', level: 'world', key: 'all', name: 'World', parishes: 2, members: 10, clergy: 1, attendance: 50, births: 1, deaths: 0, birthsMonth: 1, deathsMonth: 0, returnsFiled: 1, updatedAt: 'x' }));
+  await assertSucceeds(setDoc(doc(sup, 'parishMonthly/A_2026-11'), { parishId: 'A', month: '2026-11', memberCount: 2, clergyCount: 1, attendanceTotal: 0, serviceCount: 0, birthCount: 0, deathCount: 0, lastActive: '', city: '', country: '', continent: '', updatedAt: 'x' }));
+  await assertFails(setDoc(doc(sup, 'statsRollups/2026-11_world_all'), { month: '2026-11', level: 'world', key: 'all', name: 'World', fullName: 'Ade Bisi', updatedAt: 'x' }));
+  await assertSucceeds(setDoc(doc(sup, 'aiSummaries/2026-11'), { month: '2026-11', text: 'All calm.', engine: 'test', alertCount: 0, at: 'x', by: 'uNamed' }));
+  for (const who of [as.adminA(), as.hq()]) {
+    await assertFails(getDoc(doc(who, 'statsRollups/2026-11_world_all')));
+    await assertFails(setDoc(doc(who, 'parishMonthly/A_2026-12'), { parishId: 'A', month: '2026-12' }));
+    await assertFails(getDoc(doc(who, 'aiSummaries/2026-11')));
+  }
+  // New alert rules are accepted with an audit entry.
+  const b = writeBatch(sup);
+  b.set(doc(sup, 'alerts/2026-11_A_inactive'), { month: '2026-11', parishId: 'A', parishName: 'Parish A', rule: 'inactive', detail: 'x', currency: 'NGN', status: 'Open', version: 1, at: 'x', by: 'uNamed' });
+  auditW(b, sup, 'alerts/2026-11_A_inactive', 1, 'alert');
+  await assertSucceeds(b.commit());
+});
+

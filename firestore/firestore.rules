@@ -28,6 +28,14 @@ service cloud.firestore {
       return role() == 'parish_admin' && profile().parishId == parishId
         && get(/databases/$(database)/documents/parishes/$(parishId)).data.status == 'Approved';
     }
+    // Phase 8: Church Leader ("Church Head", name configurable). Read-only church-wide + posting approval.
+    // A holder needs role 'church_head' on users/{uid} AND an Active leaders/{email} doc (Super Admin assigns / revokes).
+    function isChurchHead() {
+      return role() == 'church_head' && exists(docAt('leaders/' + myEmail()))
+        && get(docAt('leaders/' + myEmail())).data.status == 'Active';
+    }
+    function isLeaderView() { return isSuper() || isChurchHead(); }
+    function leadersActive() { return exists(docAt('hqSettings/leadership')) ? get(docAt('hqSettings/leadership')).data.active : 0; }
     function isClergyEmail(e) { return exists(/databases/$(database)/documents/clergyIndex/$(e)); }
     function isAdminEmail(e) { return exists(/databases/$(database)/documents/adminEmails/$(e)); }
 
@@ -155,14 +163,14 @@ service cloud.firestore {
     }
     function validClergy(d, id) {
       return d.keys().hasOnly(personKeys().concat(['formerMemberNo', 'joinedDate', 'leftDate', 'leaveReason',
-          'transferredTo', 'letterId', 'serviceRecord', 'deathId']))
+          'transferredTo', 'letterId', 'serviceRecord', 'deathId', 'postingId', 'postedFrom', 'postedFromParishId']))
         && validPerson(d, id) && d.status in ['Active', 'Former']
         // Clergy must carry an email so the clergy-not-admin rule can be enforced.
         && d.email != '' && !isAdminEmail(d.email)
         && getAfter(docAt('clergyIndex/' + d.email)).data.parishId != null
         && s(d.get('formerMemberNo', ''), 30) && s(d.get('transferredTo', ''), 120) && s(d.get('letterId', ''), 60)
         && s(d.get('joinedDate', ''), 10) && s(d.get('leftDate', ''), 10)
-        && d.get('leaveReason', '') in ['', 'Transfer', 'Retired', 'Called to glory', 'Other']
+        && d.get('leaveReason', '') in ['', 'Transfer', 'Posting', 'Retired', 'Called to glory', 'Other']
         && d.get('serviceRecord', []) is list && d.get('serviceRecord', []).size() <= 40
         && (d.status == 'Active' || isDate(d.get('leftDate', '')));
     }
@@ -305,7 +313,8 @@ service cloud.firestore {
             && existsAfter(docAt('parishes/' + p + '/members/' + d.get('memberNo', 'x')))));
     }
     function validFinance(d) {
-      return d.keys().hasOnly(['transactionDate', 'contributorName', 'contributionType', 'amount'])
+      return d.keys().hasOnly(['transactionDate', 'contributorName', 'contributionType', 'amount', 'memberNo'])
+        && (d.get('memberNo', '') == '' || isNo(d.memberNo, 'MBR'))
         && isDate(d.transactionDate) && str(d.contributorName, 120) && str(d.contributionType, 60)
         && (d.amount is int || d.amount is float) && d.amount > 0 && d.amount <= 100000000;
     }
@@ -313,7 +322,8 @@ service cloud.firestore {
     function validStats(d) {
       return d.keys().hasOnly(['memberCount', 'clergyCount', 'formerClergyCount', 'attendanceTotal', 'serviceCount',
           'financeTotal', 'financeCount', 'diasporaCount', 'byType', 'visitorCount', 'updatedAt',
-          'birthCount', 'childCount', 'teenCount', 'deathCount'])
+          'birthCount', 'childCount', 'teenCount', 'deathCount', 'lastActive'])
+        && optDate(d, 'lastActive')
         && nonNegInt(d, 'birthCount') && nonNegInt(d, 'childCount') && nonNegInt(d, 'teenCount') && nonNegInt(d, 'deathCount')
         && (!('byType' in d) || (d.byType is map && d.byType.size() <= 20))
         && nonNegInt(d, 'visitorCount')
@@ -357,6 +367,12 @@ service cloud.firestore {
       allow delete: if isSuper();
     }
     function claimsInvite(d) {
+      return (d.keys().hasOnly(['role', 'parishId', 'email', 'inviteCode', 'name']) && d.role == 'church_head' && d.parishId == ''
+          && d.email == myEmail() && inviteValidFor(d.inviteCode, '', myEmail()) && d.name == get(docAt('leaders/' + myEmail())).data.name
+          && getAfter(docAt('invites/' + d.inviteCode)).data.usedBy == request.auth.uid)
+        || claimsAdminInvite(d);
+    }
+    function claimsAdminInvite(d) {
       return d.keys().hasOnly(['role', 'parishId', 'email', 'inviteCode']) && d.role == 'parish_admin'
         && d.email == myEmail() && myEmail() != '' && !isClergyEmail(myEmail())
         && inviteValidFor(d.inviteCode, d.parishId, myEmail())
@@ -373,6 +389,11 @@ service cloud.firestore {
     // Invites: id is a random secret code. Only super_admin creates or lists them.
     // The invited person can read their own (they must know the code) and mark it used, once.
     match /invites/{code} {
+      allow create: if isNamedSuper() && code.size() >= 16
+        && request.resource.data.keys().hasOnly(['email', 'parishId', 'role', 'createdAt', 'usedBy'])
+        && request.resource.data.role == 'church_head' && request.resource.data.parishId == ''
+        && request.resource.data.get('usedBy', null) == null && isEmail(request.resource.data.email)
+        && getAfter(docAt('leaders/' + request.resource.data.email)).data.status == 'Active';
       allow create: if isSuper() && code.size() >= 16
         && request.resource.data.keys().hasOnly(['email', 'parishId', 'role', 'createdAt', 'usedBy'])
         && isEmail(request.resource.data.email) && request.resource.data.email == request.resource.data.email.lower()
@@ -398,8 +419,9 @@ service cloud.firestore {
     match /clergyIndex/{email} {
       allow read: if isSuper();
       allow create, update: if request.resource.data.keys().hasOnly(['parishId', 'clergyId'])
-        && isParishAdminOf(request.resource.data.parishId)
-        && getAfter(docAt('parishes/' + request.resource.data.parishId + '/clergy/' + request.resource.data.clergyId)).data.email == email;
+        && (isParishAdminOf(request.resource.data.parishId) || isNamedSuper())
+        && getAfter(docAt('parishes/' + request.resource.data.parishId + '/clergy/' + request.resource.data.clergyId)).data.email == email
+        && getAfter(docAt('parishes/' + request.resource.data.parishId + '/clergy/' + request.resource.data.clergyId)).data.status == 'Active';
       allow delete: if false;
     }
 
@@ -409,7 +431,7 @@ service cloud.firestore {
     }
 
     match /parishes/{parishId} {
-      allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
+      allow read: if isSuper() || isChurchHead() || isHQ() || isParishAdminOf(parishId);
       allow create: if isSuper() && validParish(request.resource.data) && letteringOk(parishId);
       allow update: if (isSuper() && validParish(request.resource.data) && letteringOk(parishId))
         || (isParishAdminOf(parishId) && validParish(request.resource.data)
@@ -420,7 +442,7 @@ service cloud.firestore {
         allow read: if isParishAdminOf(parishId) || isSuper();
         allow create: if isSuper() && request.resource.data == { 'clg': 0, 'mbr': 0 };
         // Exactly one counter moves up by exactly 1, and the record with that number is created in the same write.
-        allow update: if isParishAdminOf(parishId) && request.resource.data.keys().hasOnly(['clg', 'mbr'])
+        allow update: if (isParishAdminOf(parishId) || isNamedSuper()) && request.resource.data.keys().hasOnly(['clg', 'mbr'])
           && ((request.resource.data.clg == resource.data.clg + 1 && request.resource.data.mbr == resource.data.mbr
                 && existsAfter(docAt('parishes/' + parishId + '/clergy/' + numId(parishId, 'CLG-', request.resource.data.clg)))
                 && !exists(docAt('parishes/' + parishId + '/clergy/' + numId(parishId, 'CLG-', request.resource.data.clg))))
@@ -492,10 +514,13 @@ service cloud.firestore {
       // Clergy register: parish admin + super_admin.
       match /clergy/{clergyId} {
         allow read: if isParishAdminOf(parishId) || isSuper();
-        allow create: if isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId)
+        allow create: if (isParishAdminOf(parishId) || (isNamedSuper() && 'postingId' in request.resource.data))
+          && validClergy(request.resource.data, clergyId)
           && request.resource.data.status == 'Active'
-          && takesNextNumber(parishId, 'clg', 'CLG-', clergyId);
-        allow update: if isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId) && keepsIdentity();
+          && takesNextNumber(parishId, 'clg', 'CLG-', clergyId)
+          && (!('postingId' in request.resource.data) || postingArrives(parishId, request.resource.data, clergyId));
+        allow update: if (isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId) && keepsIdentity())
+          || (isNamedSuper() && validClergy(request.resource.data, clergyId) && keepsIdentity() && postingDeparts(parishId, clergyId));
         allow delete: if false;
       }
       // Transfer letters (photo of the letter), kept apart from the clergy doc.
@@ -640,7 +665,7 @@ service cloud.firestore {
 
     // Collection-group reads for the super_admin world view.
     match /{p=**}/clergy/{id} {
-      allow read: if isSuper();
+      allow read: if isLeaderView();
     }
     match /{p=**}/members/{id} {
       allow read: if isSuper() && resource.data.important == true;
@@ -648,14 +673,14 @@ service cloud.firestore {
 
     // Per-parish totals only (no names). HQ + super read; the parish's own writes keep it current.
     match /parishStats/{parishId} {
-      allow read: if isSuper() || isHQ() || isParishAdminOf(parishId);
+      allow read: if isLeaderView() || isHQ() || isParishAdminOf(parishId);
       allow create: if isSuper() && validStats(request.resource.data);
       allow update: if (isSuper() || isParishAdminOf(parishId)) && validStats(request.resource.data);
       allow delete: if isSuper();
     }
 
     match /circulars/{id} {
-      allow read: if hasProfile() && (isSuper() || isHQ() || role() == 'parish_admin');
+      allow read: if hasProfile() && (isSuper() || isHQ() || role() == 'parish_admin' || isChurchHead());
       allow write: if isSuper() || isHQ();
     }
 
@@ -686,6 +711,14 @@ service cloud.firestore {
     }
     match /hqSettings/{id} {
       allow read: if hasProfile();
+      allow create, update: if isNamedSuper() && id == 'staff'
+        && request.resource.data.keys().hasOnly(['retireAge', 'version', 'updatedAt', 'updatedBy'])
+        && (request.resource.data.retireAge == null || (request.resource.data.retireAge is int
+            && request.resource.data.retireAge >= 40 && request.resource.data.retireAge <= 100))
+        && request.resource.data.version == (resource == null ? 1 : resource.data.version + 1)
+        && request.resource.data.updatedBy == request.auth.uid
+        && auditedAfter('hqSettings/' + id, request.resource.data.version);
+      allow create, update: if isNamedSuper() && id == 'leadership' && leadershipOk();
       allow create, update: if isNamedSuper() && id == 'returns'
         && request.resource.data.keys().hasOnly(['shares', 'version', 'updatedAt', 'updatedBy'])
         && validShares(request.resource.data.shares)
@@ -805,7 +838,7 @@ service cloud.firestore {
     // cur: { NGN: { due, remitted, confirmed, tithes, income, returns } } (one entry per currency, never converted).
     // Parishes add their own deltas in the same batch as the return change; Super Admin can rebuild a month from returns.
     match /returnRollups/{id} {
-      allow read: if isSuper();
+      allow read: if isLeaderView();
       allow create, update: if (isNamedSuper() || isParishAdminOf(profile().parishId))
         && request.resource.data.keys().hasOnly(['month', 'level', 'key', 'name', 'country', 'continent', 'cur', 'updatedAt'])
         && request.resource.data.level in ['city', 'country', 'continent']
@@ -825,10 +858,10 @@ service cloud.firestore {
 
     // ---- Alerts (rule-based for now): alerts/{YYYY-MM}_{parishId}_{rule}. Super Admin only. ----
     match /alerts/{id} {
-      allow read: if isSuper();
+      allow read: if isLeaderView();
       allow create, update: if isNamedSuper()
         && request.resource.data.keys().hasOnly(['month', 'parishId', 'parishName', 'rule', 'detail', 'currency', 'status', 'version', 'at', 'by'])
-        && request.resource.data.rule in ['underpaid', 'titheDrop', 'notFiled', 'bigChange']
+        && request.resource.data.rule in ['underpaid', 'titheDrop', 'notFiled', 'bigChange', 'attendanceDrop', 'memberDecline', 'inactive', 'returnsGap']
         && id == request.resource.data.month + '_' + request.resource.data.parishId + '_' + request.resource.data.rule
         && request.resource.data.status in ['Open', 'Reviewed'] && s(request.resource.data.detail, 300)
         && request.resource.data.version == (resource == null ? 1 : resource.data.version + 1)
@@ -977,11 +1010,147 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ================= Phase 8: Church Leader role, clergy postings, AI dashboard =================
+    // ---- Leadership: hqSettings/leadership { roleName, active, lastLeader }. `active` counts Active leaders and moves by
+    // exactly 1 together with the leaders/{email} doc named in lastLeader (assign / revoke). Leadership is disputed in
+    // court, so the title is configurable, several holders are allowed, and every change is audited.
+    function leadershipOk() {
+      let d = request.resource.data;
+      let before = resource == null ? 0 : resource.data.active;
+      return d.keys().hasOnly(['roleName', 'active', 'lastLeader', 'version', 'updatedAt', 'updatedBy'])
+        && str(d.roleName, 60) && d.active is int && d.active >= 0 && d.updatedBy == request.auth.uid
+        && d.version == (resource == null ? 1 : resource.data.version + 1)
+        && auditedAfter('hqSettings/leadership', d.version)
+        && (d.active == before
+          || (d.active == before + 1 && getAfter(docAt('leaders/' + d.lastLeader)).data.status == 'Active'
+              && getAfter(docAt('leaders/' + d.lastLeader)).data.version == (exists(docAt('leaders/' + d.lastLeader)) ? get(docAt('leaders/' + d.lastLeader)).data.version + 1 : 1)
+              && (!exists(docAt('leaders/' + d.lastLeader)) || get(docAt('leaders/' + d.lastLeader)).data.status != 'Active'))
+          || (d.active == before - 1 && getAfter(docAt('leaders/' + d.lastLeader)).data.status == 'Revoked'
+              && get(docAt('leaders/' + d.lastLeader)).data.status == 'Active'));
+    }
+    function leaderMoves(email) {
+      return getAfter(docAt('hqSettings/leadership')).data.lastLeader == email
+        && getAfter(docAt('hqSettings/leadership')).data.active
+           == (exists(docAt('hqSettings/leadership')) ? get(docAt('hqSettings/leadership')).data.active : 0)
+              + (request.resource.data.status == 'Active' ? 1 : -1);
+    }
+    match /leaders/{email} {
+      allow read: if isNamedSuper() || (signedIn() && email == myEmail());
+      allow create, update: if isNamedSuper() && email == email.lower() && isEmail(email)
+        && request.resource.data.keys().hasOnly(['name', 'email', 'status', 'note', 'version', 'updatedAt', 'updatedBy'])
+        && request.resource.data.email == email && str(request.resource.data.name, 120)
+        && request.resource.data.status in ['Active', 'Revoked'] && s(request.resource.data.get('note', ''), 300)
+        && request.resource.data.version == (resource == null ? 1 : resource.data.version + 1)
+        && (resource == null || resource.data.status != request.resource.data.status)
+        && leaderMoves(email) && request.resource.data.updatedBy == request.auth.uid
+        && auditedAfter('leaders/' + email, request.resource.data.version);
+      allow delete: if false;
+    }
+    // Leadership settings (title, number of holders) are readable by every signed-in role.
+    // (hqSettings read is already hasProfile().)
+
+    // ---- Clergy postings: postings/{id}. Super Admin posts clergy from parish X to Y. With a Church Head, a posting waits
+    // for approval. On/after the effective date each half is applied (old parish: Former/Posting; new parish: new CLG
+    // number linked to the old one) by that parish's admin when they open the app, or both by a named Super Admin.
+    function postingImmutable() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'departedAt', 'newClergyNo', 'approvedBy', 'approvedByName', 'decisionNote', 'version', 'updatedAt', 'updatedBy']);
+    }
+    function postingDue(d) { return ymdNum(d.effectiveDate) <= todayNum(); }
+    function postingTouch(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys.concat(['status', 'version', 'updatedAt', 'updatedBy']));
+    }
+    function postingAfterStatus(d) { return d.status == (d.departedAt != '' && d.newClergyNo != '' ? 'Applied' : 'Approved'); }
+    match /postings/{id} {
+      allow read: if isLeaderView() || isParishAdminOf(resource.data.fromParishId) || isParishAdminOf(resource.data.toParishId);
+      allow create: if isNamedSuper()
+        && request.resource.data.keys().hasOnly(['clergyNo', 'fullName', 'email', 'person', 'fromParishId', 'fromParishName', 'toParishId', 'toParishName',
+            'effectiveDate', 'reason', 'letter', 'status', 'departedAt', 'newClergyNo', 'approvedBy', 'approvedByName', 'decisionNote',
+            'version', 'createdAt', 'createdBy', 'createdByName', 'updatedAt', 'updatedBy'])
+        && request.resource.data.fromParishId != request.resource.data.toParishId
+        && exists(docAt('parishes/' + request.resource.data.toParishId))
+        && get(docAt('parishes/' + request.resource.data.fromParishId + '/clergy/' + request.resource.data.clergyNo)).data.status == 'Active'
+        && get(docAt('parishes/' + request.resource.data.fromParishId + '/clergy/' + request.resource.data.clergyNo)).data.email == request.resource.data.email
+        && request.resource.data.person is map && request.resource.data.person.email == request.resource.data.email
+        && request.resource.data.person.fullName == request.resource.data.fullName
+        && isDate(request.resource.data.effectiveDate) && str(request.resource.data.reason, 300)
+        && (request.resource.data.get('letter', '') == '' || (s(request.resource.data.letter, 345000) && request.resource.data.letter.matches('^data:image/(jpeg|png|webp);base64,.*')))
+        && request.resource.data.status == (leadersActive() > 0 ? 'Pending approval' : 'Approved')
+        && request.resource.data.departedAt == '' && request.resource.data.newClergyNo == ''
+        && request.resource.data.version == 1 && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid && auditedAfter('postings/' + id, 1);
+      allow update: if bumped() && postingImmutable() && request.resource.data.updatedBy == request.auth.uid
+        && auditedAfter('postings/' + id, request.resource.data.version) && (
+          // Church Head approves or rejects.
+          (resource.data.status == 'Pending approval' && request.resource.data.status in ['Approved', 'Rejected'] && isChurchHead()
+            && postingTouch(['approvedBy', 'approvedByName', 'decisionNote']) && request.resource.data.approvedBy == request.auth.uid
+            && request.resource.data.approvedByName == profile().name && s(request.resource.data.get('decisionNote', ''), 300))
+          // Super Admin cancels before anything has moved.
+          || (request.resource.data.status == 'Cancelled' && resource.data.status in ['Pending approval', 'Approved'] && resource.data.departedAt == ''
+            && resource.data.newClergyNo == '' && postingTouch(['decisionNote']) && isNamedSuper())
+          // Old parish half: clergy record is Former with reason Posting, in the same write.
+          || (resource.data.departedAt == '' && request.resource.data.departedAt == resource.data.effectiveDate && resource.data.status == 'Approved'
+            && postingDue(resource.data) && (isParishAdminOf(resource.data.fromParishId) || isNamedSuper())
+            && postingTouch(['departedAt']) && postingAfterStatus(request.resource.data)
+            && getAfter(docAt('parishes/' + resource.data.fromParishId + '/clergy/' + resource.data.clergyNo)).data.status == 'Former'
+            && getAfter(docAt('parishes/' + resource.data.fromParishId + '/clergy/' + resource.data.clergyNo)).data.leaveReason == 'Posting'
+            && getAfter(docAt('parishes/' + resource.data.fromParishId + '/clergy/' + resource.data.clergyNo)).data.postingId == id)
+          // New parish half: a new lettered CLG number linked to the old one, in the same write.
+          || (resource.data.newClergyNo == '' && request.resource.data.newClergyNo is string && request.resource.data.newClergyNo != ''
+            && resource.data.status == 'Approved' && postingDue(resource.data) && (isParishAdminOf(resource.data.toParishId) || isNamedSuper())
+            && postingTouch(['newClergyNo']) && postingAfterStatus(request.resource.data)
+            && getAfter(docAt('parishes/' + resource.data.toParishId + '/clergy/' + request.resource.data.newClergyNo)).data.postingId == id));
+      allow delete: if false;
+    }
+    function postingArrives(p, d, id) {
+      let po = getAfter(docAt('postings/' + d.postingId)).data;
+      return po.toParishId == p && po.newClergyNo == id && get(docAt('postings/' + d.postingId)).data.newClergyNo == ''
+        && d.postedFrom == po.clergyNo && d.postedFromParishId == po.fromParishId && d.email == po.email && d.fullName == po.fullName;
+    }
+    function postingDeparts(p, clergyId) {
+      let po = getAfter(docAt('postings/' + request.resource.data.postingId)).data;
+      return po.fromParishId == p && po.clergyNo == clergyId && po.departedAt != '' && resource.data.status == 'Active'
+        && request.resource.data.status == 'Former' && request.resource.data.leaveReason == 'Posting'
+        && request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'leftDate', 'leaveReason', 'transferredTo', 'postingId', 'serviceRecord', 'updatedAt']);
+    }
+
+    // ---- AI dashboard: precomputed totals (no names). Written by the scheduled server job (service account, bypasses
+    // rules) or, as a fallback, by a named Super Admin from the browser.
+    // parishMonthly/{parishId}_{YYYY-MM}: that parish's totals at month end. statsRollups/{YYYY-MM}_{level}_{key}.
+    function countsOk(d, keys) { return d.keys().hasOnly(keys) && d.month.matches('^20[0-9]{2}-[0-9]{2}$'); }
+    match /parishMonthly/{id} {
+      allow read: if isLeaderView();
+      allow create, update: if isNamedSuper() && id == request.resource.data.parishId + '_' + request.resource.data.month
+        && countsOk(request.resource.data, ['parishId', 'month', 'memberCount', 'clergyCount', 'attendanceTotal', 'serviceCount',
+            'birthCount', 'deathCount', 'lastActive', 'city', 'country', 'continent', 'updatedAt']);
+      allow delete: if false;
+    }
+    match /statsRollups/{id} {
+      allow read: if isLeaderView();
+      allow create, update: if isNamedSuper() && request.resource.data.level in ['world', 'continent', 'country', 'city']
+        && id == request.resource.data.month + '_' + request.resource.data.level + '_' + request.resource.data.key
+        && countsOk(request.resource.data, ['month', 'level', 'key', 'name', 'country', 'continent', 'parishes', 'members', 'clergy',
+            'attendance', 'births', 'deaths', 'birthsMonth', 'deathsMonth', 'returnsFiled', 'updatedAt']);
+      allow delete: if false;
+    }
+    // aiSummaries/{YYYY-MM}: the plain-language summary of a month's alerts (generated from totals only).
+    match /aiSummaries/{month} {
+      allow read: if isLeaderView();
+      allow create, update: if (isNamedSuper() || isChurchHead())
+        && request.resource.data.keys().hasOnly(['month', 'text', 'engine', 'alertCount', 'at', 'by'])
+        && request.resource.data.month == month && s(request.resource.data.text, 3000) && request.resource.data.by == request.auth.uid;
+      allow delete: if false;
+    }
+
     // ---- Audit log: append-only. Who (uid + email + name), when (server time), what (before/after, reason). ----
     function auditTargetOk(d) {
       return (d.target.matches('^returns/[A-Za-z0-9]+_20[0-9]{2}-[0-9]{2}$') && d.parishId == d.target.split('/')[1].split('_')[0]
               && (isNamedSuper() || isParishAdminOf(d.parishId)))
-        || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqLeave|committees|committeeMembers)/.+') && isNamedSuper() && d.parishId == '');
+        || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqLeave|committees|committeeMembers|leaders)/.+') && isNamedSuper() && d.parishId == '')
+        || (d.target.matches('^postings/.+') && d.parishId == '' && (role() == 'parish_admin'
+            ? (isParishAdminOf(getAfter(docAt(d.target)).data.fromParishId) || isParishAdminOf(getAfter(docAt(d.target)).data.toParishId))
+            : (isNamedSuper() || isChurchHead())));
     }
     match /auditLog/{id} {
       allow read: if isSuper() || (role() == 'parish_admin' && resource.data.parishId == profile().parishId);
@@ -995,7 +1164,7 @@ service cloud.firestore {
         && (!(request.resource.data.action in ['correct', 'dispute']) || str(request.resource.data.get('reason', ''), 300))
         && request.resource.data.by == request.auth.uid && request.resource.data.byEmail == myEmail()
         && request.resource.data.role == role() && request.resource.data.at == request.time
-        && (role() != 'super_admin' || request.resource.data.byName == profile().name);
+        && (!(role() in ['super_admin', 'church_head']) || request.resource.data.byName == profile().name);
       allow update, delete: if false;
     }
   }
