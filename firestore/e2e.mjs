@@ -52,6 +52,18 @@ await page.route('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/**', r => 
   const rel = new URL(r.request().url()).pathname.split('/6.4.0/')[1];
   return r.fulfill({ path: join(NM, '@fortawesome/fontawesome-free', rel) });
 });
+await page.route('https://cdn.jsdelivr.net/npm/**', r => r.fulfill({ path: join(NM, r.request().url().split('/npm/')[1].replace(/@[\d.]+/, '')), contentType: 'text/javascript' }));
+// Phase 5: the ccc-ai worker is stubbed here (the accuracy check calls the real one). Remembers each request.
+const aiCalls = [];
+const AI_STUB = [
+  { fullName: 'Adewale Ogunbiyi', gender: 'Male', maritalStatus: 'Married', address: '4 Oke-Bola, Ibadan', phone: '0805 999 0001', email: '', rank: 'Elder Brother', rankAsWritten: '', occupation: 'Farmer', dobDay: 4, dobMonth: 7, dobYear: 1980, anointDay: 25, anointMonth: 12, anointYear: 2025, nokName: 'Ronke Ogunbiyi', nokAddress: 'Ibadan', nokPhone: '0805 999 0002' },
+  { fullName: 'TEST Emeka Obi', gender: 'Male', maritalStatus: 'Single', address: '', phone: '', email: '', rank: '', rankAsWritten: '', occupation: '', dobDay: 9, dobMonth: 9, dobYear: 1990, anointDay: null, anointMonth: null, anointYear: null, nokName: '', nokAddress: '', nokPhone: '' },
+  { fullName: 'Yewande Akintola', gender: 'Female', maritalStatus: 'Single', address: '', phone: '0706 555 1234', email: '', rank: '', rankAsWritten: 'Lace Sister', occupation: 'Banker', dobDay: null, dobMonth: null, dobYear: null, anointDay: null, anointMonth: null, anointYear: null, nokName: '', nokAddress: '', nokPhone: '' },
+  { fullName: 'Kunle Ajibade', gender: 'Male', maritalStatus: 'Married', address: '', phone: '0803 111 0001', email: '', rank: '', rankAsWritten: '', occupation: '', dobDay: 1, dobMonth: 5, dobYear: null, anointDay: null, anointMonth: null, anointYear: null, nokName: '', nokAddress: '', nokPhone: '' }];
+await page.route('https://ccc-ai.aarinat-company-limited.workers.dev/**', r => {
+  aiCalls.push({ auth: r.request().headers()['authorization'] || '', body: r.request().postDataJSON() });
+  return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ people: AI_STUB, engine: 'stub' }) });
+});
 const pageErrors = [];
 page.on('console', m => { if (m.type() === 'error') console.error('console:', m.text().slice(0, 600)); });
 page.on('pageerror', e => { pageErrors.push(e.message); console.error('pageerror', e.message); });
@@ -699,6 +711,61 @@ try {
   assert.equal(await page.textContent('#metricChildren'), '2');  // child 7 + toddler moved in (child 12 moved out)
   assert.equal(await page.textContent('#metricTeens'), '1');
   await fullShot('72-dashboard-phase4-counts');
+
+  // ---------------- Phase 5: AI-Assisted Data Entry
+  await nav('members');
+  await shot('80-ai-button');
+  await page.click('#aiEntryBtn');
+  await page.waitForSelector('#aiModal:not(.hidden)');
+  await page.setInputFiles('#aiFile', join(ROOT, 'firestore', 'ai-test', 'members-list.docx'));
+  await page.click('#aiReadBtn');
+  await page.waitForFunction(() => document.querySelectorAll('#aiResults .ai-card').length === 4, null, { timeout: 20000 });
+  assert.equal(aiCalls.length, 1);
+  assert.match(aiCalls[0].auth, /^Bearer [\w-]+\.[\w-]+\./, 'sends the Firebase ID token');
+  assert.match(aiCalls[0].body.text, /Adebayo Olumide Ogunleye \(Senior Leader\)/, 'DOCX read in the browser (mammoth)');
+  assert.equal(await page.locator('.ai-dup').count(), 2, 'duplicate warnings: same name + same phone');
+  const picks = await page.$$eval('.ai-pick', els => els.map(e => e.checked));
+  assert.deepEqual(picks, [true, false, true, false], 'duplicates start unticked');
+  assert.match(await page.textContent('#aiResults'), /Missing: date of birth/);
+  assert.match(await page.textContent('#aiResults'), /Lace Sister/);
+  await fullShot('81-ai-review-cards');
+  // consent is required
+  dialogs.length = 0;
+  await page.click('#aiSaveBtn');
+  await page.waitForTimeout(300);
+  assert.match(dialogs.join(' '), /consent/i);
+  // per-field fix on card 3 (Yewande): date of birth + rank
+  await page.click('.ai-card[data-i="2"] .ai-edit');
+  await page.selectOption('.ai-card[data-i="2"] [data-k="dobDay"]', '15');
+  await page.selectOption('.ai-card[data-i="2"] [data-k="dobMonth"]', '3');
+  await page.selectOption('.ai-card[data-i="2"] [data-k="rank"]', 'Elder Sister');
+  await page.fill('.ai-card[data-i="2"] [data-k="address"]', '10 Bodija Road, Ibadan');
+  await page.press('.ai-card[data-i="2"] [data-k="address"]', 'Tab');
+  await page.locator('.ai-card[data-i="2"]').scrollIntoViewIfNeeded();
+  await shot('82-ai-edit-card');
+  await page.click('.ai-card[data-i="2"] button:has-text("Done")');
+  await page.setInputFiles('.ai-card[data-i="0"] .ai-photo', await makeImage('AO', '#4c1d95'));
+  await page.waitForSelector('.ai-card[data-i="0"] img');
+  await page.check('#ai_consent');
+  await page.click('#aiSaveBtn');
+  await page.waitForFunction(() => /Saved 2 members/.test(document.querySelector('#aiStatus').textContent), null, { timeout: 20000 });
+  assert.equal(await page.locator('.ai-card.bg-green-50').count(), 2);
+  await fullShot('83-ai-saved');
+  const saved = await page.evaluate(async (p) => {
+    const q = await db.collection('parishes').doc(p).collection('members').where('nameLower', 'in', ['adewale ogunbiyi', 'yewande akintola']).get();
+    return q.docs.map(d => ({ no: d.id, ...d.data() })).map(d => ({ no: d.no, rank: d.rank, dob: [d.dobDay, d.dobMonth], photo: !!d.photo, consent: d.consentGiven, status: d.status }));
+  }, parishId);
+  assert.equal(saved.length, 2);
+  for (const m of saved) { assert.match(m.no, /^CCC-TCP-IKJ-MBR-\d{3}$/); assert.equal(m.consent, true); assert.equal(m.status, 'Active'); }
+  assert.ok(saved.find(m => m.rank === 'Elder Sister' && m.dob[0] === 15), 'edited fields saved');
+  assert.ok(saved.find(m => m.photo), 'manual photo saved');
+  // the rules still apply to AI saves: a rank from the wrong line is refused
+  const bad = await page.evaluate(async () => { try { await createRecord('members', { fullName: 'Bad Rank', nameLower: 'bad rank', gender: 'Female', maritalStatus: 'Single', rank: 'Evangelist', dobDay: 1, dobMonth: 1, consentGiven: true, consentDate: today(), status: 'Active', createdAt: nowIso(), updatedAt: nowIso() }); return 'SAVED'; } catch (e) { return e.code; } });
+  assert.equal(bad, 'permission-denied');
+  await page.click('#aiModal button[aria-label="Close"]');
+  await page.waitForSelector('#membersTable :text("Adewale Ogunbiyi")');
+  await shot('84-ai-members-list');
+  console.log('E2E PASS (phase 5): AI entry button, DOCX read in browser, ID token sent, 4 cards, duplicate warnings (name + phone) unticked, consent required, per-field edit, manual photo, Save selected -> 2 numbered members through createRecord, rules still refuse a wrong-line rank.');
   await logout();
 
   await login('super@test.local');

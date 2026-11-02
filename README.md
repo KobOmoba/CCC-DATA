@@ -90,3 +90,14 @@ cd firestore && npm run test:e2e
 ```
 Set `CHROMIUM_PATH` to use an installed Chromium. Screenshots land in `firestore/screenshots/`.
 Open the app with `?emulator=1` to point it at local emulators instead of the live project.
+
+## AI-Assisted Data Entry (Phase 5)
+- Button under **Church Members**. Upload PDF, DOCX, TXT, CSV, XLSX or a photo/scan. PDF (pdf.js), DOCX (mammoth) and
+  XLSX/CSV (SheetJS) are read in the browser; photos and scanned PDFs go to vision AI.
+- Worker `ccc-ai` (`ai-worker/worker.js`, deploy with `ai-worker/deploy.sh`) at
+  `https://ccc-ai.aarinat-company-limited.workers.dev/extract`. Gemini (secret `GEMINI_API_KEY`), Groq fallback (`GROQ_API_KEY`).
+  It verifies the admin's Firebase ID token (RS256 against Google's public keys, project ccc-data-aarinat) and rate-limits
+  6/minute, 200/day per user. CORS: kobomoba.github.io (+ local test server).
+- Review screen: one card per person, Edit for per-field fixes, duplicate warning (same name or phone, starts unticked),
+  optional photo per card, consent required, **Save selected** uses the normal numbered `createRecord` path, so the rules apply.
+- Accuracy test: `firestore/ai-test/` (3 files + truth.json; `payloads.mjs`, `send.mjs`, `score.mjs`).

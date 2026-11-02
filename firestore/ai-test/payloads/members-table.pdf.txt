@@ -1,0 +1,50 @@
+CCC Parish Register - New Members
+Name   Sex   Marital   Address   Phone   Rank   Occupation   Birthday   Last anointed   Next of kin   NOK phone
+Oluwafemi
+Adekunle
+Bankole   M   Married
+5 Allen Avenue,
+Ikeja   08051112233
+Cape Elder
+Brother   Accountant
+2 February
+1982   25/12/2025
+Titilayo Bankole
+(5 Allen
+Avenue, Ikeja)   08051112234
+Omowunmi
+Folake
+Adesanya   F   Married
+18 Ijebu Road,
+Sagamu   07033334455
+Senior Elder
+Sister   Teacher   21 April 1979   1/1/2026
+Ayodele
+Adesanya (18
+Ijebu Road,
+Sagamu)   07033334456
+Kolawole
+Ayodeji Ojo   M   Single
+9 Oba Adesida
+Road, Akure   08164445566   Brother   Student   8 October 2001
+Comfort Ojo
+(Akure)   08164445500
+Ibukunoluwa
+Temitope Alade   F   Divorced
+41 Lagos Road,
+Ikorodu   09056667788   Sister   Hairdresser   14 July
+Funmilayo
+Alade (Ikorodu)   09056667700
+Olanrewaju
+Gbenga
+Oyelaran   M   Married
+2 Isale Eko
+Street, Lagos
+Island   08077778899
+Superior
+Evangelist   Civil servant
+29 January
+1958   24/12/2025
+Bolanle
+Oyelaran
+(Lagos Island)   08077778800
