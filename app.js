@@ -222,6 +222,9 @@ function showSection(id) {
     if (YOUNG[id] || id === "deaths") loadYoung(id, true).catch(e => alert("Could not load: " + e.message));
     if (id === "returns") openReturns().catch(e => alert("Could not load returns: " + e.message));
     if (id === "hqreturns") openHq().catch(e => alert("Could not load returns: " + e.message));
+    if (id === "directory") loadDirectory().catch(e => alert("Could not load the directory: " + e.message));
+    if (id === "staff") openStaff().catch(e => alert("Could not load staff: " + e.message));
+    if (id === "committees") openCommittees().catch(e => alert("Could not load committees: " + e.message));
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -254,6 +257,8 @@ async function loadParishData() {
     $("memberSearch").value = "";
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
+    // Phase 7: keep this parish's directory entries (Super Admin's church-wide directory) present and current.
+    localState.dirSync = syncDirectory().catch(e => console.error("directory sync", e.message));
 }
 
 function showTotals(s) {
@@ -457,6 +462,7 @@ async function createRecord(kind, p, extraWrites) {
         if (s.own) t.set(cRef, { n }); else t.update(cRef, { [s.key]: n });
         t.set(parishRef().collection(kind).doc(id), s.own ? { ...p, no: id } : { ...p, memberNo: id });
         if (kind === "clergy") t.set(db.collection("clergyIndex").doc(p.email), { parishId: localState.currentParishId, clergyId: id });
+        if (kind === "members") t.set(dirRef(localState.currentParishId, id), { ...dirProfile({ ...p, memberNo: id }), updatedAt: nowIso() }, { merge: true });
         t.set(statsRef(), { [s.stat]: inc(1) }, { merge: true });
         if (extraWrites) extraWrites(t, id);
         return id;
@@ -476,6 +482,7 @@ async function savePerson() {
                 const batch = db.batch();
                 batch.set(parishRef().collection(form.kind).doc(o.memberNo), merged);
                 if (form.kind === "clergy") batch.set(db.collection("clergyIndex").doc(p.email), { parishId: localState.currentParishId, clergyId: o.memberNo });
+                if (form.kind === "members") batch.set(dirRef(localState.currentParishId, o.memberNo), { ...dirProfile(merged), updatedAt: nowIso() }, { merge: true });
                 await batch.commit();
             } else {
                 p.status = "Active"; p.consentDate = today(); p.createdAt = nowIso();
@@ -724,7 +731,7 @@ async function loadWorld() {
         db.collectionGroup("clergy").get(),
         db.collectionGroup("members").where("important", "==", true).get()]);
     const parishOf = d => d.ref.parent.parent.id;
-    register = clergy.docs.map(d => ({ ...d.data(), parish: localState.parishNames[parishOf(d)] || parishOf(d) }));
+    register = clergy.docs.map(d => ({ ...d.data(), parishId: parishOf(d), parish: localState.parishNames[parishOf(d)] || parishOf(d) }));
     renderRegister();
     $("importantList").innerHTML = important.empty ? `<p class="text-xs text-gray-400 italic">No members flagged yet.</p>` :
         important.docs.map(d => worldCard({ ...d.data(), parish: localState.parishNames[parishOf(d)] })).join("");

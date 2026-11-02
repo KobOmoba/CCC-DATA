@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
     <script src="returns.js" defer></script>
+    <script src="hq.js" defer></script>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
 
@@ -74,6 +75,9 @@
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('parishes')" id="nav-parishes" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-earth-africa text-emerald-400 w-4"></i> Parishes</button>
                 <button onclick="showSection('hqreturns')" id="nav-hqreturns" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-scale-balanced text-emerald-300 w-4"></i> Monthly Returns (HQ)</button>
+                <button onclick="showSection('directory')" id="nav-directory" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-address-book text-sky-300 w-4"></i> Member Directory</button>
+                <button onclick="showSection('committees')" id="nav-committees" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-group text-pink-300 w-4"></i> Committees</button>
+                <button onclick="showSection('staff')" id="nav-staff" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-id-badge text-amber-300 w-4"></i> HQ Staff</button>
                 <button onclick="showSection('register')" id="nav-register" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy Register</button>
                 <button onclick="showSection('important')" id="nav-important" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-star text-amber-300 w-4"></i> Important Members</button>
                 <button onclick="showSection('flows')" id="nav-flows" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-cyan-300 w-4"></i> Diaspora Flows</button>
@@ -399,6 +403,43 @@
                         <div id="inviteResult" class="hidden bg-emerald-50 border border-emerald-300 rounded p-3"></div>
                     </div>
                     <div id="parishList" class="space-y-2"></div>
+                </section>
+
+                <!-- PHASE 7: church-wide member directory (work profile only) -->
+                <section id="section-directory" class="space-y-3 hidden">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Member Directory</h2><p class="text-xs text-gray-500">Work profile + church participation, for forming committees. Address, next of kin, birth year and family stay private to each parish.</p></div>
+                    <div class="flex gap-1 text-xs"><select id="dir_by" onchange="searchDirectory()" class="border p-2.5 rounded bg-white"><option value="name">Name</option><option value="parish">Parish</option><option value="city">City</option><option value="rank">Rank</option><option value="occupation">Occupation</option></select>
+                    <input type="search" id="dir_q" oninput="searchDirectory()" class="flex-1 min-w-0 border p-2.5 rounded" placeholder="Search"></div>
+                    <div id="dir_list" class="space-y-2"></div>
+                    <button id="dir_listMore" onclick="loadDirectory(true)" class="hidden w-full py-2 border rounded bg-white font-semibold text-xs">Load more</button>
+                </section>
+
+                <!-- PHASE 7: committees -->
+                <section id="section-committees" class="space-y-3 hidden">
+                    <div class="pb-2 border-b flex justify-between items-center"><div><h2 class="text-lg font-bold">Committees</h2><p class="text-xs text-gray-500">Members and clergy from any parish. Former members are kept.</p></div>
+                    <button onclick="openCommitteeForm()" id="newCmtBtn" class="px-3 py-2 bg-blue-900 text-white rounded font-bold text-xs">+ New</button></div>
+                    <div id="cm_nameBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-2">
+                        <p class="font-bold">Named accounts only: add your full name before any action.</p>
+                        <input id="cm_myName" class="w-full border p-2.5 rounded" placeholder="Your full name">
+                        <button onclick="$('hq_myName').value=$('cm_myName').value;saveMyName().then(()=>showSection('committees'))" class="w-full py-2 bg-amber-600 text-white font-bold rounded">Save my name</button>
+                    </div>
+                    <div id="cm_list" class="space-y-2"></div>
+                </section>
+
+                <!-- PHASE 7: HQ Staff (Product 2: CCC International administrative staff) -->
+                <section id="section-staff" class="space-y-3 hidden">
+                    <div class="pb-2 border-b flex justify-between items-center"><div><h2 class="text-lg font-bold">HQ Staff</h2><p class="text-xs text-gray-500">CCC International administrative staff. Named Super Admins only; every change is logged.</p></div>
+                    <button onclick="openStaffForm()" id="addStaffBtn" class="px-3 py-2 bg-blue-900 text-white rounded font-bold text-xs">+ Add</button></div>
+                    <div id="st_nameBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-2">
+                        <p class="font-bold">Named accounts only: add your full name before any action.</p>
+                        <input id="st_myName" class="w-full border p-2.5 rounded" placeholder="Your full name">
+                        <button onclick="$('hq_myName').value=$('st_myName').value;saveMyName().then(()=>showSection('staff'))" class="w-full py-2 bg-amber-600 text-white font-bold rounded">Save my name</button>
+                    </div>
+                    <div class="flex gap-1 text-xs"><input type="search" id="st_q" oninput="renderStaff()" class="flex-1 min-w-0 border p-2.5 rounded" placeholder="Search name, number, department">
+                    <select id="st_status" onchange="renderStaff()" class="border p-2.5 rounded bg-white"><option value="">All</option><option>Active</option><option>On leave</option><option>Retired</option><option>Left</option></select></div>
+                    <div id="st_list" class="space-y-2"></div>
+                    <div class="bg-white border rounded-xl text-xs"><p class="font-bold p-3 pb-0">Staff per department (active + on leave)</p><table class="w-full"><tbody id="st_byDept" class="divide-y"></tbody></table></div>
+                    <div class="bg-white border rounded-xl p-3 text-xs space-y-1"><p class="font-bold">Due to retire within 12 months (age 60)</p><div id="st_retire"></div><p id="st_noDob" class="text-amber-700"></p></div>
                 </section>
 
                 <section id="section-register" class="space-y-3 hidden">
@@ -728,6 +769,78 @@
             </header>
             <div id="recordBody" class="p-4 space-y-3"></div>
             <footer id="recordActions" class="bg-gray-50 p-3 border-t flex flex-wrap justify-end gap-2 rounded-b-xl"></footer>
+        </div>
+    </div>
+
+    <!-- PHASE 7 MODALS -->
+    <div id="dirModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span id="dirTitle"></span>
+                <button onclick="closeModal('dirModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div id="dirBody" class="p-4 space-y-1"></div>
+        </div>
+    </div>
+    <div id="staffModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span id="staffTitle"></span>
+                <button onclick="closeModal('staffModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div id="staffBody" class="p-4 space-y-1"></div>
+            <footer id="staffActions" class="bg-gray-50 p-3 border-t flex flex-wrap justify-end gap-2 rounded-b-xl"></footer>
+        </div>
+    </div>
+    <div id="staffFormModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span id="staffFormTitle"></span>
+                <button onclick="closeModal('staffFormModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-4 space-y-2">
+                <label class="block font-semibold">Full name *<input id="sf_name" type="text"  class="w-full border p-2.5 rounded mt-1 font-normal"></label>
+                <label class="block font-semibold">Photo<input id="sf_photo" type="file" accept="image/*" onchange="pickStaffPhoto(this)" class="w-full mt-1 font-normal"></label>
+                <img id="sf_photoPreview" alt="" class="hidden w-20 h-24 object-cover rounded">
+                <div class="grid grid-cols-2 gap-2"><label class="block font-semibold">Department / office *<input id="sf_dept" type="text"  class="w-full border p-2.5 rounded mt-1 font-normal"></label><label class="block font-semibold">Job title *<input id="sf_title" type="text"  class="w-full border p-2.5 rounded mt-1 font-normal"></label><label class="block font-semibold">Grade<input id="sf_grade" type="text"  class="w-full border p-2.5 rounded mt-1 font-normal"></label><label class="block font-semibold">Phone<input id="sf_phone" type="tel"  class="w-full border p-2.5 rounded mt-1 font-normal"></label></div>
+                <label class="block font-semibold">Email<input id="sf_email" type="email"  class="w-full border p-2.5 rounded mt-1 font-normal"></label>
+                <label class="block font-semibold">Category<select id="sf_category" onchange="setStaffLink('','')" class="w-full border p-2.5 rounded mt-1 bg-white font-normal"><option value="member">Member</option><option value="clergy">Clergy</option></select></label>
+                <div class="border rounded p-2 space-y-1"><p class="font-semibold">Parish record (optional): <span id="sf_linkText"></span></p><input type="hidden" id="sf_link">
+                <input id="sf_linkQ" oninput="findStaffLink()" class="w-full border p-2 rounded" placeholder="Type their name to find it"><div id="sf_linkFound" class="space-y-1"></div>
+                <button type="button" onclick="setStaffLink('','')" class="underline text-gray-500">Remove link</button></div>
+                <div class="grid grid-cols-2 gap-2"><label class="block font-semibold">Date of birth (full)<input id="sf_dob" type="date"  class="w-full border p-2.5 rounded mt-1 font-normal"></label><label class="block font-semibold">Employed *<input id="sf_employed" type="date"  class="w-full border p-2.5 rounded mt-1 font-normal"></label><label class="block font-semibold">Confirmed<input id="sf_confirmed" type="date"  class="w-full border p-2.5 rounded mt-1 font-normal"></label><label class="block font-semibold">Retired / left<input id="sf_exit" type="date"  class="w-full border p-2.5 rounded mt-1 font-normal"></label></div>
+                <label class="block font-semibold">Status<select id="sf_status" class="w-full border p-2.5 rounded mt-1 bg-white font-normal"><option>Active</option><option>On leave</option><option>Retired</option><option>Left</option></select></label>
+                <label class="flex gap-2 items-start"><input id="sf_consent" type="checkbox" class="w-5 h-5"><span>The staff member consents to HQ keeping these records (NDPA 2023).</span></label>
+                <div id="sf_reasonWrap"><label class="block font-semibold">Reason for this change *<input id="sf_reason" type="text"  class="w-full border p-2.5 rounded mt-1 font-normal"></label></div>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl"><button id="saveStaffBtn" onclick="saveStaff()" class="px-4 py-2 bg-blue-900 text-white rounded font-bold">Save</button></footer>
+        </div>
+    </div>
+    <div id="cmtModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span id="cmtTitle"></span>
+                <button onclick="closeModal('cmtModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div id="cmtBody" class="p-4 space-y-1"></div>
+            <footer id="cmtActions" class="bg-gray-50 p-3 border-t flex flex-wrap justify-end gap-2 rounded-b-xl"></footer>
+        </div>
+    </div>
+    <div id="cmtFormModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
+                <span id="cmtFormTitle"></span>
+                <button onclick="closeModal('cmtFormModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="p-4 space-y-2">
+                <label class="block font-semibold">Committee name *<input id="cf_name" type="text"  class="w-full border p-2.5 rounded mt-1 font-normal"></label>
+                <label class="block font-semibold">Purpose<textarea id="cf_purpose" rows="2" class="w-full border p-2.5 rounded mt-1 font-normal"></textarea></label>
+                <label class="block font-semibold">Duties<textarea id="cf_duties" rows="3" class="w-full border p-2.5 rounded mt-1 font-normal"></textarea></label>
+                <div class="grid grid-cols-2 gap-2"><label class="block font-semibold">Term starts *<input id="cf_start" type="date"  class="w-full border p-2.5 rounded mt-1 font-normal"></label><label class="block font-semibold">Term ends *<input id="cf_end" type="date"  class="w-full border p-2.5 rounded mt-1 font-normal"></label></div>
+                <label class="block font-semibold">Status<select id="cf_status" class="w-full border p-2.5 rounded mt-1 bg-white font-normal"><option>Active</option><option>Ended</option></select></label>
+                <div id="cf_reasonWrap"><label class="block font-semibold">Reason for this change *<input id="cf_reason" type="text"  class="w-full border p-2.5 rounded mt-1 font-normal"></label></div>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl"><button id="saveCmtBtn" onclick="saveCommittee()" class="px-4 py-2 bg-blue-900 text-white rounded font-bold">Save</button></footer>
         </div>
     </div>
 

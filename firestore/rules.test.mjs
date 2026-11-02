@@ -986,3 +986,142 @@ test('p6 currency: parish sets an ISO currency code; returns keep their own curr
   await assertFails(updateDoc(doc(as.adminA(), 'parishes/A'), { currency: 'pounds' }));
   await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-10', { currency: 'GBP' }));
 });
+
+// ================= Phase 7: HQ Staff, member directory, committees =================
+const audit7 = (db, target, v, action, extra = {}) => ({ ref: doc(db, 'auditLog/' + target.replace('/', '_') + '_v' + v),
+  data: { action, target, targetVersion: v, parishId: '', reason: '', before: null, after: null, by: 'uNamed', byEmail: 'bayo@x.org',
+    byName: 'Bayo Adeyemi', role: 'super_admin', at: serverTimestamp(), ...extra } });
+const staff = (no, extra = {}) => ({ staffNo: no, fullName: 'Kemi Ade', nameLower: 'kemi ade', photo: '', department: 'Finance',
+  jobTitle: 'Accountant', grade: 'GL-08', phone: '0803', email: '', category: 'member', linkParishId: '', linkNo: '',
+  dob: '1967-03-01', employedDate: '2010-01-04', confirmedDate: '', exitDate: '', status: 'Active', postings: [],
+  consentGiven: true, consentDate: '2026-11-02', version: 1, createdAt: '2026-11-02', updatedAt: '2026-11-02', updatedBy: 'uNamed', ...extra });
+async function addStaff(db, data = {}, uid = 'uNamed') {
+  return runTransaction(db, async (t) => {
+    const c = await t.get(doc(db, 'hqMeta/staff'));
+    const n = (c.exists() ? c.data().n : 0) + 1;
+    const id = 'CCC-HQ-STF-' + String(n).padStart(3, '0');
+    t.set(doc(db, 'hqMeta/staff'), { n });
+    t.set(doc(db, 'hqStaff/' + id), staff(id, { updatedBy: uid, ...data }));
+    const a = audit7(db, 'hqStaff/' + id, 1, 'create'); t.set(a.ref, { ...a.data, by: uid });
+    return id;
+  });
+}
+const dirDoc = (p, no, extra = {}) => ({ parishId: p, memberNo: no, fullName: 'Ade Bisi', nameLower: 'ade bisi', photo: '', gender: 'Female',
+  rank: '', occupation: 'Trader', occLower: 'trader', phone: '080', parishName: 'Parish ' + p, city: 'Lagos', cityLower: 'lagos',
+  country: 'Nigeria', status: 'Active', departments: [{ dept: 'choir', role: '', status: 'Current', from: '2026-01-01', to: '' }],
+  attendance: { streak: 3, lastSeen: '2026-11-01' }, rankHistory: [], anointed: {}, giving: { regular: true, byYear: { 2026: 50000 } },
+  committees: [], updatedAt: '2026-11-02', ...extra });
+const committee = (extra = {}) => ({ name: 'Harvest Planning', nameLower: 'harvest planning', purpose: 'Plan 2027 harvest', duties: 'Budget, venue',
+  termStart: '2026-11-01', termEnd: '2027-10-31', status: 'Active', version: 1, createdAt: '2026-11-02', createdBy: 'uNamed', updatedAt: '2026-11-02', updatedBy: 'uNamed', ...extra });
+async function auditedSet(db, path, data, v, action = 'create') {
+  const b = writeBatch(db); b.set(doc(db, path), data); const a = audit7(db, path, v, action); b.set(a.ref, a.data); return b.commit();
+}
+
+test('p7 HQ staff: named super creates CCC-HQ-STF-001 with audit; numbers in sequence; nobody else reads or writes', async () => {
+  await assertSucceeds(addStaff(as.named()));
+  await assertSucceeds(addStaff(as.named()));
+  const s2 = await getDoc(doc(as.named(), 'hqStaff/CCC-HQ-STF-002'));
+  assert(s2.data().staffNo, 'CCC-HQ-STF-002');
+  await assertFails(addStaff(as.superA(), {}, 'uSuper'));          // unnamed super
+  for (const who of [as.superA(), as.hq(), as.adminA(), as.stranger()]) {
+    await assertFails(getDoc(doc(who, 'hqStaff/CCC-HQ-STF-001')));
+    await assertFails(getDocs(collection(who, 'hqStaff')));
+  }
+  // Skipping a number, or no audit entry, is refused.
+  const db = as.named();
+  const b = writeBatch(db); b.set(doc(db, 'hqMeta/staff'), { n: 4 }); b.set(doc(db, 'hqStaff/CCC-HQ-STF-004'), staff('CCC-HQ-STF-004'));
+  const a = audit7(db, 'hqStaff/CCC-HQ-STF-004', 1, 'create'); b.set(a.ref, a.data);
+  await assertFails(b.commit());
+  const b2 = writeBatch(db); b2.set(doc(db, 'hqMeta/staff'), { n: 3 }); b2.set(doc(db, 'hqStaff/CCC-HQ-STF-003'), staff('CCC-HQ-STF-003'));
+  await assertFails(b2.commit());
+});
+test('p7 HQ staff: updates bump version + audit; Retired/Left need an exit date; never deleted; consent required', async () => {
+  const db = as.named();
+  await addStaff(db);
+  const ref = 'hqStaff/CCC-HQ-STF-001';
+  await assertFails(updateDoc(doc(db, ref), { grade: 'GL-09', version: 2 }));  // no audit
+  await assertFails(auditedSet(db, ref, staff('CCC-HQ-STF-001', { grade: 'GL-09', version: 1 }), 1, 'update')); // no bump
+  await assertSucceeds(auditedSet(db, ref, staff('CCC-HQ-STF-001', { grade: 'GL-09', version: 2 }), 2, 'update'));
+  await assertFails(auditedSet(db, ref, staff('CCC-HQ-STF-001', { status: 'Retired', version: 3 }), 3, 'update'));
+  await assertSucceeds(auditedSet(db, ref, staff('CCC-HQ-STF-001', { status: 'Retired', exitDate: '2026-11-30', version: 3 }), 3, 'update'));
+  await assertFails(deleteDoc(doc(db, ref)));
+  await assertFails(addStaff(db, { consentGiven: false }));
+  await assertFails(addStaff(db, { address: 'Lagos' }));   // unknown field
+});
+test('p7 HQ staff: link to a parish clergy/member record must exist; documents <=250KB image/PDF; leave records', async () => {
+  const db = as.named();
+  await assertFails(addStaff(db, { category: 'clergy', linkParishId: 'A', linkNo: 'CCC-CLG-009' }));
+  await assertSucceeds(addStaff(db, { category: 'clergy', linkParishId: 'A', linkNo: 'CCC-CLG-001' }));
+  await assertFails(addStaff(db, { category: 'member', linkParishId: 'A', linkNo: 'CCC-MBR-001' })); // no directory doc yet
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'directory/A_CCC-MBR-001'), dirDoc('A', 'CCC-MBR-001')));
+  await assertSucceeds(addStaff(db, { category: 'member', linkParishId: 'A', linkNo: 'CCC-MBR-001' }));
+  const file = (data) => ({ staffNo: 'CCC-HQ-STF-001', kind: 'CV', name: 'cv.pdf', data, version: 1, at: serverTimestamp(), by: 'uNamed', byName: 'Bayo Adeyemi' });
+  await assertSucceeds(auditedSet(db, 'hqStaffFiles/f1', file('data:application/pdf;base64,' + 'A'.repeat(300000)), 1));
+  await assertSucceeds(auditedSet(db, 'hqStaffFiles/f2', file('data:image/jpeg;base64,' + 'A'.repeat(1000)), 1));
+  await assertFails(auditedSet(db, 'hqStaffFiles/f3', file('data:application/pdf;base64,' + 'A'.repeat(360000)), 1));
+  await assertFails(auditedSet(db, 'hqStaffFiles/f4', file('data:text/html;base64,AAAA'), 1));
+  await assertFails(deleteDoc(doc(db, 'hqStaffFiles/f1')));
+  const leave = (extra = {}) => ({ staffNo: 'CCC-HQ-STF-001', type: 'Annual', from: '2026-12-01', to: '2026-12-20', note: '', version: 1, at: serverTimestamp(), by: 'uNamed', ...extra });
+  await assertSucceeds(auditedSet(db, 'hqLeave/l1', leave(), 1));
+  await assertFails(auditedSet(db, 'hqLeave/l2', leave({ to: '2026-11-01' }), 1));
+  await assertFails(auditedSet(db, 'hqLeave/l3', leave({ staffNo: 'CCC-HQ-STF-099' }), 1));
+  await assertFails(getDoc(doc(as.superA(), 'hqLeave/l1')));
+  await assertFails(getDoc(doc(as.adminA(), 'hqStaffFiles/f1')));
+});
+test('p7 directory: parish writes its own projection; no private fields; other parish and HQ cannot read', async () => {
+  const a = as.adminA();
+  await assertSucceeds(setDoc(doc(a, 'directory/A_CCC-MBR-001'), dirDoc('A', 'CCC-MBR-001')));
+  for (const k of ['address', 'nokName', 'dobYear', 'family'])
+    await assertFails(setDoc(doc(a, 'directory/A_CCC-MBR-002'), dirDoc('A', 'CCC-MBR-002', { fullName: 'Head Choir', nameLower: 'head choir', [k]: 'x' })));
+  await assertFails(setDoc(doc(a, 'directory/A_CCC-MBR-009'), dirDoc('A', 'CCC-MBR-009')));          // no such member
+  await assertFails(setDoc(doc(a, 'directory/A_CCC-MBR-002'), dirDoc('A', 'CCC-MBR-002')));          // name must match the record
+  await assertFails(setDoc(doc(as.adminB(), 'directory/A_CCC-MBR-002'), dirDoc('A', 'CCC-MBR-002', { fullName: 'Head Choir', nameLower: 'head choir' })));
+  await assertFails(setDoc(doc(a, 'directory/A_CCC-MBR-002'), dirDoc('A', 'CCC-MBR-002', { fullName: 'Head Choir', nameLower: 'head choir', committees: [{ name: 'x' }] })));
+  await assertSucceeds(getDoc(doc(a, 'directory/A_CCC-MBR-001')));
+  await assertSucceeds(getDocs(query(collection(a, 'directory'), where('parishId', '==', 'A'))));
+  await assertFails(getDoc(doc(as.adminB(), 'directory/A_CCC-MBR-001')));
+  await assertFails(getDocs(collection(as.adminB(), 'directory')));
+  await assertFails(getDoc(doc(as.hq(), 'directory/A_CCC-MBR-001')));
+  await assertFails(getDoc(doc(as.stranger(), 'directory/A_CCC-MBR-001')));
+  await assertSucceeds(getDocs(query(collection(as.superA(), 'directory'), orderBy('nameLower'), limit(20))));
+  await assertSucceeds(getDocs(query(collection(as.superA(), 'directory'), where('rank', '==', ''), limit(20))));
+  await assertFails(setDoc(doc(as.named(), 'directory/A_CCC-MBR-001'), dirDoc('A', 'CCC-MBR-001', { phone: '1' })));
+  await assertFails(deleteDoc(doc(a, 'directory/A_CCC-MBR-001')));
+  await assertFails(deleteDoc(doc(as.named(), 'directory/A_CCC-MBR-001')));
+});
+test('p7 directory: parish cannot change committees; super changes only committees', async () => {
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'directory/A_CCC-MBR-001'), dirDoc('A', 'CCC-MBR-001')));
+  await assertFails(updateDoc(doc(as.adminA(), 'directory/A_CCC-MBR-001'), { committees: [{ name: 'Fake' }] }));
+  await assertSucceeds(updateDoc(doc(as.adminA(), 'directory/A_CCC-MBR-001'), { occupation: 'Banker', occLower: 'banker' }));
+  await assertSucceeds(updateDoc(doc(as.named(), 'directory/A_CCC-MBR-001'), { committees: [{ id: 'c1', name: 'Harvest', role: 'Chair' }] }));
+  await assertFails(updateDoc(doc(as.superA(), 'directory/A_CCC-MBR-001'), { committees: [] }));   // unnamed
+  // Parish keeps committees when it refreshes (merge write).
+  await assertSucceeds(setDoc(doc(as.adminA(), 'directory/A_CCC-MBR-001'), { occupation: 'Teacher', occLower: 'teacher' }, { merge: true }));
+});
+test('p7 committees: named super creates with audit; members from directory, clergy by clergy number; former kept', async () => {
+  const db = as.named();
+  await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), 'directory/A_CCC-MBR-001'), dirDoc('A', 'CCC-MBR-001')));
+  await assertFails(setDoc(doc(db, 'committees/c1'), committee()));                                  // no audit
+  await assertFails(auditedSet(db, 'committees/c1', committee({ termEnd: '2026-01-01' }), 1));       // end before start
+  await assertFails(auditedSet(as.superA(), 'committees/c1', committee({ updatedBy: 'uSuper' }), 1));
+  await assertSucceeds(auditedSet(db, 'committees/c1', committee(), 1));
+  const cm = (p, no, extra = {}) => ({ committeeId: 'c1', committeeName: 'Harvest Planning', parishId: p, parishName: 'Parish ' + p, personNo: no,
+    fullName: 'Ade Bisi', isClergy: no.includes('CLG'), role: 'Member', status: 'Current', joinedDate: '2026-11-02', leftDate: '', version: 1,
+    updatedAt: '2026-11-02', updatedBy: 'uNamed', ...extra });
+  await assertSucceeds(auditedSet(db, 'committeeMembers/c1_A_CCC-MBR-001', cm('A', 'CCC-MBR-001', { role: 'Chair' }), 1));
+  await assertSucceeds(auditedSet(db, 'committeeMembers/c1_A_CCC-CLG-001', cm('A', 'CCC-CLG-001', { role: 'Secretary' }), 1));
+  await assertFails(auditedSet(db, 'committeeMembers/c1_A_CCC-MBR-002', cm('A', 'CCC-MBR-002'), 1));   // not in the directory
+  await assertFails(auditedSet(db, 'committeeMembers/c1_A_CCC-CLG-001x', cm('A', 'CCC-CLG-001'), 1));  // id mismatch
+  await assertFails(auditedSet(db, 'committeeMembers/c1_A_CCC-CLG-001', cm('A', 'CCC-CLG-001', { isClergy: false, version: 2 }), 2, 'update'));
+  await assertFails(auditedSet(db, 'committeeMembers/c1_A_CCC-MBR-001', cm('A', 'CCC-MBR-001', { status: 'Former', version: 2 }), 2, 'update')); // no leftDate
+  await assertSucceeds(auditedSet(db, 'committeeMembers/c1_A_CCC-MBR-001', cm('A', 'CCC-MBR-001', { status: 'Former', leftDate: '2026-12-01', version: 2 }), 2, 'update'));
+  await assertFails(deleteDoc(doc(db, 'committeeMembers/c1_A_CCC-MBR-001')));
+  await assertFails(deleteDoc(doc(db, 'committees/c1')));
+  for (const who of [as.hq(), as.adminA()]) {
+    await assertFails(getDoc(doc(who, 'committees/c1')));
+    await assertFails(getDoc(doc(who, 'committeeMembers/c1_A_CCC-MBR-001')));
+  }
+  // Audit trail exists for every change.
+  const log = await getDocs(query(collection(db, 'auditLog'), where('target', '==', 'committeeMembers/c1_A_CCC-MBR-001')));
+  assert(log.size, 2);
+});

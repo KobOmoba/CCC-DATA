@@ -55,6 +55,15 @@ with the invited email + code.
   in the same write. It leaves the counts and is never deleted.
 - **Certificates**: birth and death certificates (church name, parish logo, number, signature lines). Print / Save as PDF from the browser.
   Issued by the parish admin only. parishStats gains birthCount, childCount, teenCount, deathCount (Super Admin / HQ: totals only).
+- **Phase 7 (Super Admin)**, `hq.js`:
+  - **HQ Staff** (Product 2): `hqStaff/CCC-HQ-STF-001` (counter `hqMeta/staff`), postings history, `hqStaffFiles` (image/PDF <= ~250KB),
+    `hqLeave`. Reports: staff per department, due to retire within 12 months (age 60, needs a full DOB). Named Super Admins only.
+  - **Member directory**: `directory/{parishId}_{memberNo}` = work profile + participation (departments, attendance streak,
+    rank history, anointment, regular giver + yearly totals). No address, next of kin, birth year or family. The parish writes it
+    with each member save and refreshes/backfills it whenever the parish admin opens the app. Super Admin searches by name, parish,
+    city, rank or occupation. Only the Super Admin changes `committees` on it.
+  - **Committees**: `committees/{id}` + `committeeMembers/{committee}_{parish}_{no}` (Chair / Secretary / Member; clergy allowed by
+    clergy number; former members kept). Every Super Admin change is versioned and written to `auditLog`. Nothing is deleted.
 - `flows/{id}` - places + year only (no names); Super Admin's "Diaspora Flows" summary.
 
 ## Set up Firebase later (on your phone)
