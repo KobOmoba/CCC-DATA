@@ -64,6 +64,35 @@ with the invited email + code.
     city, rank or occupation. Only the Super Admin changes `committees` on it.
   - **Committees**: `committees/{id}` + `committeeMembers/{committee}_{parish}_{no}` (Chair / Secretary / Member; clergy allowed by
     clergy number; former members kept). Every Super Admin change is versioned and written to `auditLog`. Nothing is deleted.
+- **Phase 9** (`p9.js`, `website/`):
+  - **Sermon Library**: `parishes/{p}/sermons/{id}` (title, preacher name or clergy number, date, service type, scripture, tags,
+    transcript text up to 200k chars, `mediaUrl` = an https LINK to YouTube / Google Drive / Facebook; Firebase Storage is not enabled).
+    "Share church-wide" also writes `sharedSermons/{parish}_{id}` (read by every active parish admin, the Super Admin and the Church Head;
+    unsharing deletes only that copy). Search by title, preacher, #tag, scripture or date over the newest 200.
+  - **Calendar**: the Phase 3 timetable (`weekServices`) + special services + `parishes/{p}/events/{id}` (meeting, harvest, anniversary,
+    crusade) with volunteer `slots` `[{role, needed, assigned:[{no,name}]}]`. Month + list views. Dashboard card "Upcoming this week":
+    events, birthdays (dobDay/dobMonth) and wedding anniversaries (new optional `weddingDay`/`weddingMonth` on the member form), services.
+  - **Messages**: templates birthday / anniversary / absent / event / general with `{name}` `{parish}` `{date}`; recipients from members,
+    units or departments. WhatsApp = one wa.me tap per person with a next queue; email = `mailto:` BCC batches of 40 ({name} -> "Beloved").
+    `parishes/{p}/messageLog` keeps ONLY template, channel, member number, name, server time, sender (rules refuse text/phone/email).
+  - **Change parish admin** (Super Admin, Parishes page): new invite + `adminHandovers/{id}` (versioned, every step in `auditLog` with a reason).
+    Default: the old admin keeps access until the new admin activates the invite (two admins for that short time), then the next time the
+    Super Admin opens Parishes the handover completes. "Revoke now" removes the old admin at once. Revoked = `users/{uid}.role = 'revoked'`
+    (kept, not deleted) + `adminEmails` entry removed. The rules refuse to revoke or delete a parish admin outside an audited handover.
+  - **Public website** (`website/`, no login, no cookies): Home, About & beliefs, Find a parish, Service times, Events, Sermons, Contact,
+    Privacy (NDPA). Reads only `publicParishes` (name, city, country, map link, service times), `publicEvents`, `publicSermons`, which only
+    the Super Admin publishes (Public Website page). Firestore REST, no SDK. Served at `/site` through `vercel.json`.
+
+### WhatsApp Business Cloud API (later)
+Today `sendWhatsApp(to, text)` in `p9.js` opens wa.me. To send automatically, the church needs: its own **Meta Business account**
+(verified), a **WhatsApp Business phone number** added in Meta's WhatsApp Manager (gives a **phone number ID**), a **permanent access token**
+(System User token with `whatsapp_business_messaging`), and **approved message templates** (business-started messages outside the 24-hour
+window must use one). The token must live on a server (e.g. a new `/whatsapp` route on the Cloudflare `ai-worker`, as a secret), never in
+the browser. Then replace `MessagingAdapter.whatsapp.send` with a call to that route; the log stays the same.
+
+### Public website hosting
+`vercel.json` rewrites `/site` and `/site/*` to `website/`, so after the next deploy it is at
+`https://ccc-parish-portal.vercel.app/site`. Alternative: a second Vercel project with **Root Directory = `website`** (works as-is; all links are relative).
 - `flows/{id}` - places + year only (no names); Super Admin's "Diaspora Flows" summary.
 
 ## Set up Firebase later (on your phone)

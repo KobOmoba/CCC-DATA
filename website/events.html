@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>if (location.pathname === "/site") document.write('<base href="/site/">');</script>
+<title>Events · Celestial Church of Christ</title>
+<meta name="description" content="Upcoming Celestial Church of Christ events: harvests, crusades, anniversaries.">
+<meta name="theme-color" content="#1e3a8a">
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<main>
+<h1>Events</h1>
+<div id="events"><p class="empty">Loading…</p></div>
+<script>document.addEventListener("DOMContentLoaded", () => renderEvents(document.getElementById("events")));</script>
+</main>
+</body>
+</html>

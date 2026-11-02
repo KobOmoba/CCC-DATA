@@ -200,6 +200,10 @@ async function onAuthChanged(user) {
             return auth.signOut();
         }
         const { role, parishId, name } = prof.data();
+        if (role === "revoked") {
+            alert("Your admin access for this parish has been handed over to a new admin. Contact the Super Admin if this is wrong.");
+            return auth.signOut();
+        }
         localState = { user, role, currentParishId: parishId || "", parish: {}, name: name || "" };
         const isParish = role === "parish_admin";
         document.querySelectorAll(".parish-only").forEach(el => el.classList.toggle("hidden", !isParish));
@@ -239,6 +243,11 @@ function showSection(id) {
     if (id === "ai") openAiDashboard().catch(e => alert("Could not load the AI dashboard: " + e.message));
     if (id === "postings") openPostings().catch(e => alert("Could not load postings: " + e.message));
     if (id === "committees") openCommittees().catch(e => alert("Could not load committees: " + e.message));
+    if (id === "sermons") openSermons().catch(e => alert("Could not load sermons: " + e.message));
+    if (id === "calendar") openCalendar().catch(e => alert("Could not load the calendar: " + e.message));
+    if (id === "messages") openMessages().catch(e => alert("Could not load messages: " + e.message));
+    if (id === "parishes" && localState.role === "super_admin") completeClaimedHandovers().catch(e => console.error("handovers", e.message));
+    if (id === "website") openWebsite().catch(e => alert("Could not load the website settings: " + e.message));
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -265,11 +274,12 @@ async function loadParishData() {
     localState.parish = pDoc.exists ? pDoc.data() : {};
     showBranding(localState.parish);
     fillSettingsForm(localState.parish);
-    $("welcomeTitle").textContent = "Shalom, " + (localState.parish.name || "Parish") + "!";
+    $("welcomeTitle").textContent = "Halleluyah, " + (localState.parish.name || "Parish") + "!";
     const st = await statsRef().get().catch(() => null);
     showTotals(st && st.exists ? st.data() : {});
     $("memberSearch").value = "";
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
+    renderWeekCard().catch(e => console.error("week card", e.message)); // Phase 9
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
     // Phase 8: record activity for the "no activity for 30 days" alert, and apply any clergy posting now due.
     await markParishActive().catch(e => console.error("activity", e.message));
@@ -430,6 +440,7 @@ function openPersonForm(kind, existing) {
     set("p_name", p.fullName); set("p_gender", p.gender); set("p_marital", p.maritalStatus); set("p_address", p.address);
     set("p_phone", p.phone); set("p_email", p.email); fillRanks(p.rank); set("p_occupation", p.occupation);
     set("p_dobDay", p.dobDay); set("p_dobMonth", p.dobMonth); set("p_dobYear", p.dobYear);
+    set("p_wedDay", p.weddingDay); set("p_wedMonth", p.weddingMonth);
     set("p_anDay", p.anointDay); set("p_anMonth", p.anointMonth); set("p_anYear", p.anointYear);
     set("p_nokName", p.nokName); set("p_nokAddress", p.nokAddress); set("p_nokPhone", p.nokPhone);
     set("p_joined", p.joinedDate || (kind === "clergy" ? today() : ""));
@@ -450,6 +461,7 @@ function readPersonForm() {
         fullName: val("p_name"), gender: val("p_gender"), maritalStatus: val("p_marital"), address: val("p_address"),
         phone: val("p_phone"), email: val("p_email").toLowerCase(), rank: val("p_rank"), occupation: val("p_occupation"),
         dobDay: intOrNull("p_dobDay"), dobMonth: intOrNull("p_dobMonth"), dobYear: intOrNull("p_dobYear"),
+        weddingDay: intOrNull("p_wedDay"), weddingMonth: intOrNull("p_wedMonth"),
         anointDay: intOrNull("p_anDay"), anointMonth: intOrNull("p_anMonth"), anointYear: intOrNull("p_anYear"),
         nokName: val("p_nokName"), nokAddress: val("p_nokAddress"), nokPhone: val("p_nokPhone"),
         photo: form.photo || "", important: $("p_important").checked, consentGiven: $("p_consent").checked,
@@ -725,7 +737,7 @@ async function saveParishSettings() {
 // ---------------------------------------------------------------- super admin / HQ world view
 let register = [];
 async function loadWorld() {
-    $("welcomeTitle").textContent = localState.role === "super_admin" ? "Shalom, Super Admin!" : localState.role === "church_head" ? `Shalom, ${localState.name || "Church Head"}!` : "Shalom, HQ!";
+    $("welcomeTitle").textContent = localState.role === "super_admin" ? "Halleluyah, Super Admin!" : localState.role === "church_head" ? `Halleluyah, ${localState.name || "Church Head"}!` : "Halleluyah, HQ!";
     $("welcomeSub").textContent = "Totals for all parishes. Ordinary member records stay private to each parish.";
     $("dashParishName").textContent = "World-wide";
     const [parishes, stats] = await Promise.all([db.collection("parishes").get(), db.collection("parishStats").get()]);
@@ -744,7 +756,8 @@ async function loadWorld() {
     if (localState.role !== "super_admin") return;
     $("parishList").innerHTML = parishes.docs.map(d => { const p = d.data();
         return `<div class="bg-white border rounded-xl p-3 text-xs"><p class="font-bold">${esc(p.name)} <span class="text-gray-400">${esc(p.status)}</span></p>
-            <p>Parish code: ${p.code ? `<span class="font-mono font-bold">${esc(p.code)}</span>` : `<button onclick="giveParishCode('${esc(d.id)}')" class="underline text-blue-700">Give a parish code</button>`}</p><p>Lettering: ${p.parishLetters ? `<span class="font-mono font-bold">${esc(p.parishLetters)}-${esc(p.cityLetters)}</span>` : `<button onclick="setLettering('${esc(d.id)}')" class="underline text-blue-700">Set parish lettering</button>`}</p><p class="text-gray-500">${esc([p.address, p.city, p.state, p.country, p.continent].filter(Boolean).join(", "))}</p></div>`; }).join("");
+            <p>Parish code: ${p.code ? `<span class="font-mono font-bold">${esc(p.code)}</span>` : `<button onclick="giveParishCode('${esc(d.id)}')" class="underline text-blue-700">Give a parish code</button>`}</p><p>Lettering: ${p.parishLetters ? `<span class="font-mono font-bold">${esc(p.parishLetters)}-${esc(p.cityLetters)}</span>` : `<button onclick="setLettering('${esc(d.id)}')" class="underline text-blue-700">Set parish lettering</button>`}</p><p class="text-gray-500">${esc([p.address, p.city, p.state, p.country, p.continent].filter(Boolean).join(", "))}</p>
+            <button onclick="changeAdmin('${esc(d.id)}')" class="chg-admin mt-1 px-2 py-1 border rounded text-blue-800"><i class="fa-solid fa-user-gear"></i> Change parish admin</button></div>`; }).join("");
     const [clergy, important] = await Promise.all([
         db.collectionGroup("clergy").get(),
         db.collectionGroup("members").where("important", "==", true).get()]);
@@ -886,8 +899,8 @@ function waLink(phone, text) {
     if (d.startsWith("0") && d.length === 11) d = "234" + d.slice(1);
     return `https://wa.me/${d}?text=${encodeURIComponent(text)}`;
 }
-const missText = name => `Shalom ${String(name).split(" ")[0]}, we have missed you at ${localState.parish.name || "church"}. We pray all is well with you and your family, and we look forward to seeing you in service soon. God bless you.`;
-const visitText = name => `Shalom ${String(name).split(" ")[0]}, thank you for worshipping with us at ${localState.parish.name || "our parish"}. You are always welcome. God bless you.`;
+const missText = name => `Halleluyah ${String(name).split(" ")[0]}, we have missed you at ${localState.parish.name || "church"}. We pray all is well with you and your family, and we look forward to seeing you in service soon. God bless you.`;
+const visitText = name => `Halleluyah ${String(name).split(" ")[0]}, thank you for worshipping with us at ${localState.parish.name || "our parish"}. You are always welcome. God bless you.`;
 
 let att = { week: "", specials: [], records: {}, people: [], clergy: [], svc: null, reports: null, cleaning: null };
 

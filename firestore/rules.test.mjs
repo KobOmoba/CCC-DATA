@@ -1291,3 +1291,140 @@ test('p8 AI dashboard data: rollups + snapshots + summaries readable by super an
   await assertSucceeds(b.commit());
 });
 
+
+// ---------------------------------------------------------------- Phase 9
+const sermon = (extra = {}) => ({ title: 'Walk in the Light', titleLower: 'walk in the light', preacher: 'Ven Olu', preacherNo: 'CCC-CLG-001',
+  date: '2026-11-01', serviceType: 'Sunday Service', scripture: 'John 8:12', tags: ['light', 'faith'], text: 'Beloved...',
+  mediaUrl: 'https://youtu.be/abc', shared: false, parishId: 'A', parishName: 'Parish A', createdAt: 'x', updatedAt: 'x', ...extra });
+test('p9 sermons: own parish only; link not file; bad shapes refused', async () => {
+  const a = as.adminA();
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/sermons/s1'), sermon()));
+  await assertSucceeds(getDoc(doc(a, 'parishes/A/sermons/s1')));
+  await assertFails(setDoc(doc(a, 'parishes/A/sermons/s2'), sermon({ mediaUrl: 'http://insecure' })));
+  await assertFails(setDoc(doc(a, 'parishes/A/sermons/s2'), sermon({ audio: 'data:audio/mp3;base64,AAAA' })));
+  await assertFails(setDoc(doc(a, 'parishes/A/sermons/s2'), sermon({ titleLower: 'other' })));
+  await assertFails(setDoc(doc(a, 'parishes/A/sermons/s2'), sermon({ parishId: 'B' })));
+  await assertFails(deleteDoc(doc(a, 'parishes/A/sermons/s1')));
+  for (const who of [as.adminB(), as.superA(), as.hq(), as.stranger()]) await assertFails(getDoc(doc(who, 'parishes/A/sermons/s1')));
+  await assertFails(setDoc(doc(as.adminB(), 'parishes/A/sermons/s3'), sermon()));
+});
+test('p9 shared sermons: owning parish shares/unshares; every parish admin + super read; strangers not', async () => {
+  const a = as.adminA();
+  await assertSucceeds(setDoc(doc(a, 'sharedSermons/A_s1'), sermon({ shared: true })));
+  await assertFails(setDoc(doc(a, 'sharedSermons/B_s1'), sermon({ shared: true, parishId: 'B' })));
+  await assertFails(setDoc(doc(as.adminB(), 'sharedSermons/A_s2'), sermon({ shared: true })));
+  await assertFails(setDoc(doc(a, 'sharedSermons/A_s3'), sermon({ shared: false })));
+  for (const who of [as.adminB(), as.superA(), a]) await assertSucceeds(getDocs(collection(who, 'sharedSermons')));
+  for (const who of [as.adminS(), as.hq(), as.stranger(), as.noRole()]) await assertFails(getDoc(doc(who, 'sharedSermons/A_s1')));
+  await assertFails(deleteDoc(doc(as.adminB(), 'sharedSermons/A_s1')));
+  await assertSucceeds(deleteDoc(doc(a, 'sharedSermons/A_s1')));
+});
+test('p9 events with volunteer slots: own parish only', async () => {
+  const a = as.adminA();
+  const ev = { title: 'Harvest 2026', kind: 'harvest', date: '2026-11-22', time: '10:00', venue: 'Main church', notes: '',
+    slots: [{ role: 'Ushers', needed: 4, assigned: [{ no: 'CCC-MBR-001', name: 'Ade Bisi' }] }], createdAt: 'x', updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/events/e1'), ev));
+  await assertFails(setDoc(doc(a, 'parishes/A/events/e2'), { ...ev, kind: 'party' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/events/e2'), { ...ev, time: '9am' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/events/e2'), { ...ev, secret: 'x' }));
+  for (const who of [as.adminB(), as.superA(), as.hq()]) await assertFails(getDoc(doc(who, 'parishes/A/events/e1')));
+});
+test('p9 message log: who/when/template only, never content; append-only', async () => {
+  const a = as.adminA();
+  const log = { template: 'birthday', channel: 'whatsapp', to: 'CCC-MBR-001', name: 'Ade Bisi', at: serverTimestamp(), by: 'uA' };
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/messageLog/m1'), log));
+  await assertFails(setDoc(doc(a, 'parishes/A/messageLog/m2'), { ...log, text: 'Happy birthday Ade' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/messageLog/m2'), { ...log, phone: '0803' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/messageLog/m2'), { ...log, template: 'promo' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/messageLog/m2'), { ...log, by: 'uB' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/messageLog/m2'), { ...log, at: '2026-01-01' }));
+  await assertFails(updateDoc(doc(a, 'parishes/A/messageLog/m1'), { name: 'X' }));
+  await assertFails(deleteDoc(doc(a, 'parishes/A/messageLog/m1')));
+  await assertFails(getDoc(doc(as.adminB(), 'parishes/A/messageLog/m1')));
+});
+test('p9 wedding anniversary on a member (optional day + month)', async () => {
+  const a = as.adminA();
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { weddingDay: 14, weddingMonth: 2 }));
+  await assertFails(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { weddingMonth: 13 }));
+});
+test('p9 public website: anyone reads; only super publishes; public fields only', async () => {
+  const pub = { name: 'Parish A', nameLower: 'parish a', city: 'Lagos', cityLower: 'lagos', country: 'Nigeria', countryLower: 'nigeria',
+    mapsUrl: 'https://maps.app.goo.gl/x', services: [{ day: 'Sun', time: '10:00', name: 'Sunday Service' }], updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(as.superA(), 'publicParishes/A'), pub));
+  await assertFails(setDoc(doc(as.superA(), 'publicParishes/A'), { ...pub, address: '12 Secret Close' }));
+  await assertFails(setDoc(doc(as.superA(), 'publicParishes/A'), { ...pub, adminEmail: 'a@x.org' }));
+  await assertFails(setDoc(doc(as.superA(), 'publicParishes/A'), { ...pub, nameLower: 'wrong' }));
+  await assertFails(setDoc(doc(as.superA(), 'publicParishes/NOPE'), pub));
+  for (const who of [as.adminA(), as.hq(), as.stranger()]) await assertFails(setDoc(doc(who, 'publicParishes/A'), pub));
+  await assertSucceeds(getDocs(query(collection(as.stranger(), 'publicParishes'), orderBy('nameLower'), limit(20))));
+  await assertSucceeds(getDoc(doc(as.stranger(), 'publicParishes/A')));
+  // The private records stay closed to the public.
+  await assertFails(getDoc(doc(as.stranger(), 'parishes/A')));
+  await assertFails(getDocs(collection(as.stranger(), 'parishStats')));
+  await assertFails(getDocs(collection(as.stranger(), 'sharedSermons')));
+  const ps = { title: 'Walk in the Light', preacher: 'Ven Olu', date: '2026-11-01', scripture: 'John 8:12', mediaUrl: 'https://youtu.be/abc', parishName: 'Parish A', summary: 'Short', updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(as.superA(), 'publicSermons/A_s1'), ps));
+  await assertFails(setDoc(doc(as.superA(), 'publicSermons/A_s2'), { ...ps, text: 'full transcript' }));
+  await assertFails(setDoc(doc(as.adminA(), 'publicSermons/A_s3'), ps));
+  const pe = { title: 'Crusade', date: '2026-12-05', time: '16:00', venue: 'Stadium', city: 'Lagos', notes: '', updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(as.superA(), 'publicEvents/e1'), pe));
+  await assertFails(setDoc(doc(as.adminA(), 'publicEvents/e2'), pe));
+  await assertSucceeds(getDocs(collection(as.stranger(), 'publicEvents')));
+  await assertSucceeds(getDocs(collection(as.stranger(), 'publicSermons')));
+  await assertSucceeds(deleteDoc(doc(as.superA(), 'publicParishes/A')));
+});
+
+// ---------------------------------------------------------------- Phase 9: change parish admin (handover)
+const hoStart = (db, id, mode = 'on_claim', extra = {}) => {
+  const b = writeBatch(db);
+  b.set(doc(db, 'invites/HANDOVERCODE-00000001'), { email: 'new@x.org', parishId: 'A', role: 'parish_admin', usedBy: null, createdAt: 'x' });
+  b.set(doc(db, 'adminHandovers/' + id), { parishId: 'A', parishName: 'Parish A', newEmail: 'new@x.org', inviteCode: 'HANDOVERCODE-00000001',
+    oldAdmins: [{ uid: 'uA', email: 'a@x.org' }], mode, status: 'Pending', reason: 'Real admin appointed', version: 1, createdAt: 'x', updatedAt: 'x', revokedAt: '', by: 'uNamed', ...extra });
+  auditW(b, db, 'adminHandovers/' + id, 1, 'admin-handover-start', '', 'Real admin appointed');
+  return b;
+};
+const revoke = (b, db, id) => { b.update(doc(db, 'users/uA'), { role: 'revoked', handoverId: id, revokedAt: 'x', revokedBy: 'uNamed' }); b.delete(doc(db, 'adminEmails/a@x.org')); };
+test('p9 handover: named super starts it (invite + audited record); two admins coexist until claimed', async () => {
+  const sup = as.named();
+  await assertFails(hoStart(as.superA(), 'h0').commit());                     // unnamed super: refused
+  const nb = hoStart(sup, 'h1'); await assertSucceeds(nb.commit());
+  const bad = writeBatch(sup);                                                 // no audit entry: refused
+  bad.set(doc(sup, 'adminHandovers/h2'), { parishId: 'A', parishName: 'A', newEmail: 'new@x.org', inviteCode: 'HANDOVERCODE-00000001', oldAdmins: [], mode: 'now', status: 'Pending', reason: 'x', version: 1, createdAt: 'x', updatedAt: 'x', revokedAt: '', by: 'uNamed' });
+  await assertFails(bad.commit());
+  for (const who of [as.adminA(), as.hq()]) await assertFails(getDoc(doc(who, 'adminHandovers/h1')));
+  // New admin claims: both admins work in parish A.
+  const nu = ctx('uN', 'new@x.org');
+  const c = writeBatch(nu);
+  c.set(doc(nu, 'users/uN'), { role: 'parish_admin', parishId: 'A', email: 'new@x.org', inviteCode: 'HANDOVERCODE-00000001' });
+  c.update(doc(nu, 'invites/HANDOVERCODE-00000001'), { usedBy: 'uN' });
+  c.set(doc(nu, 'adminEmails/new@x.org'), { uid: 'uN' });
+  await assertSucceeds(c.commit());
+  await assertSucceeds(getDoc(doc(nu, 'parishes/A/members/CCC-MBR-001')));
+  await assertSucceeds(getDoc(doc(as.adminA(), 'parishes/A/members/CCC-MBR-001')));
+  // Complete: old admin revoked in the same audited step; old login loses all access; parish data untouched.
+  const fb = writeBatch(sup);
+  fb.update(doc(sup, 'adminHandovers/h1'), { status: 'Completed', version: 2, updatedAt: 'y', revokedAt: 'y' });
+  auditW(fb, sup, 'adminHandovers/h1', 2, 'admin-handover-complete', '', 'claimed');
+  revoke(fb, sup, 'h1');
+  await assertSucceeds(fb.commit());
+  await assertFails(getDoc(doc(as.adminA(), 'parishes/A/members/CCC-MBR-001')));
+  await assertFails(setDoc(doc(as.adminA(), 'parishes/A/finances/f9'), fin));
+  await assertSucceeds(getDoc(doc(nu, 'parishes/A/members/CCC-MBR-001')));
+  // Nothing deleted: the record stays; no more changes once Completed.
+  await assertFails(updateDoc(doc(sup, 'adminHandovers/h1'), { status: 'Pending', version: 3 }));
+  await assertFails(deleteDoc(doc(sup, 'adminHandovers/h1')));
+});
+test('p9 handover: revoke now; revoking an admin without an audited handover is refused', async () => {
+  const sup = as.named();
+  await assertFails(updateDoc(doc(sup, 'users/uA'), { role: 'revoked' }));
+  await assertFails(deleteDoc(doc(sup, 'users/uA')));
+  const b = hoStart(sup, 'h3', 'now', { revokedAt: 'x' }); revoke(b, sup, 'h3');
+  await assertSucceeds(b.commit());
+  await assertFails(getDoc(doc(as.adminA(), 'parishes/A')));
+  await assertSucceeds(getDoc(doc(as.adminA(), 'users/uA')));               // can still see why (role revoked)
+  // Cancel needs a reason in the audit; the parish admin cannot touch handovers.
+  const c = writeBatch(sup);
+  c.update(doc(sup, 'adminHandovers/h3'), { status: 'Cancelled', version: 2, updatedAt: 'z' });
+  auditW(c, sup, 'adminHandovers/h3', 2, 'admin-handover-cancel', '', 'Wrong email');
+  await assertSucceeds(c.commit());
+});

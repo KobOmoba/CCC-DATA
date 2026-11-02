@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>if (location.pathname === "/site") document.write('<base href="/site/">');</script>
+<title>Service times · Celestial Church of Christ</title>
+<meta name="description" content="Weekly service times of the Celestial Church of Christ.">
+<meta name="theme-color" content="#1e3a8a">
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<main>
+<h1>Service times</h1>
+<p class="muted">The weekly timetable kept by every parish. Times are local to each parish; check your parish for any change.</p>
+<div class="card" id="svc"></div>
+<script>document.addEventListener("DOMContentLoaded", () => renderServices(document.getElementById("svc")));</script>
+</main>
+</body>
+</html>

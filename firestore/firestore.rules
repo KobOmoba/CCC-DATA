@@ -81,7 +81,7 @@ service cloud.firestore {
       return ['memberNo', 'fullName', 'nameLower', 'gender', 'maritalStatus', 'address', 'phone', 'phoneDigits',
         'email', 'rank', 'occupation', 'dobDay', 'dobMonth', 'dobYear', 'anointDay', 'anointMonth', 'anointYear',
         'nokName', 'nokAddress', 'nokPhone', 'photo', 'important', 'status', 'consentGiven', 'consentDate',
-        'createdAt', 'updatedAt'];
+        'createdAt', 'updatedAt', 'weddingDay', 'weddingMonth'];
     }
     // Compact helpers: Firestore caps a request at 1000 evaluated expressions, so these stay small.
     function s(v, max) { return v is string && v.size() <= max; }
@@ -98,6 +98,7 @@ service cloud.firestore {
         && n(d.dobDay, 1, 31) && d.dobDay != null && n(d.dobMonth, 1, 12) && d.dobMonth != null
         && n(d.get('dobYear', null), 1900, 2100) && n(d.get('anointDay', null), 1, 31)
         && n(d.get('anointMonth', null), 1, 12) && n(d.get('anointYear', null), 1900, 2100)
+        && n(d.get('weddingDay', null), 1, 31) && n(d.get('weddingMonth', null), 1, 12)
         && (d.get('photo', '') == '' || (s(d.photo, 110000) && d.photo.matches('^data:image/(jpeg|png|webp);base64,.*')))
         && d.get('important', false) is bool
         && d.consentGiven == true && isDate(d.consentDate);
@@ -363,8 +364,39 @@ service cloud.firestore {
               || (isEmail(request.resource.data.get('email', '')) && !isClergyEmail(request.resource.data.email))))
         || (signedIn() && request.auth.uid == uid && claimsInvite(request.resource.data));
       allow update: if isSuper() && (request.resource.data.role != 'parish_admin'
-              || (isEmail(request.resource.data.get('email', '')) && !isClergyEmail(request.resource.data.email)));
-      allow delete: if isSuper();
+              || (isEmail(request.resource.data.get('email', '')) && !isClergyEmail(request.resource.data.email)))
+        // Phase 9: a parish admin loses the role only through an audited handover (marked 'revoked', never silently).
+        && (resource.data.role != 'parish_admin' || request.resource.data.role == 'parish_admin' || revokesByHandover());
+      allow delete: if isSuper() && resource.data.role != 'parish_admin';
+    }
+    function revokesByHandover() {
+      return request.resource.data.role == 'revoked' && request.resource.data.parishId == resource.data.parishId
+        && request.resource.data.handoverId is string
+        && getAfter(docAt('adminHandovers/' + request.resource.data.handoverId)).data.parishId == resource.data.parishId
+        && auditedAfter('adminHandovers/' + request.resource.data.handoverId,
+             getAfter(docAt('adminHandovers/' + request.resource.data.handoverId)).data.version);
+    }
+    // ---- Phase 9: "Change parish admin". New invite + handover record; old admin(s) revoked now or once the new
+    // admin has claimed. Two admins may coexist during the handover. Every step is versioned and audited.
+    function handoverKeys() {
+      return ['parishId', 'parishName', 'newEmail', 'inviteCode', 'oldAdmins', 'mode', 'status', 'reason', 'version',
+        'createdAt', 'updatedAt', 'revokedAt', 'by'];
+    }
+    match /adminHandovers/{id} {
+      allow read: if isSuper();
+      allow create: if isNamedSuper() && request.resource.data.keys().hasOnly(handoverKeys())
+        && request.resource.data.version == 1 && request.resource.data.status == 'Pending'
+        && request.resource.data.mode in ['now', 'on_claim'] && str(request.resource.data.reason, 300)
+        && request.resource.data.oldAdmins is list && request.resource.data.oldAdmins.size() <= 10
+        && exists(docAt('parishes/' + request.resource.data.parishId))
+        && getAfter(docAt('invites/' + request.resource.data.inviteCode)).data.email == request.resource.data.newEmail
+        && getAfter(docAt('invites/' + request.resource.data.inviteCode)).data.parishId == request.resource.data.parishId
+        && auditedAfter('adminHandovers/' + id, 1);
+      allow update: if isNamedSuper() && request.resource.data.keys().hasOnly(handoverKeys()) && bumped()
+        && resource.data.status == 'Pending' && request.resource.data.status in ['Pending', 'Completed', 'Cancelled']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'version', 'updatedAt', 'revokedAt', 'reason'])
+        && auditedAfter('adminHandovers/' + id, request.resource.data.version);
+      allow delete: if false;
     }
     function claimsInvite(d) {
       return (d.keys().hasOnly(['role', 'parishId', 'email', 'inviteCode', 'name']) && d.role == 'church_head' && d.parishId == ''
@@ -583,6 +615,93 @@ service cloud.firestore {
         allow read, delete: if isParishAdminOf(parishId);
         allow create, update: if isParishAdminOf(parishId) && validFinance(request.resource.data);
       }
+      // ---- Phase 9: sermons, events (volunteer slots), message log. Private to the parish.
+      match /sermons/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validSermon(request.resource.data) && request.resource.data.parishId == parishId;
+        allow delete: if false; // the archive is kept
+      }
+      match /events/{id} {
+        allow read, delete: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && validEvent(request.resource.data);
+      }
+      // Who, when, which template. Never the message text, phone or email.
+      match /messageLog/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId)
+          && request.resource.data.keys().hasOnly(['template', 'channel', 'to', 'name', 'at', 'by'])
+          && request.resource.data.template in ['birthday', 'anniversary', 'absent', 'event', 'general']
+          && request.resource.data.channel in ['whatsapp', 'email']
+          && str(request.resource.data.to, 40) && str(request.resource.data.name, 120)
+          && request.resource.data.at == request.time && request.resource.data.by == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // ---- Phase 9 helpers ----
+    function sermonKeys() {
+      return ['title', 'titleLower', 'preacher', 'preacherNo', 'date', 'serviceType', 'scripture', 'tags', 'text', 'mediaUrl',
+        'shared', 'parishId', 'parishName', 'createdAt', 'updatedAt'];
+    }
+    function httpsOpt(d, k) { return d.get(k, '') == '' || (s(d.get(k, ''), 500) && d.get(k, '').matches('^https://[^ ]+$')); }
+    // Audio/video is a LINK (YouTube, Drive, Facebook...): Firebase Storage is not enabled. Text is stored directly.
+    function validSermon(d) {
+      return d.keys().hasOnly(sermonKeys()) && str(d.title, 150) && d.titleLower == d.title.lower()
+        && str(d.preacher, 120) && s(d.get('preacherNo', ''), 40) && isDate(d.date)
+        && s(d.get('serviceType', ''), 60) && s(d.get('scripture', ''), 200)
+        && d.get('tags', []) is list && d.get('tags', []).size() <= 10
+        && s(d.get('text', ''), 200000) && httpsOpt(d, 'mediaUrl') && d.get('shared', false) is bool
+        && s(d.get('parishName', ''), 120);
+    }
+    function validEvent(d) {
+      return d.keys().hasOnly(['title', 'kind', 'date', 'time', 'endDate', 'venue', 'notes', 'slots', 'createdAt', 'updatedAt'])
+        && str(d.title, 100) && d.kind in ['meeting', 'harvest', 'anniversary', 'crusade', 'other']
+        && isDate(d.date) && d.time is string && d.time.matches('^[0-2][0-9]:[0-5][0-9]$') && optDate(d, 'endDate')
+        && s(d.get('venue', ''), 120) && s(d.get('notes', ''), 1000)
+        && d.get('slots', []) is list && d.get('slots', []).size() <= 20;
+    }
+
+    // ---- Phase 9: church-wide shared sermons. The owning parish writes its copy (id = parishId_sermonId);
+    // every active parish admin, the Super Admin and the Church Head can read them.
+    match /sharedSermons/{id} {
+      allow read: if isSuper() || isChurchHead() || (role() == 'parish_admin' && isParishAdminOf(profile().parishId));
+      allow create, update: if isParishAdminOf(request.resource.data.parishId)
+        && id.matches(request.resource.data.parishId + '_[A-Za-z0-9]{1,40}')
+        && validSermon(request.resource.data) && request.resource.data.shared == true && str(request.resource.data.parishName, 120);
+      allow delete: if isParishAdminOf(resource.data.parishId); // "stop sharing"; the parish copy stays
+    }
+
+    // ---- Phase 9: PUBLIC website projections. Anyone (no login) may read; only the Super Admin publishes.
+    // Each holds ONLY public fields, so nothing private can leak through them.
+    match /publicParishes/{id} {
+      allow read: if true;
+      allow create, update: if isSuper() && exists(docAt('parishes/' + id))
+        && request.resource.data.keys().hasOnly(['name', 'nameLower', 'city', 'cityLower', 'country', 'countryLower', 'mapsUrl', 'services', 'updatedAt'])
+        && str(request.resource.data.name, 120) && request.resource.data.nameLower == request.resource.data.name.lower()
+        && s(request.resource.data.get('city', ''), 80) && request.resource.data.get('cityLower', '') == request.resource.data.get('city', '').lower()
+        && s(request.resource.data.get('country', ''), 80) && request.resource.data.get('countryLower', '') == request.resource.data.get('country', '').lower()
+        && httpsOpt(request.resource.data, 'mapsUrl')
+        && request.resource.data.services is list && request.resource.data.services.size() <= 20;
+      allow delete: if isSuper();
+    }
+    match /publicSermons/{id} {
+      allow read: if true;
+      allow create, update: if isSuper()
+        && request.resource.data.keys().hasOnly(['title', 'preacher', 'date', 'scripture', 'mediaUrl', 'parishName', 'summary', 'updatedAt'])
+        && str(request.resource.data.title, 150) && str(request.resource.data.preacher, 120) && isDate(request.resource.data.date)
+        && s(request.resource.data.get('scripture', ''), 200) && httpsOpt(request.resource.data, 'mediaUrl')
+        && s(request.resource.data.get('parishName', ''), 120) && s(request.resource.data.get('summary', ''), 600);
+      allow delete: if isSuper();
+    }
+    match /publicEvents/{id} {
+      allow read: if true;
+      allow create, update: if isSuper()
+        && request.resource.data.keys().hasOnly(['title', 'date', 'time', 'venue', 'city', 'notes', 'updatedAt'])
+        && str(request.resource.data.title, 100) && isDate(request.resource.data.date)
+        && request.resource.data.time is string && request.resource.data.time.matches('^[0-2][0-9]:[0-5][0-9]$')
+        && s(request.resource.data.get('venue', ''), 120) && s(request.resource.data.get('city', ''), 80)
+        && s(request.resource.data.get('notes', ''), 600);
+      allow delete: if isSuper();
     }
 
     // ---- Parish codes: short public code -> parish id, used to address a member transfer ----
@@ -1147,7 +1266,7 @@ service cloud.firestore {
     function auditTargetOk(d) {
       return (d.target.matches('^returns/[A-Za-z0-9]+_20[0-9]{2}-[0-9]{2}$') && d.parishId == d.target.split('/')[1].split('_')[0]
               && (isNamedSuper() || isParishAdminOf(d.parishId)))
-        || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqLeave|committees|committeeMembers|leaders)/.+') && isNamedSuper() && d.parishId == '')
+        || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqLeave|committees|committeeMembers|leaders|adminHandovers)/.+') && isNamedSuper() && d.parishId == '')
         || (d.target.matches('^postings/.+') && d.parishId == '' && (role() == 'parish_admin'
             ? (isParishAdminOf(getAfter(docAt(d.target)).data.fromParishId) || isParishAdminOf(getAfter(docAt(d.target)).data.toParishId))
             : (isNamedSuper() || isChurchHead())));

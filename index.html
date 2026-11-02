@@ -18,6 +18,7 @@
     <script src="returns.js" defer></script>
     <script src="hq.js" defer></script>
     <script src="p8.js" defer></script>
+    <script src="p9.js" defer></script>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
 
@@ -74,6 +75,9 @@
                 <button onclick="showSection('attendance')" id="nav-attendance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-check text-yellow-400 w-4"></i> Attendance</button>
                 <button onclick="showSection('finance')" id="nav-finance" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-invoice-dollar text-amber-500 w-4"></i> Finance</button>
                 <button onclick="showSection('returns')" id="nav-returns" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-hand-holding-dollar text-emerald-300 w-4"></i> Monthly Returns</button>
+                <button onclick="showSection('calendar')" id="nav-calendar" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-days text-rose-300 w-4"></i> Calendar</button>
+                <button onclick="showSection('sermons')" id="nav-sermons" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-book-bible text-sky-300 w-4"></i> Sermons</button>
+                <button onclick="showSection('messages')" id="nav-messages" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-brands fa-whatsapp text-emerald-400 w-4"></i> Messages</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('ai')" id="nav-ai" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wand-magic-sparkles text-fuchsia-300 w-4"></i> AI Dashboard</button>
                 <button onclick="showSection('postings')" id="nav-postings" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-route text-amber-300 w-4"></i> Clergy Postings</button>
@@ -82,6 +86,8 @@
                 <button onclick="showSection('directory')" id="nav-directory" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-address-book text-sky-300 w-4"></i> Member Directory</button>
                 <button onclick="showSection('committees')" id="nav-committees" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-group text-pink-300 w-4"></i> Committees</button>
                 <button onclick="showSection('staff')" id="nav-staff" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-id-badge text-amber-300 w-4"></i> HQ Staff</button>
+                <button onclick="showSection('sermons')" id="nav-sermonsAll" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-book-bible text-sky-300 w-4"></i> Sermons (church-wide)</button>
+                <button onclick="showSection('website')" id="nav-website" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-globe text-emerald-300 w-4"></i> Public Website</button>
                 <button onclick="showSection('register')" id="nav-register" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy Register</button>
                 <button onclick="showSection('important')" id="nav-important" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-star text-amber-300 w-4"></i> Important Members</button>
                 <button onclick="showSection('flows')" id="nav-flows" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-cyan-300 w-4"></i> Diaspora Flows</button>
@@ -111,7 +117,7 @@
 
                 <section id="section-dashboard" class="space-y-4">
                     <div class="bg-gradient-to-r from-blue-900 to-indigo-800 text-white p-5 rounded-xl shadow-md">
-                        <h2 id="welcomeTitle" class="text-lg font-bold">Shalom!</h2>
+                        <h2 id="welcomeTitle" class="text-lg font-bold">Halleluyah!</h2>
                         <p id="welcomeSub" class="text-xs text-blue-200 mt-1">Your parish at a glance.</p>
                     </div>
                     <div class="grid grid-cols-3 gap-2 text-xs">
@@ -133,6 +139,7 @@
                         <div class="bg-white p-3 rounded-xl border shadow-sm"><p class="text-gray-500 uppercase font-semibold text-[10px]">Total giving</p><p id="metricGiving" class="text-lg font-bold">0</p></div>
                     </div>
                     <div class="grid grid-cols-4 gap-2 text-xs"><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Births</p><p id="metricBirths" class="text-lg font-bold text-rose-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Children</p><p id="metricChildren" class="text-lg font-bold text-amber-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Teens</p><p id="metricTeens" class="text-lg font-bold text-lime-700">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Deaths</p><p id="metricDeaths" class="text-lg font-bold text-gray-700">0</p></div></div>
+                    <div class="parish-only"><div id="weekCard" class="hidden bg-white border rounded-xl p-3 text-xs space-y-2 shadow-sm"></div></div>
                     <div class="parish-only"><div id="parishPostings" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-2"></div></div>
                     <div id="pendingMoves" class="parish-only hidden bg-violet-50 border border-violet-300 rounded-xl p-3 text-xs space-y-2"></div>
                     <div id="electionBanners" class="parish-only space-y-2"></div>
@@ -408,6 +415,67 @@
                         <div id="inviteResult" class="hidden bg-emerald-50 border border-emerald-300 rounded p-3"></div>
                     </div>
                     <div id="parishList" class="space-y-2"></div>
+                </section>
+
+
+                <!-- PHASE 9: sermon library -->
+                <section id="section-sermons" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Sermon Library</h2><p class="text-gray-500">Text is kept here; audio/video is a link (YouTube, Google Drive, Facebook...).</p></div>
+                    <div class="flex gap-2 sm-parish"><button data-tab="mine" onclick="sermonTab('mine')" class="sm-tab att-tab px-3 py-2 rounded-full border bg-white font-semibold">This parish</button>
+                        <button data-tab="shared" onclick="sermonTab('shared')" class="sm-tab att-tab px-3 py-2 rounded-full border bg-white font-semibold">Church-wide</button>
+                        <button id="addSermonBtn" onclick="openSermonForm()" class="ml-auto px-3 py-2 bg-blue-700 text-white rounded-lg font-bold"><i class="fa-solid fa-plus"></i> Add</button></div>
+                    <input id="sm_q" type="search" oninput="renderSermons()" class="w-full border p-2.5 rounded-lg" placeholder="Search title, preacher, #tag or date (2026-11)">
+                    <div id="sm_list" class="space-y-2"></div>
+                </section>
+
+                <!-- PHASE 9: event calendar -->
+                <section id="section-calendar" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Calendar</h2><p class="text-gray-500">The weekly CCC services are filled in automatically. Add meetings, harvest, anniversary, crusade.</p></div>
+                    <div class="flex items-center gap-2"><button onclick="calShift(-1)" class="px-3 py-2 border rounded bg-white" aria-label="Previous month">‹</button>
+                        <p id="cal_title" class="font-bold text-sm flex-1 text-center"></p><button onclick="calShift(1)" class="px-3 py-2 border rounded bg-white" aria-label="Next month">›</button></div>
+                    <div class="flex gap-2"><button data-v="month" onclick="calView('month')" class="cal-view att-tab px-3 py-2 rounded-full border bg-white font-semibold">Month</button>
+                        <button data-v="list" onclick="calView('list')" class="cal-view att-tab px-3 py-2 rounded-full border bg-white font-semibold">List</button>
+                        <button id="addEventBtn" onclick="openEventForm()" class="ml-auto px-3 py-2 bg-rose-600 text-white rounded-lg font-bold"><i class="fa-solid fa-plus"></i> Event</button></div>
+                    <p class="text-[10px] text-gray-500"><span class="inline-block w-2 h-2 rounded-full bg-blue-500"></span> service · <span class="inline-block w-2 h-2 rounded-full bg-amber-500"></span> special · <span class="inline-block w-2 h-2 rounded-full bg-rose-500"></span> event</p>
+                    <div id="cal_body" class="space-y-1"></div>
+                </section>
+
+                <!-- PHASE 9: messages -->
+                <section id="section-messages" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Messages</h2><p class="text-gray-500">Personal WhatsApp (one tap each) or email. Only who / when / template is logged.</p></div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2">
+                        <div class="flex gap-2"><button data-c="whatsapp" onclick="msgChannel('whatsapp')" class="msg-ch att-tab active px-3 py-2 rounded-full border font-semibold"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+                            <button data-c="email" onclick="msgChannel('email')" class="msg-ch att-tab px-3 py-2 rounded-full border font-semibold"><i class="fa-solid fa-envelope"></i> Email</button></div>
+                        <label class="block">Template<select id="msg_tpl" onchange="msgTemplate()" class="w-full border p-2.5 rounded bg-white mt-1">
+                            <option value="birthday">Birthday</option><option value="anniversary">Wedding anniversary</option><option value="absent">Absent follow-up</option><option value="event">Event reminder</option><option value="general">General</option></select></label>
+                        <textarea id="msg_text" oninput="renderPreview()" rows="4" class="w-full border p-2.5 rounded"></textarea>
+                        <p class="text-gray-500">Placeholders: {name} {parish} {date}. Preview:</p><p id="msg_preview" class="bg-emerald-50 border border-emerald-200 rounded p-2 whitespace-pre-wrap"></p>
+                    </div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2">
+                        <p class="font-bold">Recipients</p>
+                        <input id="msg_q" oninput="msgSearch(this.value)" class="w-full border p-2.5 rounded" placeholder="Add a member: type a name">
+                        <div id="msg_found" class="space-y-1"></div>
+                        <div class="flex gap-2"><select id="msg_unit" class="flex-1 border p-2.5 rounded bg-white"></select><button onclick="addUnitRecipients()" id="msg_unitBtn" class="px-3 border rounded font-bold">Add</button></div>
+                        <div id="msg_recips" class="leading-8"></div><p id="msg_count" class="text-gray-500"></p>
+                        <button id="msg_start" onclick="startSending()" class="w-full py-3 bg-emerald-700 text-white rounded-lg font-bold">Start sending</button>
+                        <div id="msg_queue" class="space-y-2"></div>
+                    </div>
+                    <div class="bg-white border rounded-xl p-3 space-y-1"><p class="font-bold">Sent log (latest 20)</p><div id="msg_log" class="divide-y"></div></div>
+                </section>
+
+                <!-- PHASE 9: Super Admin publishes the public website projections -->
+                <section id="section-website" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Public Website</h2><p class="text-gray-500">Only name, city, country, map link and service times go public. Nothing else leaves the parish record.</p></div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">Find-a-parish listing</p><div id="web_parishes" class="space-y-1"></div>
+                        <button id="web_more" onclick="moreWebParishes()" class="hidden w-full py-2 border rounded">Load more parishes</button></div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">Public events</p>
+                        <input id="we_title" class="w-full border p-2.5 rounded" placeholder="Title, e.g. Annual Crusade">
+                        <div class="grid grid-cols-2 gap-2"><input type="date" id="we_date" class="border p-2.5 rounded"><input type="time" id="we_time" value="10:00" class="border p-2.5 rounded">
+                            <input id="we_venue" class="border p-2.5 rounded" placeholder="Venue"><input id="we_city" class="border p-2.5 rounded" placeholder="City"></div>
+                        <input id="we_notes" class="w-full border p-2.5 rounded" placeholder="Short note (optional)">
+                        <button id="we_add" onclick="addPublicEvent()" class="w-full py-2.5 bg-emerald-600 text-white rounded font-bold">Publish event</button>
+                        <div id="web_events" class="space-y-1"></div></div>
+                    <div class="bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">Public sermons</p><div id="web_sermons" class="space-y-1"></div></div>
                 </section>
 
                 <!-- PHASE 7: church-wide member directory (work profile only) -->
@@ -723,6 +791,9 @@
                 <fieldset><legend>Date of birth * (year optional)</legend>
                     <div class="grid grid-cols-3 gap-2 mt-1"><select id="p_dobDay" class="day-select border p-2.5 rounded bg-white"></select><select id="p_dobMonth" class="month-select border p-2.5 rounded bg-white"></select><select id="p_dobYear" class="year-select border p-2.5 rounded bg-white"></select></div>
                 </fieldset>
+                <fieldset><legend>Wedding anniversary (optional)</legend>
+                    <div class="grid grid-cols-2 gap-2 mt-1"><select id="p_wedDay" class="day-select border p-2.5 rounded bg-white"></select><select id="p_wedMonth" class="month-select border p-2.5 rounded bg-white"></select></div>
+                </fieldset>
                 <fieldset><legend>Last anointment date</legend>
                     <div class="grid grid-cols-3 gap-2 mt-1"><select id="p_anDay" class="day-select border p-2.5 rounded bg-white"></select><select id="p_anMonth" class="month-select border p-2.5 rounded bg-white"></select><select id="p_anYear" class="year-select border p-2.5 rounded bg-white"></select></div>
                 </fieldset>
@@ -816,6 +887,53 @@
         </div>
     </div>
 
+
+    <!-- PHASE 9 modals -->
+    <div id="p9Modal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl"><span id="p9Title"></span>
+                <button onclick="closeModal('p9Modal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
+            <div id="p9Body" class="p-4 space-y-2"></div>
+            <footer id="p9Actions" class="bg-gray-50 p-3 border-t flex flex-wrap justify-end gap-2 rounded-b-xl"></footer>
+        </div>
+    </div>
+    <div id="sermonModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl"><span>SERMON</span>
+                <button onclick="closeModal('sermonModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
+            <div class="p-4 space-y-2">
+                <input id="sm_title" class="w-full border p-2.5 rounded" placeholder="Title *">
+                <input id="sm_preacher" class="w-full border p-2.5 rounded" placeholder="Preacher: name or clergy number (CCC-...-CLG-001) *">
+                <div class="grid grid-cols-2 gap-2"><input type="date" id="sm_date" class="border p-2.5 rounded"><input id="sm_service" list="sm_services" class="border p-2.5 rounded" placeholder="Service type"></div>
+                <datalist id="sm_services"><option>Sunday Service</option><option>Bible Class</option><option>Wednesday Evening Service</option><option>Friday Evening Service</option><option>New Moon Service</option><option>Harvest</option><option>Crusade</option></datalist>
+                <input id="sm_scripture" class="w-full border p-2.5 rounded" placeholder="Scripture, e.g. John 8:12">
+                <input id="sm_tags" class="w-full border p-2.5 rounded" placeholder="Tags, comma separated (faith, healing)">
+                <input id="sm_media" type="url" class="w-full border p-2.5 rounded" placeholder="Audio/video link https://... (YouTube, Drive, Facebook)">
+                <textarea id="sm_text" rows="6" class="w-full border p-2.5 rounded" placeholder="Transcript / sermon notes"></textarea>
+                <label class="flex items-center gap-2"><input type="checkbox" id="sm_shared"> Share church-wide (all parish admins + Super Admin can read it)</label>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('sermonModal')" class="px-3 py-2 border rounded">Cancel</button>
+                <button id="saveSermonBtn" onclick="saveSermon()" class="px-4 py-2 bg-blue-700 text-white rounded font-bold">Save</button></footer>
+        </div>
+    </div>
+    <div id="eventModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
+            <header class="bg-rose-800 text-white p-4 font-bold flex justify-between items-center rounded-t-xl"><span>EVENT</span>
+                <button onclick="closeModal('eventModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
+            <div class="p-4 space-y-2">
+                <input id="ev_title" class="w-full border p-2.5 rounded" placeholder="Title *, e.g. Harvest Thanksgiving">
+                <select id="ev_kind" class="w-full border p-2.5 rounded bg-white"><option value="meeting">Meeting</option><option value="harvest">Harvest</option><option value="anniversary">Anniversary</option><option value="crusade">Crusade</option><option value="other">Other</option></select>
+                <div class="grid grid-cols-2 gap-2"><input type="date" id="ev_date" class="border p-2.5 rounded"><input type="time" id="ev_time" class="border p-2.5 rounded"></div>
+                <input id="ev_venue" class="w-full border p-2.5 rounded" placeholder="Venue">
+                <textarea id="ev_notes" rows="2" class="w-full border p-2.5 rounded" placeholder="Notes"></textarea>
+                <p class="font-bold">Volunteer roles</p><div id="ev_slots" class="space-y-1"></div>
+                <div class="flex gap-2"><input id="ev_slotRole" class="flex-1 border p-2.5 rounded" placeholder="Role, e.g. Ushers"><input id="ev_slotNeed" type="number" min="1" class="w-16 border p-2.5 rounded" placeholder="#">
+                    <button id="ev_slotAdd" onclick="addSlot()" class="px-3 border rounded font-bold">Add</button></div>
+            </div>
+            <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl"><button onclick="closeModal('eventModal')" class="px-3 py-2 border rounded">Cancel</button>
+                <button id="saveEventBtn" onclick="saveEvent()" class="px-4 py-2 bg-rose-700 text-white rounded font-bold">Save</button></footer>
+        </div>
+    </div>
     <div id="recordModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md text-xs my-2">
             <header class="bg-blue-900 text-white p-4 font-bold flex justify-between items-center rounded-t-xl">
