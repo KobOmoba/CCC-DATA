@@ -265,7 +265,8 @@ service cloud.firestore {
     // Old simple records {serviceDate, serviceType, headcount} stay valid and readable.
     // A scheduled service has id <date>_<serviceKey> and splits the headcount into men/women/children/visitors.
     function isServiceKey(k) {
-      return k.matches('^(sunday|bible|vigil_sidemen|wakati|seekers|wed_evening|new_moon|vigil_prophets|fri_evening|special|other)$');
+      return k.matches('^(sunday|bible|vigil_sidemen|wakati|seekers|wed_evening|new_moon|vigil_prophets|fri_evening|special|other)$')
+        || k.matches('^c_[a-z0-9]{1,20}$'); // Phase 9b: a parish's own added services
     }
     function cnt(d, k) { return d.get(k, -1) is int && d.get(k, -1) >= 0 && d.get(k, -1) <= 100000; }
     function validAttendance(p, d, id) {
@@ -326,7 +327,7 @@ service cloud.firestore {
           'birthCount', 'childCount', 'teenCount', 'deathCount', 'lastActive'])
         && optDate(d, 'lastActive')
         && nonNegInt(d, 'birthCount') && nonNegInt(d, 'childCount') && nonNegInt(d, 'teenCount') && nonNegInt(d, 'deathCount')
-        && (!('byType' in d) || (d.byType is map && d.byType.size() <= 20))
+        && (!('byType' in d) || (d.byType is map && d.byType.size() <= 60))
         && nonNegInt(d, 'visitorCount')
         && nonNegInt(d, 'diasporaCount')
         && nonNegInt(d, 'memberCount') && nonNegInt(d, 'clergyCount') && nonNegInt(d, 'formerClergyCount')
@@ -625,9 +626,34 @@ service cloud.firestore {
         allow read, delete: if isParishAdminOf(parishId);
         allow create, update: if isParishAdminOf(parishId) && validEvent(request.resource.data);
       }
+      // Phase 9b: the parish's own weekly timetable (services + activities). Default = the standard CCC timetable.
+      match /settings/{k} {
+        allow read: if isParishAdminOf(parishId);
+        allow create, update: if isParishAdminOf(parishId) && k == 'timetable'
+          && request.resource.data.keys().hasOnly(['services', 'updatedAt'])
+          && request.resource.data.services is list && request.resource.data.services.size() >= 1 && request.resource.data.services.size() <= 40;
+        allow delete: if isParishAdminOf(parishId) && k == 'timetable'; // back to the standard timetable
+      }
+      // Phase 9b: member self-registration through the parish's join link. Anyone (no login) may CREATE one Pending
+      // request; only this parish's admin reads, approves (the real member is created through the normal numbered path)
+      // or rejects with a reason. Honeypot field must stay empty; consent required; photo capped.
+      match /pendingMembers/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if request.auth == null && validPending(parishId, request.resource.data);
+        allow update: if isParishAdminOf(parishId) && resource.data.status == 'Pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reason', 'memberNo', 'decidedAt', 'decidedBy'])
+          && ((request.resource.data.status == 'Rejected' && str(request.resource.data.get('reason', ''), 300))
+            || (request.resource.data.status == 'Approved' && existsAfter(docAt('parishes/' + parishId + '/members/' + request.resource.data.get('memberNo', 'x')))));
+        allow delete: if isParishAdminOf(parishId); // NDPA: erase on request
+      }
       // Who, when, which template. Never the message text, phone or email.
       match /messageLog/{id} {
         allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && request.resource.data.get('channel', '') == 'whatsapp_batch'
+          && request.resource.data.keys().hasOnly(['template', 'channel', 'count', 'at', 'by'])
+          && request.resource.data.template in ['birthday', 'anniversary', 'absent', 'event', 'general']
+          && request.resource.data.count is int && request.resource.data.count >= 0 && request.resource.data.count <= 100000
+          && request.resource.data.at == request.time && request.resource.data.by == request.auth.uid;
         allow create: if isParishAdminOf(parishId)
           && request.resource.data.keys().hasOnly(['template', 'channel', 'to', 'name', 'at', 'by'])
           && request.resource.data.template in ['birthday', 'anniversary', 'absent', 'event', 'general']
@@ -636,6 +662,24 @@ service cloud.firestore {
           && request.resource.data.at == request.time && request.resource.data.by == request.auth.uid;
         allow update, delete: if false;
       }
+    }
+
+    // ---- Phase 9b helpers ----
+    function validPending(p, d) {
+      return d.keys().hasOnly(['fullName', 'gender', 'maritalStatus', 'phone', 'email', 'address', 'occupation', 'dobDay', 'dobMonth',
+          'dobYear', 'weddingDay', 'weddingMonth', 'nokName', 'nokPhone', 'photo', 'consentGiven', 'status', 'website', 'submittedAt'])
+        && d.status == 'Pending' && d.consentGiven == true && d.get('website', '') == ''
+        && d.submittedAt == request.time
+        && str(d.fullName, 120) && d.gender in ['Male', 'Female']
+        && d.maritalStatus in ['Single', 'Married', 'Widowed', 'Divorced', 'Separated']
+        && str(d.phone, 20) && (d.get('email', '') == '' || isEmail(d.email))
+        && s(d.get('address', ''), 200) && s(d.get('occupation', ''), 80) && s(d.get('nokName', ''), 120) && s(d.get('nokPhone', ''), 20)
+        && d.dobDay is int && d.dobDay >= 1 && d.dobDay <= 31 && d.dobMonth is int && d.dobMonth >= 1 && d.dobMonth <= 12
+        && n(d.get('dobYear', null), 1900, 2100) && n(d.get('weddingDay', null), 1, 31) && n(d.get('weddingMonth', null), 1, 12)
+        && (d.get('photo', '') == '' || (s(d.photo, 110000) && d.photo.matches('^data:image/jpeg;base64,.*')))
+        && exists(docAt('joinLinks/' + get(docAt('parishes/' + p)).data.get('code', 'none')))
+        && get(docAt('joinLinks/' + get(docAt('parishes/' + p)).data.code)).data.open == true
+        && get(docAt('parishes/' + p)).data.status == 'Approved';
     }
 
     // ---- Phase 9 helpers ----
@@ -671,37 +715,46 @@ service cloud.firestore {
       allow delete: if isParishAdminOf(resource.data.parishId); // "stop sharing"; the parish copy stays
     }
 
-    // ---- Phase 9: PUBLIC website projections. Anyone (no login) may read; only the Super Admin publishes.
-    // Each holds ONLY public fields, so nothing private can leak through them.
-    match /publicParishes/{id} {
+    // ---- Phase 9b: ONE public website per parish, at /site/?p=<parish code>. The parish admin publishes it.
+    // Only public fields: name, city, country, map link, timetable, welcome text, public contact, events, sermons.
+    function siteOwner(code) { return isParishAdminOf(get(docAt('publicSites/' + code)).data.parishId); }
+    function ownsCode(pid, code) { return isParishAdminOf(pid) && get(docAt('parishes/' + pid)).data.get('code', '') == code; }
+    match /publicSites/{code} {
       allow read: if true;
-      allow create, update: if isSuper() && exists(docAt('parishes/' + id))
-        && request.resource.data.keys().hasOnly(['name', 'nameLower', 'city', 'cityLower', 'country', 'countryLower', 'mapsUrl', 'services', 'updatedAt'])
-        && str(request.resource.data.name, 120) && request.resource.data.nameLower == request.resource.data.name.lower()
-        && s(request.resource.data.get('city', ''), 80) && request.resource.data.get('cityLower', '') == request.resource.data.get('city', '').lower()
-        && s(request.resource.data.get('country', ''), 80) && request.resource.data.get('countryLower', '') == request.resource.data.get('country', '').lower()
-        && httpsOpt(request.resource.data, 'mapsUrl')
-        && request.resource.data.services is list && request.resource.data.services.size() <= 20;
-      allow delete: if isSuper();
+      allow create, update: if ownsCode(request.resource.data.parishId, code)
+        && request.resource.data.keys().hasOnly(['parishId', 'name', 'city', 'country', 'mapsUrl', 'welcome', 'contactEmail', 'contactPhone', 'services', 'updatedAt'])
+        && str(request.resource.data.name, 120) && s(request.resource.data.get('city', ''), 80) && s(request.resource.data.get('country', ''), 80)
+        && httpsOpt(request.resource.data, 'mapsUrl') && s(request.resource.data.get('welcome', ''), 2000)
+        && (request.resource.data.get('contactEmail', '') == '' || isEmail(request.resource.data.contactEmail))
+        && s(request.resource.data.get('contactPhone', ''), 30)
+        && request.resource.data.services is list && request.resource.data.services.size() <= 40;
+      allow delete: if isSuper() || isParishAdminOf(resource.data.parishId);
+      match /events/{id} {
+        allow read: if true;
+        allow create, update: if siteOwner(code)
+          && request.resource.data.keys().hasOnly(['title', 'kind', 'date', 'time', 'venue', 'notes', 'updatedAt'])
+          && str(request.resource.data.title, 100) && isDate(request.resource.data.date)
+          && request.resource.data.time is string && request.resource.data.time.matches('^[0-2][0-9]:[0-5][0-9]$')
+          && s(request.resource.data.get('kind', ''), 20) && s(request.resource.data.get('venue', ''), 120) && s(request.resource.data.get('notes', ''), 600);
+        allow delete: if isSuper() || siteOwner(code);
+      }
+      match /sermons/{id} {
+        allow read: if true;
+        allow create, update: if siteOwner(code)
+          && request.resource.data.keys().hasOnly(['title', 'preacher', 'date', 'scripture', 'mediaUrl', 'summary', 'updatedAt'])
+          && str(request.resource.data.title, 150) && str(request.resource.data.preacher, 120) && isDate(request.resource.data.date)
+          && s(request.resource.data.get('scripture', ''), 200) && httpsOpt(request.resource.data, 'mediaUrl')
+          && s(request.resource.data.get('summary', ''), 600);
+        allow delete: if isSuper() || siteOwner(code);
+      }
     }
-    match /publicSermons/{id} {
-      allow read: if true;
-      allow create, update: if isSuper()
-        && request.resource.data.keys().hasOnly(['title', 'preacher', 'date', 'scripture', 'mediaUrl', 'parishName', 'summary', 'updatedAt'])
-        && str(request.resource.data.title, 150) && str(request.resource.data.preacher, 120) && isDate(request.resource.data.date)
-        && s(request.resource.data.get('scripture', ''), 200) && httpsOpt(request.resource.data, 'mediaUrl')
-        && s(request.resource.data.get('parishName', ''), 120) && s(request.resource.data.get('summary', ''), 600);
-      allow delete: if isSuper();
-    }
-    match /publicEvents/{id} {
-      allow read: if true;
-      allow create, update: if isSuper()
-        && request.resource.data.keys().hasOnly(['title', 'date', 'time', 'venue', 'city', 'notes', 'updatedAt'])
-        && str(request.resource.data.title, 100) && isDate(request.resource.data.date)
-        && request.resource.data.time is string && request.resource.data.time.matches('^[0-2][0-9]:[0-5][0-9]$')
-        && s(request.resource.data.get('venue', ''), 120) && s(request.resource.data.get('city', ''), 80)
-        && s(request.resource.data.get('notes', ''), 600);
-      allow delete: if isSuper();
+    // Join link switch: anyone may GET one by code (never list); the parish admin opens/closes it.
+    match /joinLinks/{code} {
+      allow get: if true;
+      allow create, update: if ownsCode(request.resource.data.parishId, code)
+        && request.resource.data.keys().hasOnly(['parishId', 'name', 'open', 'updatedAt'])
+        && str(request.resource.data.name, 120) && request.resource.data.open is bool;
+      allow delete: if false;
     }
 
     // ---- Parish codes: short public code -> parish id, used to address a member transfer ----

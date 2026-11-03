@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>if (location.pathname === "/site") document.write('<base href="/site/">');</script>
-<title>Service times · Celestial Church of Christ</title>
-<meta name="description" content="Weekly service times of the Celestial Church of Christ.">
+<script>if (location.pathname === "/site" || location.pathname === "/join") document.write('<base href="/site/">');</script>
+<title>Service times</title>
+<meta name="description" content="Weekly service times.">
 <meta name="theme-color" content="#1e3a8a">
+<meta name="robots" content="index">
 <link rel="stylesheet" href="site.css">
 <script src="site.js" defer></script>
 </head>
 <body>
 <main>
 <h1>Service times</h1>
-<p class="muted">The weekly timetable kept by every parish. Times are local to each parish; check your parish for any change.</p>
+<p class="muted">Our weekly timetable (local time).</p>
 <div class="card" id="svc"></div>
-<script>document.addEventListener("DOMContentLoaded", () => renderServices(document.getElementById("svc")));</script>
+<script>window.page = () => renderServices(document.getElementById("svc"));</script>
 </main>
 </body>
 </html>

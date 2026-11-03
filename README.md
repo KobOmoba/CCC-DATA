@@ -79,9 +79,22 @@ with the invited email + code.
     Default: the old admin keeps access until the new admin activates the invite (two admins for that short time), then the next time the
     Super Admin opens Parishes the handover completes. "Revoke now" removes the old admin at once. Revoked = `users/{uid}.role = 'revoked'`
     (kept, not deleted) + `adminEmails` entry removed. The rules refuse to revoke or delete a parish admin outside an audited handover.
-  - **Public website** (`website/`, no login, no cookies): Home, About & beliefs, Find a parish, Service times, Events, Sermons, Contact,
-    Privacy (NDPA). Reads only `publicParishes` (name, city, country, map link, service times), `publicEvents`, `publicSermons`, which only
-    the Super Admin publishes (Public Website page). Firestore REST, no SDK. Served at `/site` through `vercel.json`.
+- **Phase 9b** (founder review):
+  - **One website per parish** (`website/`, no login, no cookies): `/site/?p=<parish code>`. Pages (menu is one data list, `PAGES` in
+    `website/site.js`): Home ("Halleluyah 🙌" + welcome text), About & beliefs, Service times, Events, Sermons, Contact, Join us, Privacy (NDPA).
+    The parish admin controls it from **Our Website**: welcome text, public email/phone, which upcoming events show, which sermons
+    ("Put on our website"). Stored in `publicSites/{code}` (+ `events`, `sermons`); rules allow only public fields (no volunteer names, no transcript,
+    no address, no members). Only that parish's admin writes it; the Super Admin may delete (moderation). The old church-wide publishing is removed.
+  - **Member self-registration**: dashboard card with the link `/join?p=<code>`, a QR code (vendored `vendor/qrcode.js`, MIT) and Copy / Share on WhatsApp.
+    The admin opens/closes it (`joinLinks/{code}`, public get, no list). The member's form writes ONE `parishes/{p}/pendingMembers` doc with no login;
+    rules: anonymous create only, every field typed and size-capped, consent required, status must be Pending, honeypot `website` must be empty,
+    JPEG photo <= ~80 KB, server timestamp, link must be open and the parish Approved. Only that parish's admin reads it. **Review** opens the normal
+    member form pre-filled; Save creates the numbered member and marks the request Approved in the same transaction. **Reject** needs a reason.
+  - **WhatsApp "Send to many"**: one message ({name} -> "Beloved") through the phone's share sheet (`navigator.share`) or `wa.me/?text=` (no number), so
+    the admin picks several chats, a group or a broadcast list. "Copy message" fallback. Logged once: template, `whatsapp_batch`, count, sender.
+  - **Editable weekly timetable**: Parish Settings > Weekly services & activities (`parishes/{p}/settings/timetable`; delete = back to the standard CCC
+    timetable). Used by attendance, calendar, dashboard "this week" and the parish website. Existing rows keep their keys, new services get `c_xxx`
+    (rules accept them for attendance), activities `a_xxx` (calendar only). Old attendance records stay valid.
 
 ### WhatsApp Business Cloud API (later)
 Today `sendWhatsApp(to, text)` in `p9.js` opens wa.me. To send automatically, the church needs: its own **Meta Business account**
@@ -90,9 +103,9 @@ Today `sendWhatsApp(to, text)` in `p9.js` opens wa.me. To send automatically, th
 window must use one). The token must live on a server (e.g. a new `/whatsapp` route on the Cloudflare `ai-worker`, as a secret), never in
 the browser. Then replace `MessagingAdapter.whatsapp.send` with a call to that route; the log stays the same.
 
-### Public website hosting
-`vercel.json` rewrites `/site` and `/site/*` to `website/`, so after the next deploy it is at
-`https://ccc-parish-portal.vercel.app/site`. Alternative: a second Vercel project with **Root Directory = `website`** (works as-is; all links are relative).
+### Parish website hosting
+`vercel.json` rewrites `/site`, `/site/*` and `/join` to `website/`, so after the next deploy a parish site is at
+`https://ccc-parish-portal.vercel.app/site/?p=<code>` and its sign-up form at `/join?p=<code>`.
 - `flows/{id}` - places + year only (no names); Super Admin's "Diaspora Flows" summary.
 
 ## Set up Firebase later (on your phone)

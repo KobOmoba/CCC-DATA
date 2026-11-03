@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>if (location.pathname === "/site" || location.pathname === "/join") document.write('<base href="/site/">');</script>
+<title>Join us</title>
+<meta name="description" content="Register as a member of this parish.">
+<meta name="theme-color" content="#1e3a8a">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<main>
+<h1>Join us</h1>
+<p id="joinIntro" class="muted">Loading…</p>
+<form id="joinForm" class="card" hidden autocomplete="on">
+<label>Full name *<input name="fullName" required maxlength="120"></label>
+<div class="grid"><label>Gender *<select name="gender" required><option value="">Choose</option><option>Male</option><option>Female</option></select></label>
+<label>Marital status *<select name="maritalStatus" required><option value="">Choose</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option><option>Separated</option></select></label></div>
+<label>Phone (WhatsApp) *<input name="phone" type="tel" required maxlength="20"></label>
+<label>Email<input name="email" type="email" maxlength="120"></label>
+<p class="muted">Date of birth * (year optional)</p>
+<div class="grid3"><input name="dobDay" type="number" min="1" max="31" placeholder="Day" required><input name="dobMonth" type="number" min="1" max="12" placeholder="Month" required><input name="dobYear" type="number" min="1900" max="2100" placeholder="Year"></div>
+<p class="muted">Wedding anniversary (optional)</p>
+<div class="grid"><input name="weddingDay" type="number" min="1" max="31" placeholder="Day"><input name="weddingMonth" type="number" min="1" max="12" placeholder="Month"></div>
+<label>Address<input name="address" maxlength="200"></label>
+<label>Occupation<input name="occupation" maxlength="80"></label>
+<div class="grid"><label>Next of kin<input name="nokName" maxlength="120"></label><label>Next of kin phone<input name="nokPhone" type="tel" maxlength="20"></label></div>
+<label>Photo (optional)<input name="photoFile" type="file" accept="image/*"></label>
+<img id="photoPreview" alt="" hidden style="max-width:96px;border-radius:8px">
+<div class="hp" aria-hidden="true"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>
+<label class="row"><input name="consent" type="checkbox" required> I agree that this parish keeps these details to manage my membership, under the <a href="privacy.html">privacy notice</a> (NDPA 2023). *</label>
+<button class="btn" id="joinSend" type="submit">Send my registration</button>
+</form>
+<div id="joinDone" class="card" hidden><h3>Thank you! Halleluyah 🙌</h3><p>Your registration was sent to the parish admin, who will confirm it.</p></div>
+<script src="join.js"></script>
+</main>
+</body>
+</html>
