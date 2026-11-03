@@ -247,7 +247,8 @@ function showSection(id) {
     if (id === "calendar") openCalendar().catch(e => alert("Could not load the calendar: " + e.message));
     if (id === "messages") openMessages().catch(e => alert("Could not load messages: " + e.message));
     if (id === "parishes" && localState.role === "super_admin") completeClaimedHandovers().catch(e => console.error("handovers", e.message));
-    if (id === "website") openWebsite().catch(e => alert("Could not load the website settings: " + e.message));
+    if (id === "site") openSite().catch(e => alert("Could not load the website settings: " + e.message));
+    if (id === "settings" && localState.role === "parish_admin") openTimetable();
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -274,12 +275,15 @@ async function loadParishData() {
     localState.parish = pDoc.exists ? pDoc.data() : {};
     showBranding(localState.parish);
     fillSettingsForm(localState.parish);
-    $("welcomeTitle").textContent = "Halleluyah, " + (localState.parish.name || "Parish") + "!";
+    $("welcomeTitle").textContent = "Halleluyah 🙌, " + (localState.parish.name || "Parish") + "!";
     const st = await statsRef().get().catch(() => null);
     showTotals(st && st.exists ? st.data() : {});
     $("memberSearch").value = "";
+    const tt = await parishRef().collection("settings").doc("timetable").get().catch(() => null);
+    setTimetable(tt && tt.exists ? tt.data().services : null);
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
     renderWeekCard().catch(e => console.error("week card", e.message)); // Phase 9
+    renderJoinCard().catch(e => console.error("join card", e.message)); // Phase 9b
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
     // Phase 8: record activity for the "no activity for 30 days" alert, and apply any clergy posting now due.
     await markParishActive().catch(e => console.error("activity", e.message));
@@ -517,7 +521,12 @@ async function savePerson() {
             } else {
                 p.status = "Active"; p.consentDate = today(); p.createdAt = nowIso();
                 if (form.kind === "clergy") p.serviceRecord = p.rank ? [{ rank: p.rank, from: p.joinedDate || today() }] : [];
-                const vid = form.visitorId;
+                const vid = form.visitorId, pend = form.pendingId;
+                if (pend) {   // Phase 9b: approving a self-registration creates the real numbered member + marks it Approved, atomically
+                    form.pendingId = null;
+                    await createRecord(form.kind, p, (t, id) => t.update(parishRef().collection("pendingMembers").doc(pend), { status: "Approved", memberNo: id, decidedAt: nowIso(), decidedBy: localState.user.uid }));
+                    closeModal("personModal"); await loadParishData(); return;
+                }
                 // A visitor made member: the visitor is marked Member in the same transaction.
                 await createRecord(form.kind, p, vid ? (t, id) => t.update(parishRef().collection("visitors").doc(vid), { status: "Member", memberNo: id, updatedAt: nowIso() }) : null);
                 if (vid) { form.visitorId = null; closeModal("personModal"); await loadVisitors(); return; }
@@ -737,7 +746,7 @@ async function saveParishSettings() {
 // ---------------------------------------------------------------- super admin / HQ world view
 let register = [];
 async function loadWorld() {
-    $("welcomeTitle").textContent = localState.role === "super_admin" ? "Halleluyah, Super Admin!" : localState.role === "church_head" ? `Halleluyah, ${localState.name || "Church Head"}!` : "Halleluyah, HQ!";
+    $("welcomeTitle").textContent = localState.role === "super_admin" ? "Halleluyah 🙌, Super Admin!" : localState.role === "church_head" ? `Halleluyah 🙌, ${localState.name || "Church Head"}!` : "Halleluyah 🙌, HQ!";
     $("welcomeSub").textContent = "Totals for all parishes. Ordinary member records stay private to each parish.";
     $("dashParishName").textContent = "World-wide";
     const [parishes, stats] = await Promise.all([db.collection("parishes").get(), db.collection("parishStats").get()]);
@@ -849,7 +858,8 @@ async function logout() {
 // ---------------------------------------------------------------- attendance, finance, circulars (Milestone 1)
 // ---------------------------------------------------------------- attendance (Phase 3)
 // The CCC weekly timetable. Keys are fixed: firestore.rules lists the same ones.
-const SCHEDULE = [
+// The standard timetable is the DEFAULT; each parish may edit its own (parishes/{p}/settings/timetable, Phase 9b).
+const DEFAULT_SCHEDULE = [
     { key: "sunday", name: "Sunday Service", dow: 0, time: "10:00" },
     { key: "bible", name: "Bible Class", dow: 1, time: "17:00" },
     { key: "vigil_sidemen", name: "Sidemen/Sidewomen Night Vigil", dow: 1, time: "23:59" },
@@ -859,7 +869,17 @@ const SCHEDULE = [
     { key: "new_moon", name: "New Moon Service", dow: 4, time: "22:00", week: "first" },
     { key: "vigil_prophets", name: "Prophets/Prophetesses Night Vigil", dow: 4, time: "23:59", week: "other" },
     { key: "fri_evening", name: "Friday Evening Service", dow: 5, time: "18:00" }];
-const TYPE_NAMES = { ...Object.fromEntries(SCHEDULE.map(s => [s.key, s.name])), special: "Special service", other: "Other service" };
+const DEFAULT_ACTIVITIES = [{ key: "a_cleaning", name: "Church cleaning", dow: 6, time: "08:00", kind: "activity" }];
+let SCHEDULE = DEFAULT_SCHEDULE, ACTIVITIES = DEFAULT_ACTIVITIES, TIMETABLE_CUSTOM = false;
+// Names of every service type ever used (standard + this parish's own), so old records keep their names.
+let TYPE_NAMES = { ...Object.fromEntries(DEFAULT_SCHEDULE.map(s => [s.key, s.name])), special: "Special service", other: "Other service" };
+function setTimetable(list) {
+    TIMETABLE_CUSTOM = !!list;
+    list = list || DEFAULT_SCHEDULE.map(s => ({ ...s, kind: "service" })).concat(DEFAULT_ACTIVITIES);
+    SCHEDULE = list.filter(s => s.kind !== "activity");
+    ACTIVITIES = list.filter(s => s.kind === "activity");
+    for (const s of SCHEDULE) TYPE_NAMES[s.key] = s.name;
+}
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const ABSENT_DAYS = 21;
 

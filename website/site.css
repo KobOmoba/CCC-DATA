@@ -28,3 +28,9 @@ td.t { font-family: ui-monospace, monospace; white-space: nowrap; color: var(--n
 footer.bottom { text-align: center; font-size: 12px; color: var(--muted); padding: 24px 16px; border-top: 1px solid var(--line); }
 .empty { text-align: center; color: var(--muted); padding: 20px; }
 @media (min-width: 720px) { h1 { font-size: 30px; } }
+form label { display: block; margin: 8px 0; font-size: 14px; }
+form input, form select { width: 100%; padding: 11px; border: 1px solid var(--line); border-radius: 10px; font-size: 16px; margin-top: 4px; background: #fff; }
+form label.row { display: flex; gap: 8px; align-items: flex-start; } form label.row input { width: auto; margin-top: 3px; }
+.grid3 { display: grid; gap: 8px; grid-template-columns: 1fr 1fr 1fr; }
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.hero h1 span { font-size: .8em; }

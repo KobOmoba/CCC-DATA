@@ -1347,33 +1347,82 @@ test('p9 wedding anniversary on a member (optional day + month)', async () => {
   await assertSucceeds(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { weddingDay: 14, weddingMonth: 2 }));
   await assertFails(updateDoc(doc(a, 'parishes/A/members/CCC-MBR-001'), { weddingMonth: 13 }));
 });
-test('p9 public website: anyone reads; only super publishes; public fields only', async () => {
-  const pub = { name: 'Parish A', nameLower: 'parish a', city: 'Lagos', cityLower: 'lagos', country: 'Nigeria', countryLower: 'nigeria',
-    mapsUrl: 'https://maps.app.goo.gl/x', services: [{ day: 'Sun', time: '10:00', name: 'Sunday Service' }], updatedAt: 'x' };
-  await assertSucceeds(setDoc(doc(as.superA(), 'publicParishes/A'), pub));
-  await assertFails(setDoc(doc(as.superA(), 'publicParishes/A'), { ...pub, address: '12 Secret Close' }));
-  await assertFails(setDoc(doc(as.superA(), 'publicParishes/A'), { ...pub, adminEmail: 'a@x.org' }));
-  await assertFails(setDoc(doc(as.superA(), 'publicParishes/A'), { ...pub, nameLower: 'wrong' }));
-  await assertFails(setDoc(doc(as.superA(), 'publicParishes/NOPE'), pub));
-  for (const who of [as.adminA(), as.hq(), as.stranger()]) await assertFails(setDoc(doc(who, 'publicParishes/A'), pub));
-  await assertSucceeds(getDocs(query(collection(as.stranger(), 'publicParishes'), orderBy('nameLower'), limit(20))));
-  await assertSucceeds(getDoc(doc(as.stranger(), 'publicParishes/A')));
-  // The private records stay closed to the public.
-  await assertFails(getDoc(doc(as.stranger(), 'parishes/A')));
-  await assertFails(getDocs(collection(as.stranger(), 'parishStats')));
-  await assertFails(getDocs(collection(as.stranger(), 'sharedSermons')));
-  const ps = { title: 'Walk in the Light', preacher: 'Ven Olu', date: '2026-11-01', scripture: 'John 8:12', mediaUrl: 'https://youtu.be/abc', parishName: 'Parish A', summary: 'Short', updatedAt: 'x' };
-  await assertSucceeds(setDoc(doc(as.superA(), 'publicSermons/A_s1'), ps));
-  await assertFails(setDoc(doc(as.superA(), 'publicSermons/A_s2'), { ...ps, text: 'full transcript' }));
-  await assertFails(setDoc(doc(as.adminA(), 'publicSermons/A_s3'), ps));
-  const pe = { title: 'Crusade', date: '2026-12-05', time: '16:00', venue: 'Stadium', city: 'Lagos', notes: '', updatedAt: 'x' };
-  await assertSucceeds(setDoc(doc(as.superA(), 'publicEvents/e1'), pe));
-  await assertFails(setDoc(doc(as.adminA(), 'publicEvents/e2'), pe));
-  await assertSucceeds(getDocs(collection(as.stranger(), 'publicEvents')));
-  await assertSucceeds(getDocs(collection(as.stranger(), 'publicSermons')));
-  await assertSucceeds(deleteDoc(doc(as.superA(), 'publicParishes/A')));
+const seedCodes = () => env.withSecurityRulesDisabled(async (c) => {
+  const db = c.firestore();
+  await updateDoc(doc(db, 'parishes/A'), { code: 'AAA111' }); await updateDoc(doc(db, 'parishes/B'), { code: 'BBB222' });
 });
-
+const pending = (extra = {}) => ({ fullName: 'Ngozi New', gender: 'Female', maritalStatus: 'Single', phone: '08031112222', email: '',
+  address: 'Ikeja', occupation: 'Nurse', dobDay: 5, dobMonth: 6, dobYear: null, weddingDay: null, weddingMonth: null, nokName: '', nokPhone: '',
+  photo: '', consentGiven: true, status: 'Pending', website: '', submittedAt: serverTimestamp(), ...extra });
+test('p9b public site: one per parish, by its own admin, public fields only; anyone reads', async () => {
+  await seedCodes();
+  const site = { parishId: 'A', name: 'Parish A', city: 'Lagos', country: 'Nigeria', mapsUrl: 'https://maps.app.goo.gl/x', welcome: 'Halleluyah!',
+    contactEmail: 'info@a.org', contactPhone: '0803', services: [{ day: 'Sun', time: '10:00', name: 'Sunday Service' }], updatedAt: 'x' };
+  const a = as.adminA();
+  await assertSucceeds(setDoc(doc(a, 'publicSites/AAA111'), site));
+  await assertFails(setDoc(doc(a, 'publicSites/BBB222'), site));                         // not its code
+  await assertFails(setDoc(doc(as.adminB(), 'publicSites/AAA111'), { ...site, parishId: 'B' }));
+  await assertFails(setDoc(doc(a, 'publicSites/AAA111'), { ...site, address: '12 Secret Close' }));
+  await assertFails(setDoc(doc(a, 'publicSites/AAA111'), { ...site, memberCount: 40 }));
+  await assertFails(setDoc(doc(as.superA(), 'publicSites/AAA111'), site));               // parish controls its own site
+  const ev = { title: 'Harvest', kind: 'harvest', date: '2026-12-05', time: '10:00', venue: 'Main church', notes: '', updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(a, 'publicSites/AAA111/events/e1'), ev));
+  await assertFails(setDoc(doc(a, 'publicSites/AAA111/events/e2'), { ...ev, slots: [{ role: 'Ushers', assigned: [{ name: 'Ade' }] }] }));
+  await assertFails(setDoc(doc(as.adminB(), 'publicSites/AAA111/events/e3'), ev));
+  const se = { title: 'Walk in the Light', preacher: 'Ven Olu', date: '2026-11-01', scripture: 'John 8:12', mediaUrl: 'https://youtu.be/a', summary: 'Short', updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(a, 'publicSites/AAA111/sermons/s1'), se));
+  await assertFails(setDoc(doc(a, 'publicSites/AAA111/sermons/s2'), { ...se, text: 'full transcript' }));
+  for (const p of ['publicSites/AAA111', 'publicSites/AAA111/events/e1', 'publicSites/AAA111/sermons/s1']) await assertSucceeds(getDoc(doc(as.stranger(), p)));
+  await assertSucceeds(getDocs(collection(as.stranger(), 'publicSites/AAA111/events')));
+  await assertFails(getDoc(doc(as.stranger(), 'parishes/A')));
+  await assertFails(getDocs(collection(as.stranger(), 'sharedSermons')));
+  await assertSucceeds(deleteDoc(doc(as.superA(), 'publicSites/AAA111/sermons/s1')));    // moderation
+});
+test('p9b join link + pendingMembers: anonymous create only, strict, honeypot, admin reads/decides', async () => {
+  await seedCodes();
+  const anon = as.stranger(), a = as.adminA();
+  await assertFails(addDocTo(anon, 'parishes/A/pendingMembers', pending()));              // link not opened yet
+  await assertFails(setDoc(doc(as.adminB(), 'joinLinks/AAA111'), { parishId: 'A', name: 'Parish A', open: true, updatedAt: 'x' }));
+  await assertSucceeds(setDoc(doc(a, 'joinLinks/AAA111'), { parishId: 'A', name: 'Parish A', open: true, updatedAt: 'x' }));
+  await assertSucceeds(getDoc(doc(anon, 'joinLinks/AAA111')));
+  await assertFails(getDocs(collection(anon, 'joinLinks')));
+  await assertSucceeds(setDoc(doc(anon, 'parishes/A/pendingMembers/p1'), pending()));
+  await assertSucceeds(setDoc(doc(anon, 'parishes/A/pendingMembers/p2'), pending({ photo: 'data:image/jpeg;base64,' + 'A'.repeat(90000) })));
+  for (const bad of [{ website: 'http://spam' }, { consentGiven: false }, { status: 'Approved' }, { memberNo: 'CCC-MBR-009' },
+      { photo: 'data:image/jpeg;base64,' + 'A'.repeat(120000) }, { photo: 'data:text/html;base64,AA' }, { fullName: '' },
+      { phone: '' }, { important: true }, { dobMonth: 13 }, { submittedAt: '2026-01-01' }])
+    await assertFails(setDoc(doc(anon, 'parishes/A/pendingMembers/bad'), pending(bad)));
+  await assertFails(setDoc(doc(ctx('uX'), 'parishes/A/pendingMembers/p3'), pending()));     // signed-in: not this path
+  await assertFails(setDoc(doc(anon, 'parishes/S/pendingMembers/p4'), pending()));         // suspended parish (no link)
+  for (const who of [anon, as.adminB(), as.superA(), as.hq()]) await assertFails(getDoc(doc(who, 'parishes/A/pendingMembers/p1')));
+  await assertSucceeds(getDocs(collection(a, 'parishes/A/pendingMembers')));
+  await assertFails(updateDoc(doc(anon, 'parishes/A/pendingMembers/p1'), { fullName: 'X' }));
+  await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p1'), { status: 'Rejected' }));        // reason required
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/pendingMembers/p1'), { status: 'Rejected', reason: 'Duplicate', decidedAt: 'x', decidedBy: 'uA' }));
+  await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p2'), { status: 'Approved', memberNo: 'CCC-MBR-999' })); // no such member
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/pendingMembers/p2'), { status: 'Approved', memberNo: 'CCC-MBR-001', decidedAt: 'x', decidedBy: 'uA' }));
+  await assertSucceeds(updateDoc(doc(a, 'joinLinks/AAA111'), { open: false }));
+  await assertFails(setDoc(doc(anon, 'parishes/A/pendingMembers/p5'), pending()));         // link closed
+});
+test('p9b timetable: per parish; custom service keys valid for attendance; batch WhatsApp log', async () => {
+  const a = as.adminA();
+  const tt = { services: [{ key: 'sunday', name: 'Sunday Service', dow: 0, time: '09:00', kind: 'service' },
+    { key: 'c_vigil2', name: 'Extra Night Vigil', dow: 6, time: '23:00', kind: 'service' }], updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/settings/timetable'), tt));
+  await assertFails(setDoc(doc(a, 'parishes/A/settings/other'), tt));
+  await assertFails(setDoc(doc(a, 'parishes/A/settings/timetable'), { services: [] }));
+  await assertFails(setDoc(doc(as.adminB(), 'parishes/A/settings/timetable'), tt));
+  await assertFails(getDoc(doc(as.superA(), 'parishes/A/settings/timetable')));
+  const rec = { serviceDate: '2026-11-07', serviceType: 'Extra Night Vigil', serviceKey: 'c_vigil2', serviceTime: '23:00', men: 1, women: 2, children: 0, visitors: 0, headcount: 3, ledBy: '', ledByName: '', notes: '', updatedAt: 'x' };
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/attendance/2026-11-07_c_vigil2'), rec));
+  await assertFails(setDoc(doc(a, 'parishes/A/attendance/2026-11-07_C-BAD'), { ...rec, serviceKey: 'C-BAD' }));
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/attendance/t1'), att));                    // old record shape still valid
+  const bl = { template: 'general', channel: 'whatsapp_batch', count: 12, at: serverTimestamp(), by: 'uA' };
+  await assertSucceeds(setDoc(doc(a, 'parishes/A/messageLog/b1'), bl));
+  await assertFails(setDoc(doc(a, 'parishes/A/messageLog/b2'), { ...bl, text: 'Dear Beloved' }));
+  await assertFails(setDoc(doc(a, 'parishes/A/messageLog/b3'), { ...bl, count: -1 }));
+});
+const addDocTo = (db, path, d) => setDoc(doc(collection(db, path)), d);
 // ---------------------------------------------------------------- Phase 9: change parish admin (handover)
 const hoStart = (db, id, mode = 'on_claim', extra = {}) => {
   const b = writeBatch(db);

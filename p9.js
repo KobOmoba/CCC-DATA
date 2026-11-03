@@ -5,7 +5,8 @@
 //     Month and list views. Dashboard card "This week": services, events, birthdays and wedding anniversaries.
 //  3. Messages: personalised WhatsApp (one tap each, with a "next" queue) + email (mailto, BCC batches).
 //     The log keeps who / when / template only. sendWhatsApp(to, text) is the adapter for the future Cloud API.
-//  4. Super Admin "Website": publishes the public projections (publicParishes, publicSermons, publicEvents).
+//  4. Phase 9b: one public website per parish (publicSites/{code}), member sign-up link + pending queue, editable timetable,
+//     WhatsApp "send to many".
 
 // ================================================================= shared helpers
 const P9_KINDS = { meeting: "Meeting", harvest: "Harvest", anniversary: "Anniversary", crusade: "Crusade", other: "Other event" };
@@ -107,7 +108,7 @@ function viewSermon(id) {
         ${x.mediaUrl ? `<a href="${esc(x.mediaUrl)}" target="_blank" rel="noopener" class="inline-block bg-red-600 text-white rounded px-3 py-2 font-bold"><i class="fa-solid fa-play mr-1"></i> Watch / listen (${mediaKind(x.mediaUrl)})</a>` : ""}
         ${x.text ? `<div class="border rounded p-2 bg-gray-50 whitespace-pre-wrap max-h-80 overflow-y-auto">${esc(x.text)}</div>` : `<p class="text-gray-400">No transcript.</p>`}`;
     const acts = (mine ? `<button onclick="openSermonForm('${id}')" class="px-3 py-2 bg-blue-600 text-white rounded">Edit</button>` : "")
-        + (localState.role === "super_admin" ? `<button id="pubSermonBtn" onclick="publishSermon('${id}')" class="px-3 py-2 bg-emerald-600 text-white rounded">Put on website</button>` : "");
+        + (mine ? `<button id="pubSermonBtn" onclick="publishSermon('${id}')" class="px-3 py-2 bg-emerald-600 text-white rounded">Put on our website</button>` : "");
     p9Modal(x.title, body, acts);
 }
 
@@ -135,14 +136,16 @@ function itemsBetween(a, b, events, specials) {
     for (let sun = weekStart(a); sun <= b; sun = addDays(sun, 7))
         for (const s of weekServices(sun, specials.filter(x => x.date >= sun && x.date <= addDays(sun, 6))))
             if (s.date >= a && s.date <= b) out.push({ ...s, type: s.key === "special" ? "special" : "service" });
+    for (let d = a; d <= b; d = addDays(d, 1))   // Phase 9b: the parish's weekly activities (rehearsals, cleaning...)
+        for (const x of ACTIVITIES) if (x.dow === parseYmd(d).getDay()) out.push({ id: d + "_" + x.key, name: x.name, date: d, time: x.time || "", type: "activity" });
     for (const e of events) out.push({ id: e.id, name: e.title, date: e.date, time: e.time, type: "event", kind: e.kind, ev: e });
     return out.sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
 }
-const dotColor = t => t === "event" ? "bg-rose-500" : t === "special" ? "bg-amber-500" : "bg-blue-500";
+const dotColor = t => t === "event" ? "bg-rose-500" : t === "special" ? "bg-amber-500" : t === "activity" ? "bg-emerald-500" : "bg-blue-500";
 function itemRow(it) {
     const slots = it.ev ? (it.ev.slots || []) : [];
     const need = slots.reduce((n, s) => n + Math.max(0, (s.needed || 0) - (s.assigned || []).length), 0);
-    const tag = it.type === "event" ? P9_KINDS[it.kind] : it.type === "special" ? "Special service" : "Service";
+    const tag = it.type === "event" ? P9_KINDS[it.kind] : it.type === "special" ? "Special service" : it.type === "activity" ? "Activity" : "Service";
     return `<div class="cal-item flex items-center gap-2 bg-white border rounded-lg p-2 ${it.type === "event" ? "cursor-pointer" : ""}" ${it.type === "event" ? `onclick="viewEvent('${it.id}')"` : ""}>
         <span class="w-2 h-2 rounded-full ${dotColor(it.type)}"></span>
         <span class="font-mono text-gray-500 w-12">${esc(it.time)}</span>
@@ -292,7 +295,7 @@ async function renderWeekCard() {
         ${evs.length ? `<p class="text-[10px] uppercase font-semibold text-gray-500">Events</p>${evs.map(itemRow).join("")}` : ""}
         <p class="text-[10px] uppercase font-semibold text-gray-500">Birthdays (${births.length})</p>${births.map(x => person(x, "birthday")).join("") || `<p class="text-gray-400">None this week.</p>`}
         <p class="text-[10px] uppercase font-semibold text-gray-500">Wedding anniversaries (${weds.length})</p>${weds.map(x => person(x, "anniversary")).join("") || `<p class="text-gray-400">None this week.</p>`}
-        <details><summary class="text-[10px] uppercase font-semibold text-gray-500 cursor-pointer">Services (${svc.length})</summary><div class="space-y-1 mt-1">${svc.map(itemRow).join("")}</div></details>`;
+        <details><summary class="text-[10px] uppercase font-semibold text-gray-500 cursor-pointer">Services &amp; activities (${svc.length})</summary><div class="space-y-1 mt-1">${svc.map(itemRow).join("")}</div></details>`;
     $("weekCard").classList.remove("hidden");
 }
 async function wish(tpl, no) {
@@ -340,7 +343,7 @@ async function openMessages() {
     await loadMsgLog();
 }
 function msgTemplate() { $("msg_text").value = TEMPLATES[val("msg_tpl")].text; renderPreview(); }
-function msgChannel(c) { msg.channel = c; document.querySelectorAll(".msg-ch").forEach(b => b.classList.toggle("active", b.dataset.c === c)); renderRecipients(); }
+function msgChannel(c) { msg.channel = c; document.querySelectorAll(".msg-ch").forEach(b => b.classList.toggle("active", b.dataset.c === c)); $("msg_many").classList.toggle("hidden", c !== "whatsapp"); renderRecipients(); }
 async function addRecipientNos(nos) {
     const docs = await Promise.all(nos.map(no => parishRef().collection(noType(no) === "CLG" ? "clergy" : "members").doc(no).get().catch(() => null)));
     for (const d of docs) if (d && d.exists) addRecipient(d.data());
@@ -426,63 +429,149 @@ async function sendBatch(i) {
 async function loadMsgLog() {
     const s = await parishRef().collection("messageLog").orderBy("at", "desc").limit(20).get();
     $("msg_log").innerHTML = s.docs.map(d => { const x = d.data(); const t = x.at && x.at.toDate ? x.at.toDate() : null;
+        if (x.channel === "whatsapp_batch") return `<p class="msg-log-row">Send to many (${x.count}) · WhatsApp · ${esc(TEMPLATES[x.template]?.name || x.template)} · <span class="text-gray-500">${t ? esc(t.toLocaleString()) : ""}</span></p>`;
         return `<p class="msg-log-row">${esc(x.name)} · ${x.channel === "whatsapp" ? "WhatsApp" : "Email"} · ${esc(TEMPLATES[x.template]?.name || x.template)} · <span class="text-gray-500">${t ? esc(t.toLocaleString()) : ""}</span></p>`; }).join("")
         || `<p class="text-gray-400">Nothing sent yet.</p>`;
 }
 
-// ================================================================= 4. SUPER ADMIN: public website
-let site = { after: null, published: {} };
-const PUBLIC_SERVICES = () => SCHEDULE.map(s => ({ day: DOW[s.dow], time: s.time, name: s.name + (s.week === "first" ? " (1st Thursday)" : s.week === "other" ? " (other Thursdays)" : "") }));
-async function openWebsite() {
-    site = { after: null, published: {} };
-    $("web_parishes").innerHTML = "";
-    await moreWebParishes();
-    const ev = await db.collection("publicEvents").orderBy("date").limit(50).get();
-    $("web_events").innerHTML = ev.docs.map(d => { const e = d.data(); return `<div class="flex justify-between border rounded p-2"><span>${esc(e.title)} · ${esc(e.date)} ${esc(e.time)} · ${esc(e.city)}</span><button onclick="unpublish('publicEvents','${d.id}')" class="text-red-600">Remove</button></div>`; }).join("") || `<p class="text-gray-400">No public events.</p>`;
-    const se = await db.collection("publicSermons").orderBy("date", "desc").limit(50).get();
-    $("web_sermons").innerHTML = se.docs.map(d => { const x = d.data(); return `<div class="flex justify-between border rounded p-2"><span>${esc(x.title)} · ${esc(x.preacher)} · ${esc(x.date)}</span><button onclick="unpublish('publicSermons','${d.id}')" class="text-red-600">Remove</button></div>`; }).join("") || `<p class="text-gray-400">No public sermons. Open Sermons (church-wide) and tap "Put on website".</p>`;
+// ================================================================= 4. PARISH WEBSITE (Phase 9b: one site per parish)
+// Served at /site/?p=<parish code>. The parish admin controls it. Only public fields are copied into publicSites/{code}.
+const siteBase = () => location.origin + "/site/?p=";
+const joinBase = () => location.origin + "/join?p=";
+const myCode = () => localState.parish.code || "";
+const siteRef = () => db.collection("publicSites").doc(myCode());
+const publicServices = () => SCHEDULE.concat(ACTIVITIES).map(s => ({ day: DOW[s.dow], time: s.time || "", name: s.name + (s.week === "first" ? " (1st of month)" : s.week === "other" ? " (other weeks)" : "") }));
+async function openSite() {
+    if (!myCode()) { $("ws_body").innerHTML = `<p class="text-red-700">This parish has no parish code yet. Ask the Super Admin to "Give a parish code".</p>`; return; }
+    $("ws_link").textContent = siteBase() + myCode();
+    $("ws_link").href = siteBase() + myCode();
+    const [site, evs, sms] = await Promise.all([siteRef().get(), siteRef().collection("events").get(), siteRef().collection("sermons").get()]);
+    const d = site.exists ? site.data() : {};
+    $("ws_welcome").value = d.welcome || ""; $("ws_email").value = d.contactEmail || ""; $("ws_phone").value = d.contactPhone || "";
+    $("ws_status").textContent = site.exists ? "Live" : "Not published yet";
+    const up = (await parishRef().collection("events").where("date", ">=", localToday()).orderBy("date").limit(30).get()).docs;
+    const shown = new Set(evs.docs.map(x => x.id));
+    $("ws_events").innerHTML = up.map(x => `<label class="ws-ev flex items-center gap-2 border rounded p-2"><input type="checkbox" ${shown.has(x.id) ? "checked" : ""} ${site.exists ? "" : "disabled"} onchange="toggleSiteEvent('${x.id}', this.checked)">
+        <span>${esc(x.data().title)} · ${esc(fmtDay(x.data().date))} ${esc(x.data().time)}</span></label>`).join("") || `<p class="text-gray-400">No upcoming events. Add them in Calendar.</p>`;
+    $("ws_sermons").innerHTML = sms.docs.map(x => `<div class="flex justify-between border rounded p-2"><span>${esc(x.data().title)} · ${esc(x.data().date)}</span><button onclick="unpublishSermon('${x.id}')" class="text-red-600">Remove</button></div>`).join("")
+        || `<p class="text-gray-400">None. Open a sermon and tap "Put on our website".</p>`;
 }
-// Paged: 20 parishes at a time, never "load all".
-async function moreWebParishes() {
-    let q = db.collection("parishes").orderBy("name").limit(20);
-    if (site.after) q = q.startAfter(site.after);
-    const s = await q.get();
-    site.after = s.docs[s.docs.length - 1] || site.after;
-    const pubs = await Promise.all(s.docs.map(d => db.collection("publicParishes").doc(d.id).get()));
-    $("web_parishes").insertAdjacentHTML("beforeend", s.docs.map((d, i) => { const p = d.data(); site.published[d.id] = pubs[i].exists;
-        return `<div class="web-row flex items-center justify-between gap-2 border rounded p-2" id="web_${d.id}"><span><b>${esc(p.name)}</b> · ${esc([p.city, p.country].filter(Boolean).join(", "))}${p.status !== "Approved" ? " · " + esc(p.status) : ""}</span>
-        <span class="flex gap-1">${pubs[i].exists ? `<span class="text-emerald-700">Live</span>` : ""}<button onclick="publishParish('${d.id}')" class="pub-btn px-2 py-1 bg-emerald-600 text-white rounded">${pubs[i].exists ? "Update" : "Publish"}</button>
-        ${pubs[i].exists ? `<button onclick="unpublish('publicParishes','${d.id}')" class="px-2 py-1 border rounded text-red-600">Hide</button>` : ""}</span></div>`; }).join(""));
-    $("web_more").classList.toggle("hidden", s.docs.length < 20);
-}
-// Only public fields are copied. Address, contacts, members, stats and lettering never leave the parish record.
-async function publishParish(id) {
-    const p = (await db.collection("parishes").doc(id).get()).data();
-    if (p.status !== "Approved") return alert("Only an approved parish can be published.");
-    const d = { name: p.name, nameLower: p.name.toLowerCase(), city: p.city || "", cityLower: (p.city || "").toLowerCase(), country: p.country || "",
-        countryLower: (p.country || "").toLowerCase(), mapsUrl: p.mapsUrl || "", services: PUBLIC_SERVICES(), updatedAt: nowIso() };
-    await db.collection("publicParishes").doc(id).set(d).catch(e => alert("Not published: " + e.message));
-    await openWebsite();
-}
-async function unpublish(col, id) {
-    if (!confirm("Remove this from the public website?")) return;
-    await db.collection(col).doc(id).delete().catch(e => alert("Not removed: " + e.message));
-    await openWebsite();
-}
-async function addPublicEvent() {
-    const title = val("we_title"), date = val("we_date"), time = val("we_time");
-    if (!title || !date || !time) return alert("Fill in title, date and time.");
-    await db.collection("publicEvents").add({ title, date, time, venue: val("we_venue"), city: val("we_city"), notes: val("we_notes"), updatedAt: nowIso() })
+async function publishSite() {
+    if (!myCode()) return alert("This parish has no parish code yet.");
+    const email = val("ws_email");
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return alert("That email does not look right.");
+    const p = localState.parish;
+    await busy("ws_publish", () => siteRef().set({ parishId: localState.currentParishId, name: p.name, city: p.city || "", country: p.country || "", mapsUrl: p.mapsUrl || "",
+        welcome: $("ws_welcome").value.slice(0, 2000), contactEmail: email.toLowerCase(), contactPhone: val("ws_phone").slice(0, 30), services: publicServices(), updatedAt: nowIso() }))
         .catch(e => alert("Not published: " + e.message));
-    ["we_title", "we_venue", "we_city", "we_notes"].forEach(k => $(k).value = "");
-    await openWebsite();
+    await openSite();
+}
+// Only title, type, date, time, venue, notes: volunteer names never go public.
+async function toggleSiteEvent(id, on) {
+    const ref = siteRef().collection("events").doc(id);
+    if (!on) return ref.delete().catch(e => alert("Not removed: " + e.message));
+    const e = (await parishRef().collection("events").doc(id).get()).data();
+    await ref.set({ title: e.title, kind: e.kind, date: e.date, time: e.time, venue: e.venue || "", notes: (e.notes || "").slice(0, 600), updatedAt: nowIso() })
+        .catch(err => alert("Not published: " + err.message));
 }
 async function publishSermon(id) {
     const x = sermonState.list.find(s => s.id === id);
-    await db.collection("publicSermons").doc(id).set({ title: x.title, preacher: x.preacher, date: x.date, scripture: x.scripture || "",
-        mediaUrl: x.mediaUrl || "", parishName: x.parishName || "", summary: (x.text || "").slice(0, 300), updatedAt: nowIso() })
-        .then(() => { $("pubSermonBtn").textContent = "On the website ✓"; })
+    if (!(await siteRef().get().catch(() => null))?.exists) return alert("Publish your parish website first (Our Website).");
+    await siteRef().collection("sermons").doc(id).set({ title: x.title, preacher: x.preacher, date: x.date, scripture: x.scripture || "",
+        mediaUrl: x.mediaUrl || "", summary: (x.text || "").slice(0, 300), updatedAt: nowIso() })
+        .then(() => { $("pubSermonBtn").textContent = "On our website ✓"; })
         .catch(e => alert("Not published: " + e.message));
+}
+async function unpublishSermon(id) { await siteRef().collection("sermons").doc(id).delete().catch(e => alert("Not removed: " + e.message)); await openSite(); }
+function copyText(t, btn) {
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { if (btn) $(btn).textContent = "Copied ✓"; })
+        .catch(() => prompt("Copy this:", t));
+}
+
+// ================================================================= 4b. JOIN LINK + PENDING REGISTRATIONS (dashboard)
+async function renderJoinCard() {
+    if (localState.role !== "parish_admin") return;
+    const card = $("joinCard");
+    if (!myCode()) { card.innerHTML = `<p class="font-bold text-sm">Member sign-up link</p><p class="text-gray-500">Needs a parish code. Ask the Super Admin.</p>`; card.classList.remove("hidden"); return; }
+    const [j, pend] = await Promise.all([db.collection("joinLinks").doc(myCode()).get(), parishRef().collection("pendingMembers").where("status", "==", "Pending").get()]);
+    const open = j.exists && j.data().open, link = joinBase() + myCode();
+    let qr = "";
+    try { const q = qrcode(0, "M"); q.addData(link); q.make(); qr = q.createSvgTag(4, 8, "QR code for the sign-up link"); } catch (e) { console.error("qr", e); }
+    pendState.list = pend.docs.map(d => ({ id: d.id, ...d.data() }));
+    card.innerHTML = `<p class="font-bold text-sm"><i class="fa-solid fa-user-plus text-emerald-700 mr-1"></i> Member sign-up link</p>
+        <p class="text-gray-600">Members fill the form on their phone; you approve each one here. ${open ? '<span class="text-emerald-700 font-bold">Open</span>' : '<span class="text-gray-500 font-bold">Closed</span>'}</p>
+        ${open ? `<div class="flex gap-3 items-center"><div id="joinQr" class="w-28 shrink-0 bg-white">${qr}</div>
+            <div class="space-y-1 min-w-0"><p id="joinLink" class="font-mono break-all text-[10px]">${esc(link)}</p>
+            <button id="joinCopy" onclick="copyText('${esc(link)}','joinCopy')" class="px-2 py-1 border rounded">Copy link</button>
+            <a id="joinShare" href="https://wa.me/?text=${encodeURIComponent("Register as a member of " + (localState.parish.name || "our parish") + ": " + link)}" target="_blank" rel="noopener" class="inline-block px-2 py-1 bg-emerald-600 text-white rounded"><i class="fa-brands fa-whatsapp"></i> Share</a></div></div>` : ""}
+        <button id="joinToggle" onclick="toggleJoin(${!open})" class="px-3 py-2 rounded ${open ? "border" : "bg-emerald-700 text-white"} font-bold">${open ? "Close the link" : "Open the sign-up link"}</button>
+        <p class="font-bold pt-1">Pending registrations (${pendState.list.length})</p>
+        ${pendState.list.map(p => `<div class="pend-row flex items-center justify-between gap-2 border rounded p-2"><span>${esc(p.fullName)} <span class="text-gray-500">${esc(p.phone)}</span></span>
+            <span class="flex gap-1"><button onclick="reviewPending('${p.id}')" class="px-2 py-1 bg-blue-700 text-white rounded">Review</button><button onclick="rejectPending('${p.id}')" class="px-2 py-1 border rounded text-red-600">Reject</button></span></div>`).join("") || `<p class="text-gray-400">None.</p>`}`;
+    card.classList.remove("hidden");
+}
+let pendState = { list: [] };
+async function toggleJoin(open) {
+    await db.collection("joinLinks").doc(myCode()).set({ parishId: localState.currentParishId, name: localState.parish.name, open, updatedAt: nowIso() })
+        .catch(e => alert("Not changed: " + e.message));
+    await renderJoinCard();
+}
+// Opens the normal member form, pre-filled; Save creates the numbered member and marks the request Approved together.
+function reviewPending(id) {
+    const p = pendState.list.find(x => x.id === id);
+    openPersonForm("members", null);
+    const set = (k, v) => $(k).value = v ?? "";
+    set("p_name", p.fullName); set("p_gender", p.gender); fillRanks(""); set("p_marital", p.maritalStatus); set("p_address", p.address);
+    set("p_phone", p.phone); set("p_email", p.email); set("p_occupation", p.occupation); set("p_dobDay", p.dobDay); set("p_dobMonth", p.dobMonth);
+    set("p_dobYear", p.dobYear); set("p_wedDay", p.weddingDay); set("p_wedMonth", p.weddingMonth); set("p_nokName", p.nokName); set("p_nokPhone", p.nokPhone);
+    $("p_consent").checked = p.consentGiven === true;
+    form.photo = p.photo || "";
+    $("p_photoPreview").classList.toggle("hidden", !form.photo); if (form.photo) $("p_photoPreview").src = form.photo;
+    form.pendingId = id;
+    $("personModalTitle").textContent = "APPROVE SIGN-UP: CHECK, EDIT, SAVE";
+}
+async function rejectPending(id) {
+    const reason = prompt("Reason for rejecting (kept with the request):");
+    if (!reason) return;
+    await parishRef().collection("pendingMembers").doc(id).update({ status: "Rejected", reason: reason.slice(0, 300), decidedAt: nowIso(), decidedBy: localState.user.uid })
+        .catch(e => alert("Not saved: " + e.message));
+    await renderJoinCard();
+}
+
+// ================================================================= 4c. WEEKLY TIMETABLE EDITOR (Parish Settings)
+let ttRows = [];
+function openTimetable() {
+    ttRows = SCHEDULE.map(s => ({ ...s, kind: "service" })).concat(ACTIVITIES.map(a => ({ ...a, kind: "activity" })));
+    renderTimetable();
+}
+function renderTimetable() {
+    const dayOpts = v => DOW.map((d, i) => `<option value="${i}" ${i === v ? "selected" : ""}>${d}</option>`).join("");
+    $("tt_rows").innerHTML = ttRows.map((r, i) => `<div class="tt-row border rounded p-2 space-y-1 ${r.kind === "activity" ? "bg-emerald-50" : "bg-white"}">
+        <input value="${esc(r.name)}" oninput="ttRows[${i}].name=this.value" class="tt-name w-full border p-2 rounded" placeholder="Name">
+        <div class="grid grid-cols-4 gap-1"><select onchange="ttRows[${i}].dow=Number(this.value)" class="tt-day border p-2 rounded bg-white">${dayOpts(r.dow)}</select>
+        <input type="time" value="${esc(r.time)}" oninput="ttRows[${i}].time=this.value" class="tt-time border p-2 rounded">
+        <select onchange="ttRows[${i}].week=this.value" class="border p-2 rounded bg-white"><option value="">Every week</option><option value="first" ${r.week === "first" ? "selected" : ""}>1st of month</option><option value="other" ${r.week === "other" ? "selected" : ""}>Other weeks</option></select>
+        <select onchange="ttRows[${i}].kind=this.value" class="tt-kind border p-2 rounded bg-white"><option value="service">Service</option><option value="activity" ${r.kind === "activity" ? "selected" : ""}>Activity</option></select></div>
+        <button onclick="ttRows.splice(${i},1);renderTimetable()" class="tt-del text-red-600">Remove</button></div>`).join("");
+    $("tt_note").textContent = TIMETABLE_CUSTOM ? "Your parish's own timetable." : "Standard CCC timetable (default).";
+}
+function addTimetableRow() { ttRows.push({ key: "", name: "", dow: 6, time: "18:00", week: "", kind: "service" }); renderTimetable(); }
+async function saveTimetable() {
+    const rows = ttRows.map(r => ({ ...r, name: String(r.name || "").trim().slice(0, 60) }));
+    if (rows.some(r => !r.name || (r.kind === "service" && !/^\d\d:\d\d$/.test(r.time || "")))) return alert("Every row needs a name, and every service a time.");
+    if (!rows.some(r => r.kind === "service")) return alert("Keep at least one service.");
+    if (rows.length > 40) return alert("Up to 40 rows.");
+    // Keys never change for existing rows, so old attendance records keep their type. New rows get c_ (service) / a_ (activity).
+    for (const r of rows) if (!r.key) r.key = (r.kind === "activity" ? "a_" : "c_") + Math.random().toString(36).slice(2, 10);
+    const services = rows.map(r => ({ key: r.key, name: r.name, dow: r.dow, time: r.time || "", week: r.week || "", kind: r.kind }));
+    await busy("tt_save", () => parishRef().collection("settings").doc("timetable").set({ services, updatedAt: nowIso() }))
+        .then(() => { setTimetable(services); openTimetable(); alert("Timetable saved. Attendance, calendar and the dashboard now use it."); })
+        .catch(e => alert("Not saved: " + e.message));
+}
+async function resetTimetable() {
+    if (!confirm("Go back to the standard CCC timetable?")) return;
+    await parishRef().collection("settings").doc("timetable").delete().catch(e => alert("Not reset: " + e.message));
+    setTimetable(null); openTimetable();
 }
 
 // ================================================================= 5. SUPER ADMIN: change parish admin (handover)
@@ -571,3 +660,21 @@ async function completeClaimedHandovers() {
         if (inv.exists && inv.data().usedBy) await stepHandover(d.id, "Completed", "admin-handover-complete", true, "New admin " + d.data().newEmail + " activated the invite");
     }
 }
+
+// ================================================================= 3b. WHATSAPP "SEND TO MANY" (one message, many chats)
+// The text is written once ({name} -> "Beloved"). The phone's share sheet (or WhatsApp's share intent with no number)
+// lets the admin pick several chats, a group or a broadcast list in one go. Logged as ONE batch: template, count, sender.
+async function sendToMany() {
+    const text = fill($("msg_text").value, null);
+    let via = "wa.me";
+    if (navigator.share) {
+        try { await navigator.share({ text }); via = "share"; }
+        catch (e) { if (e.name === "AbortError") return; openWaShare(text); }
+    } else openWaShare(text);
+    await parishRef().collection("messageLog").add({ template: val("msg_tpl"), channel: "whatsapp_batch", count: msg.recipients.length,
+        at: firebase.firestore.FieldValue.serverTimestamp(), by: localState.user.uid }).catch(e => alert("Could not log the message: " + e.message));
+    $("msg_queue").innerHTML = `<p class="text-emerald-700 font-bold">Opened ${via === "share" ? "the share sheet" : "WhatsApp"}: pick the chats, group or broadcast list, then tap Send.</p>`;
+    loadMsgLog();
+}
+function openWaShare(text) { window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank", "noopener"); }
+function copyMessage() { copyText(fill($("msg_text").value, null), "msg_copy"); }
