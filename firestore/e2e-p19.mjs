@@ -142,6 +142,7 @@ import { createRequire } from 'node:module';
 const XLSX = createRequire(import.meta.url)('xlsx');
 const WORKER = 'https://ccc-ai.aarinat-company-limited.workers.dev';
 const calls = [], r2 = new Map();
+let r2Off = false; // true = the worker answers like a worker with no R2 bucket bound (503)
 const PEOPLE = {
   image: [{ fullName: 'Adebola Testperson', gender: 'Female', maritalStatus: 'Married', phone: '08010000001', rank: 'Mother Celestial', dobDay: 15, dobMonth: 4,
     track: 'member', prophet: true, departments: ['choir'], deptRole: 'Chorister', committees: [{ name: 'Harvest Committee 2026', role: 'Secretary' }] }],
@@ -160,6 +161,7 @@ async function mockWorker(route) {
     const kind = b.file ? 'image' : /XLSXMARK/.test(b.text) ? 'xlsx' : 'txt';
     return route.fulfill({ status: 200, headers: cors, contentType: 'application/json', body: JSON.stringify({ people: PEOPLE[kind], engine: 'mock' }) });
   }
+  if (r2Off && url.pathname.startsWith('/archive/')) return route.fulfill({ status: 503, headers: cors, contentType: 'application/json', body: '{"error":"archive storage not set up yet"}' });
   if (url.pathname === '/archive/upload') {
     const pid = req.headers()['x-parish-id'], mime = req.headers()['content-type'];
     const key = `${pid}/2026/${crypto.randomUUID()}.${mime === 'application/pdf' ? 'pdf' : 'jpg'}`, body = req.postDataBuffer();
@@ -269,7 +271,8 @@ try {
   const aid = await page.getAttribute('.ar-row', 'data-id');
   const ad = await readDoc('archive/' + aid);
   assert.equal(ad.parishId.stringValue, pid); assert.ok(ad.fileKey.stringValue.startsWith(pid + '/')); assert.equal(ad.year.integerValue, '1990');
-  assert.equal(ad.mime.stringValue, 'image/jpeg');
+  assert.equal(ad.mime.stringValue, 'image/jpeg'); assert.equal(ad.storage.stringValue, 'r2');
+  assert.ok(await page.isHidden('#ar_demoNote'), 'no demo note while R2 works');
   assert.equal((await readDoc(`auditLog/archive_${aid}_v1`)).action.stringValue, 'archive-add');
   await page.fill('#ar_q', 'founding'); assert.equal(await page.locator('.ar-row').count(), 1);
   await page.fill('#ar_q', 'nothing-like-this'); assert.equal(await page.locator('.ar-row').count(), 0);
@@ -292,6 +295,101 @@ try {
   assert.equal((await readDoc('archive/' + aid)).hidden.booleanValue, true);
   assert.equal((await readDoc(`auditLog/archive_${aid}_v2`)).action.stringValue, 'archive-hide');
   await page.check('#ar_showHidden'); assert.equal(await page.locator('.ar-row').count(), 1);
+  await page.uncheck('#ar_showHidden');
+
+  // ---- 5. DEMO storage (no R2 yet: worker answers 503). Files go into Firestore chunks instead.
+  r2Off = true;
+  const r2Before = r2.size;
+  await page.evaluate(() => { arch.mode = ''; arch.urls = {}; });
+  await nav('archive');
+  await page.waitForSelector('#ar_demoNote:not(.hidden)');
+  // 5a. A big photo: made into a JPEG (long side 1600) and split into chunks of <= 700 KB.
+  const big = await page.evaluate(() => {
+    const c = document.createElement('canvas'); c.width = 4000; c.height = 4000; const x = c.getContext('2d');
+    const img = x.createImageData(4000, 4000); for (let i = 0; i < img.data.length; i++) img.data[i] = (Math.random() * 255) | 0;
+    x.putImageData(img, 0, 0); x.fillStyle = '#1e3a8a'; x.font = 'bold 400px sans-serif'; x.fillText('1975', 600, 2000);
+    return c.toDataURL('image/jpeg', 0.95).split(',')[1];
+  });
+  await page.click('#ar_addBtn');
+  assert.match(await page.textContent('#p9Body'), /max 5 MB, PDF up to 10 pages/);
+  await page.setInputFiles('#af_file', { name: 'founding-photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(big, 'base64') });
+  await page.fill('#af_title', 'Founding day photo 1975'); await page.selectOption('#af_cat', 'Photos'); await page.fill('#af_date', '1975');
+  await page.fill('#af_tags', 'founding');
+  let d1 = dialogs.length;
+  await page.click('#af_saveBtn');
+  await modalClosed('p9Modal');
+  noFail(d1);
+  await page.selectOption('#ar_cat', ''); await page.fill('#ar_year', '1975');
+  await page.waitForFunction(() => document.querySelectorAll('.ar-row').length === 1);
+  const fid = await page.getAttribute('.ar-row', 'data-id');
+  const fd = await readDoc('archive/' + fid);
+  assert.equal(fd.storage.stringValue, 'firestore'); assert.equal(fd.fileKey.stringValue, ''); assert.equal(fd.mime.stringValue, 'image/jpeg');
+  assert.equal(fd.pages.integerValue, '1');
+  const nCh = +fd.chunks.integerValue, fsize = +fd.size.integerValue;
+  assert.ok(nCh >= 2, 'big photo split into ' + nCh + ' chunks, size ' + fsize); assert.ok(fsize <= 5 * 1024 * 1024);
+  let total = 0;
+  for (let i = 0; i < nCh; i++) { const c = await readDoc(`archive/${fid}/chunks/${i}`); const n = Buffer.from(c.data.bytesValue, 'base64').length; assert.ok(n <= 700 * 1024); total += n; }
+  assert.equal(total, fsize, 'chunks add up to the file');
+  assert.equal(r2.size, r2Before, 'nothing went to R2');
+  assert.equal((await readDoc(`auditLog/archive_${fid}_v1`)).action.stringValue, 'archive-add');
+  await page.click('.ar-row');
+  await page.waitForFunction(() => document.querySelector('.ar-page')?.naturalWidth > 0);
+  const dims = await page.evaluate(() => { const i = document.querySelector('.ar-page'); return [i.naturalWidth, i.naturalHeight]; });
+  assert.equal(Math.max(...dims), 1600, 'long side 1600 px: ' + dims);
+  await shot('p19-04-archive-demo-photo');
+  promptAnswer = 'Wrong year';
+  await page.click('#ar_hideBtn');
+  await page.waitForFunction(() => document.querySelectorAll('.ar-row').length === 0);
+  assert.equal((await readDoc('archive/' + fid)).hidden.booleanValue, true);
+  assert.equal((await readDoc('archive/' + fid)).chunks.integerValue, String(nCh), 'chunks kept');
+  // 5b. A 3-page PDF: each page becomes a picture (vendored pdf.js), viewer shows all pages.
+  const pp = await browser.newPage();
+  await pp.setContent(['Minutes page one', 'Minutes page two', 'Minutes page three'].map(t => `<div style="page-break-after:always;font:48px serif;padding:80px">${t}</div>`).join(''));
+  const pdfBuf = await pp.pdf({ format: 'A4' }); await pp.close();
+  await page.fill('#ar_year', '');
+  await page.click('#ar_addBtn');
+  await page.setInputFiles('#af_file', { name: 'minutes-1982.pdf', mimeType: 'application/pdf', buffer: pdfBuf });
+  await page.fill('#af_title', 'Harvest minutes 1982'); await page.selectOption('#af_cat', 'Minutes'); await page.fill('#af_date', '1982-09');
+  d1 = dialogs.length;
+  await page.click('#af_saveBtn');
+  await modalClosed('p9Modal');
+  noFail(d1);
+  await page.fill('#ar_year', '1982');
+  await page.waitForFunction(() => document.querySelectorAll('.ar-row').length === 1);
+  const pid2 = await page.getAttribute('.ar-row', 'data-id');
+  const pd = await readDoc('archive/' + pid2);
+  assert.equal(pd.storage.stringValue, 'firestore'); assert.equal(pd.mime.stringValue, 'application/pdf'); assert.equal(pd.pages.integerValue, '3');
+  assert.ok(+pd.chunks.integerValue >= 3);
+  await page.click('.ar-row');
+  await page.waitForFunction(() => [...document.querySelectorAll('.ar-page')].filter(i => i.naturalWidth > 0).length === 3);
+  assert.match(await page.textContent('#ar_viewer'), /PDF kept as 3 page pictures/);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('p19-05-archive-demo-pdf');
+  // Extract people from the demo item: the page pictures go to the intake agent.
+  const before2 = calls.length;
+  await page.click('#ar_extractBtn');
+  await page.waitForFunction(() => document.querySelectorAll('.in-file[data-status="Done"]').length === 3, null, { timeout: 30000 });
+  assert.equal(calls.length, before2 + 3); assert.ok(calls.slice(-3).every(c => c.mime === 'image/jpeg'));
+  // 5c. Too many pages is refused with a friendly message.
+  const pp2 = await browser.newPage();
+  await pp2.setContent(Array.from({ length: 11 }, (_, i) => `<div style="page-break-after:always">Page ${i + 1}</div>`).join(''));
+  const pdf11 = await pp2.pdf({ format: 'A4' }); await pp2.close();
+  await nav('archive');
+  await page.click('#ar_addBtn');
+  await page.setInputFiles('#af_file', { name: 'long.pdf', mimeType: 'application/pdf', buffer: pdf11 });
+  await page.fill('#af_title', 'Too long');
+  await page.click('#af_saveBtn');
+  await page.waitForFunction(() => /11 pages/.test(document.getElementById('af_status').textContent));
+  await page.evaluate(() => closeModal('p9Modal'));
+  // Editing a demo item keeps storage + chunks.
+  await page.evaluate(id => archiveForm(id), pid2);
+  await page.fill('#af_title', 'Harvest committee minutes 1982');
+  await page.click('#af_saveBtn'); await modalClosed('p9Modal');
+  const pe = await readDoc('archive/' + pid2);
+  assert.equal(pe.version.integerValue, '2'); assert.equal(pe.storage.stringValue, 'firestore'); assert.equal(pe.chunks.integerValue, pd.chunks.integerValue);
+  await page.fill('#ar_year', '');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('p19-06-archive-demo-list');
   assert.deepEqual(pageErrors, [], 'no page errors');
   console.log('E2E BATCH 18 (P19) PASSED');
 } catch (e) {

@@ -595,6 +595,7 @@
                     <div class="pb-2 border-b flex justify-between items-center gap-2"><div><h2 class="text-lg font-bold"><i class="fa-solid fa-box-archive text-amber-600"></i> Archive</h2>
                         <p class="text-gray-500">History, minutes, registers, certificates, photos and letters. Kept for good: never deleted, only hidden.</p></div>
                         <button id="ar_addBtn" onclick="archiveForm()" class="hidden px-3 py-2 bg-blue-900 text-white rounded font-bold whitespace-nowrap">+ Add</button></div>
+                    <p id="ar_demoNote" class="hidden bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-900"><i class="fa-solid fa-flask"></i> <b>Demo storage.</b> Files are kept free inside the database for now: photos are made smaller, PDFs are kept as page pictures (up to 10 pages), max 5 MB each. Nothing is lost when full storage is switched on later.</p>
                     <div class="grid grid-cols-2 gap-2">
                         <input id="ar_q" oninput="renderArchive()" class="col-span-2 border p-2.5 rounded" placeholder="Search title, tags, description">
                         <select id="ar_cat" onchange="renderArchive()" class="border p-2 rounded"><option value="">All categories</option></select>
