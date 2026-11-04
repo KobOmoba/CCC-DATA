@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>if (location.pathname === "/site" || location.pathname === "/join") document.write('<base href="/site/">');</script>
+<script>if (location.pathname === "/join") document.write('<base href="/join/">');</script>
 <title>Join us</title>
 <meta name="description" content="Register as a member of this parish.">
 <meta name="theme-color" content="#1e3a8a">
 <meta name="robots" content="noindex">
-<link rel="stylesheet" href="site.css">
-<script src="site.js" defer></script>
+<link rel="stylesheet" href="join.css">
+<link rel="icon" href="/assets/ccc-logo.webp" type="image/webp">
 </head>
 <body>
+<header class="top"><div class="brand"><img class="logo" src="/assets/ccc-logo.webp" alt="Celestial Church of Christ logo">
+<span><b>CELESTIAL CHURCH OF CHRIST</b><small>Member sign-up</small></span></div></header>
 <main>
 <h1>Join us</h1>
 <p id="joinIntro" class="muted">Loading…</p>
@@ -37,5 +39,6 @@
 <div id="joinDone" class="card" hidden><h3>Thank you! Halleluyah 🙌</h3><p>Your registration was sent to the parish admin, who will confirm it.</p></div>
 <script src="join.js"></script>
 </main>
+<footer class="bottom">&copy; 2026 Celestial Church of Christ · <a href="privacy.html">Privacy notice (NDPA)</a></footer>
 </body>
 </html>

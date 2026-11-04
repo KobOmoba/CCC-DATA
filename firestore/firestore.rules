@@ -715,39 +715,9 @@ service cloud.firestore {
       allow delete: if isParishAdminOf(resource.data.parishId); // "stop sharing"; the parish copy stays
     }
 
-    // ---- Phase 9b: ONE public website per parish, at /site/?p=<parish code>. The parish admin publishes it.
-    // Only public fields: name, city, country, map link, timetable, welcome text, public contact, events, sermons.
-    function siteOwner(code) { return isParishAdminOf(get(docAt('publicSites/' + code)).data.parishId); }
+    // ---- Phase 9b member sign-up link (/join). The per-parish public website was removed in Phase 10
+    // (separate project); publicSites is now closed by the default deny.
     function ownsCode(pid, code) { return isParishAdminOf(pid) && get(docAt('parishes/' + pid)).data.get('code', '') == code; }
-    match /publicSites/{code} {
-      allow read: if true;
-      allow create, update: if ownsCode(request.resource.data.parishId, code)
-        && request.resource.data.keys().hasOnly(['parishId', 'name', 'city', 'country', 'mapsUrl', 'welcome', 'contactEmail', 'contactPhone', 'services', 'updatedAt'])
-        && str(request.resource.data.name, 120) && s(request.resource.data.get('city', ''), 80) && s(request.resource.data.get('country', ''), 80)
-        && httpsOpt(request.resource.data, 'mapsUrl') && s(request.resource.data.get('welcome', ''), 2000)
-        && (request.resource.data.get('contactEmail', '') == '' || isEmail(request.resource.data.contactEmail))
-        && s(request.resource.data.get('contactPhone', ''), 30)
-        && request.resource.data.services is list && request.resource.data.services.size() <= 40;
-      allow delete: if isSuper() || isParishAdminOf(resource.data.parishId);
-      match /events/{id} {
-        allow read: if true;
-        allow create, update: if siteOwner(code)
-          && request.resource.data.keys().hasOnly(['title', 'kind', 'date', 'time', 'venue', 'notes', 'updatedAt'])
-          && str(request.resource.data.title, 100) && isDate(request.resource.data.date)
-          && request.resource.data.time is string && request.resource.data.time.matches('^[0-2][0-9]:[0-5][0-9]$')
-          && s(request.resource.data.get('kind', ''), 20) && s(request.resource.data.get('venue', ''), 120) && s(request.resource.data.get('notes', ''), 600);
-        allow delete: if isSuper() || siteOwner(code);
-      }
-      match /sermons/{id} {
-        allow read: if true;
-        allow create, update: if siteOwner(code)
-          && request.resource.data.keys().hasOnly(['title', 'preacher', 'date', 'scripture', 'mediaUrl', 'summary', 'updatedAt'])
-          && str(request.resource.data.title, 150) && str(request.resource.data.preacher, 120) && isDate(request.resource.data.date)
-          && s(request.resource.data.get('scripture', ''), 200) && httpsOpt(request.resource.data, 'mediaUrl')
-          && s(request.resource.data.get('summary', ''), 600);
-        allow delete: if isSuper() || siteOwner(code);
-      }
-    }
     // Join link switch: anyone may GET one by code (never list); the parish admin opens/closes it.
     match /joinLinks/{code} {
       allow get: if true;

@@ -64,7 +64,7 @@ with the invited email + code.
     city, rank or occupation. Only the Super Admin changes `committees` on it.
   - **Committees**: `committees/{id}` + `committeeMembers/{committee}_{parish}_{no}` (Chair / Secretary / Member; clergy allowed by
     clergy number; former members kept). Every Super Admin change is versioned and written to `auditLog`. Nothing is deleted.
-- **Phase 9** (`p9.js`, `website/`):
+- **Phase 9** (`p9.js`):
   - **Sermon Library**: `parishes/{p}/sermons/{id}` (title, preacher name or clergy number, date, service type, scripture, tags,
     transcript text up to 200k chars, `mediaUrl` = an https LINK to YouTube / Google Drive / Facebook; Firebase Storage is not enabled).
     "Share church-wide" also writes `sharedSermons/{parish}_{id}` (read by every active parish admin, the Super Admin and the Church Head;
@@ -80,11 +80,6 @@ with the invited email + code.
     Super Admin opens Parishes the handover completes. "Revoke now" removes the old admin at once. Revoked = `users/{uid}.role = 'revoked'`
     (kept, not deleted) + `adminEmails` entry removed. The rules refuse to revoke or delete a parish admin outside an audited handover.
 - **Phase 9b** (founder review):
-  - **One website per parish** (`website/`, no login, no cookies): `/site/?p=<parish code>`. Pages (menu is one data list, `PAGES` in
-    `website/site.js`): Home ("Halleluyah 🙌" + welcome text), About & beliefs, Service times, Events, Sermons, Contact, Join us, Privacy (NDPA).
-    The parish admin controls it from **Our Website**: welcome text, public email/phone, which upcoming events show, which sermons
-    ("Put on our website"). Stored in `publicSites/{code}` (+ `events`, `sermons`); rules allow only public fields (no volunteer names, no transcript,
-    no address, no members). Only that parish's admin writes it; the Super Admin may delete (moderation). The old church-wide publishing is removed.
   - **Member self-registration**: dashboard card with the link `/join?p=<code>`, a QR code (vendored `vendor/qrcode.js`, MIT) and Copy / Share on WhatsApp.
     The admin opens/closes it (`joinLinks/{code}`, public get, no list). The member's form writes ONE `parishes/{p}/pendingMembers` doc with no login;
     rules: anonymous create only, every field typed and size-capped, consent required, status must be Pending, honeypot `website` must be empty,
@@ -93,7 +88,7 @@ with the invited email + code.
   - **WhatsApp "Send to many"**: one message ({name} -> "Beloved") through the phone's share sheet (`navigator.share`) or `wa.me/?text=` (no number), so
     the admin picks several chats, a group or a broadcast list. "Copy message" fallback. Logged once: template, `whatsapp_batch`, count, sender.
   - **Editable weekly timetable**: Parish Settings > Weekly services & activities (`parishes/{p}/settings/timetable`; delete = back to the standard CCC
-    timetable). Used by attendance, calendar, dashboard "this week" and the parish website. Existing rows keep their keys, new services get `c_xxx`
+    timetable). Used by attendance, calendar and dashboard "this week". Existing rows keep their keys, new services get `c_xxx`
     (rules accept them for attendance), activities `a_xxx` (calendar only). Old attendance records stay valid.
 
 ### WhatsApp Business Cloud API (later)
@@ -103,9 +98,16 @@ Today `sendWhatsApp(to, text)` in `p9.js` opens wa.me. To send automatically, th
 window must use one). The token must live on a server (e.g. a new `/whatsapp` route on the Cloudflare `ai-worker`, as a secret), never in
 the browser. Then replace `MessagingAdapter.whatsapp.send` with a call to that route; the log stays the same.
 
-### Parish website hosting
-`vercel.json` rewrites `/site`, `/site/*` and `/join` to `website/`, so after the next deploy a parish site is at
-`https://ccc-parish-portal.vercel.app/site/?p=<code>` and its sign-up form at `/join?p=<code>`.
+- **Phase 10** (Batch 12):
+  - Church name is fixed: **CELESTIAL CHURCH OF CHRIST** on the header, login, certificates and messages. Parish setup asks only parish name,
+    city, state, country; address, map link, continent and currency sit under "More (optional)". Lettering stays a Super Admin field.
+  - Official logo `assets/ccc-logo.webp` everywhere (header, login, certificates, favicon, `/join`). Per-parish logo upload removed;
+    old `logo` data is kept but not shown.
+  - The per-parish website (`/site`, `website/`, `publicSites`) is removed: the parish website is a separate project. `publicSites` now
+    falls to the default deny. Greetings use "Halleluyah 🙌" (never paired with good morning/afternoon/evening).
+
+### Member sign-up hosting
+`vercel.json` rewrites `/join` to `join/index.html`; the form is at `https://ccc-parish-portal.vercel.app/join?p=<code>`.
 - `flows/{id}` - places + year only (no names); Super Admin's "Diaspora Flows" summary.
 
 ## Set up Firebase later (on your phone)

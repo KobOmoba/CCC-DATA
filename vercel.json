@@ -1,8 +1,5 @@
 {
   "rewrites": [
-    { "source": "/site", "destination": "/website/index.html" },
-    { "source": "/site/", "destination": "/website/index.html" },
-    { "source": "/site/:file", "destination": "/website/:file" },
-    { "source": "/join", "destination": "/website/join.html" }
+    { "source": "/join", "destination": "/join/index.html" }
   ]
 }

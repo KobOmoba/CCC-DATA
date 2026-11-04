@@ -247,7 +247,6 @@ function showSection(id) {
     if (id === "calendar") openCalendar().catch(e => alert("Could not load the calendar: " + e.message));
     if (id === "messages") openMessages().catch(e => alert("Could not load messages: " + e.message));
     if (id === "parishes" && localState.role === "super_admin") completeClaimedHandovers().catch(e => console.error("handovers", e.message));
-    if (id === "site") openSite().catch(e => alert("Could not load the website settings: " + e.message));
     if (id === "settings" && localState.role === "parish_admin") openTimetable();
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
@@ -257,13 +256,9 @@ const statsRef = () => db.collection("parishStats").doc(localState.currentParish
 const counterRef = () => parishRef().collection("meta").doc("counters");
 
 // ---------------------------------------------------------------- branding
+// Church name and logo are fixed app-wide (CELESTIAL CHURCH OF CHRIST, assets/ccc-logo.webp). Old parish logo data is ignored.
 function showBranding(p) {
     $("dashParishName").textContent = p.name || "";
-    for (const id of ["parishLogo", "settingsLogo"]) {
-        const img = $(id);
-        if (p.logo) { img.src = p.logo; img.classList.remove("hidden"); } else img.classList.add("hidden");
-    }
-    $("logoFallback").classList.toggle("hidden", !!p.logo);
 }
 
 // ---------------------------------------------------------------- parish data
@@ -710,15 +705,6 @@ function fillSettingsForm(p) {
     set("s_state", p.state); set("s_country", p.country); set("s_continent", p.continent); set("s_currency", p.currency);
     $("s_mapsOpen").classList.toggle("hidden", !p.mapsUrl);
     if (p.mapsUrl) $("s_mapsOpen").href = p.mapsUrl;
-    pendingLogo = null;
-}
-let pendingLogo = null;
-async function pickLogo(input) {
-    if (!input.files[0]) return;
-    try {
-        pendingLogo = await compressImage(input.files[0], 60000, 256);
-        $("settingsLogo").src = pendingLogo; $("settingsLogo").classList.remove("hidden");
-    } catch (e) { alert(e.message); }
 }
 function readLocation(prefix) {
     const p = { name: val(prefix + "name"), address: val(prefix + "address"), mapsUrl: val(prefix + "maps"), city: val(prefix + "city"),
@@ -732,7 +718,6 @@ function readLocation(prefix) {
 async function saveParishSettings() {
     const p = readLocation("s_");
     if (p.error) return alert(p.error);
-    if (pendingLogo) p.logo = pendingLogo;
     p.updatedAt = nowIso();
     await busy("saveParishBtn", async () => {
         try {
@@ -919,8 +904,8 @@ function waLink(phone, text) {
     if (d.startsWith("0") && d.length === 11) d = "234" + d.slice(1);
     return `https://wa.me/${d}?text=${encodeURIComponent(text)}`;
 }
-const missText = name => `Halleluyah ${String(name).split(" ")[0]}, we have missed you at ${localState.parish.name || "church"}. We pray all is well with you and your family, and we look forward to seeing you in service soon. God bless you.`;
-const visitText = name => `Halleluyah ${String(name).split(" ")[0]}, thank you for worshipping with us at ${localState.parish.name || "our parish"}. You are always welcome. God bless you.`;
+const missText = name => `Halleluyah 🙌, ${String(name).split(" ")[0]}! We have missed you at ${localState.parish.name || "church"}. We pray all is well with you and your family, and we look forward to seeing you in service soon. God bless you.`;
+const visitText = name => `Halleluyah 🙌, ${String(name).split(" ")[0]}! Thank you for worshipping with us at ${localState.parish.name || "our parish"}. You are always welcome. God bless you.`;
 
 let att = { week: "", specials: [], records: {}, people: [], clergy: [], svc: null, reports: null, cleaning: null };
 
@@ -1827,8 +1812,7 @@ async function showCertificate(kind, id) {
     const p = d.data(), parish = localState.parish || {};
     const certNo = certNoOf(p.no);
     if (!certNo) return alert("Certificates need the parish lettering (e.g. IJY-ABK). Ask the Super Admin to set it for your parish.");
-    const logo = parish.logo ? `<img src="${esc(parish.logo)}" alt="Parish logo" class="w-20 h-20 rounded-full object-cover mx-auto border">`
-        : `<div class="w-20 h-20 mx-auto rounded-full bg-blue-900 text-yellow-300 flex items-center justify-center font-extrabold">CCC</div>`;
+    const logo = `<img src="assets/ccc-logo.webp" alt="Celestial Church of Christ logo" class="w-20 h-20 rounded-full object-contain mx-auto bg-white">`;
     const line = (k, v) => `<tr><td class="py-1 pr-2 text-gray-600 align-top w-2/5">${esc(k)}</td><td class="py-1 font-semibold border-b border-dotted border-gray-400">${esc(v || "-")}</td></tr>`;
     const isBirth = kind === "births";
     const rows = isBirth

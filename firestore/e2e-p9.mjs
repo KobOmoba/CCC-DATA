@@ -16,11 +16,11 @@ const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/doc
 const PASS = 'Passw0rd!';
 
 // Tiny static server for index.html / app.js / styles.css.
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp' };
 const server = createServer((req, res) => {
   let path = new URL(req.url, 'http://x').pathname.replace(/^\/$/, '/index.html');
-  // Mirror vercel.json: /site -> /website
-  if (path === '/site' || path === '/site/') path = '/website/index.html'; else if (path === '/join') path = '/website/join.html'; else if (path.startsWith('/site/')) path = '/website/' + path.slice(6);
+  // Mirror vercel.json: /join -> /join/index.html
+  if (path === '/join') path = '/join/index.html';
   let body;
   try { body = readFileSync(join(ROOT, path)); } catch { res.writeHead(404); return res.end(); }
   res.writeHead(200, { 'content-type': types[extname(path)] || 'text/plain' }); res.end(body);
@@ -82,7 +82,8 @@ async function login(email) {
   await page.waitForSelector('#mainApp:not(.hidden)');
 }
 async function logout() { await page.evaluate(() => logout()); await page.waitForSelector('#landingPage:not(.hidden)'); }
-const nav = (id) => page.click('#nav-' + id);
+// Phase 10: optional parish extras sit in a collapsed <details>; tests open it to fill them.
+const nav = async (id) => { await page.click('#nav-' + id); if (id === 'parishes' || id === 'settings') await page.evaluate(() => document.querySelectorAll('#np_extras, #s_extras').forEach(d => d.open = true)); };
 const modalClosed = (id) => page.waitForSelector(`#${id}.hidden`, { state: 'attached', timeout: 15000 });
 
 const noFail = (d0, re = /Not saved|not saved|failed|Not confirmed|Could not/) => assert.ok(!dialogs.slice(d0).some(m => re.test(m)), 'no failure dialog: ' + dialogs.slice(d0).join(' | '));
@@ -285,23 +286,10 @@ try {
   assert.match(await page.textContent('#cal_body'), /09:00\s*Sunday Service/);
   await shot('p9b-03-calendar-own-timetable');
 
-  // ---- 9b-3. Our Website: the parish publishes its own site (welcome, contact, an event, a sermon).
+  // ---- Phase 10: the parish website was removed from this app (separate project). Only the join link stays.
   const codeOfA = await page.evaluate(() => localState.parish.code);
-  await nav('site');
-  await page.waitForSelector('#ws_status:has-text("Not published yet")');
-  await page.fill('#ws_welcome', 'Halleluyah! Welcome to TEST Ikeja Parish. Come and worship with us.');
-  await page.fill('#ws_email', 'info@ikeja.test'); await page.fill('#ws_phone', '0803 000 0009');
-  await page.click('#ws_publish'); await page.waitForSelector('#ws_status:has-text("Live")');
-  await page.check('#ws_events .ws-ev input'); await page.waitForTimeout(500);
-  await nav('sermons'); await page.click('#sm_list .sm-row:has-text("Walk in the Light")');
-  await page.click('#pubSermonBtn'); await page.waitForSelector('#pubSermonBtn:has-text("On our website")');
-  await page.click('#p9Modal footer button:has-text("Close")');
-  await nav('site'); await page.waitForSelector('#ws_sermons:has-text("Walk in the Light")');
-  await fullShot('p9b-04-our-website-admin');
-  const pubSite = await page.evaluate(async (c) => (await db.collection('publicSites').doc(c).get()).data(), codeOfA);
-  assert.deepEqual(Object.keys(pubSite).sort(), ['city', 'contactEmail', 'contactPhone', 'country', 'mapsUrl', 'name', 'parishId', 'services', 'updatedAt', 'welcome']);
-  const pubEv = await page.evaluate(async (c) => (await db.collection('publicSites').doc(c).collection('events').get()).docs.map(d => d.data()), codeOfA);
-  assert.equal(pubEv.length, 1); assert.ok(!('slots' in pubEv[0]), 'volunteer names never public');
+  assert.equal(await page.locator('#nav-site').count(), 0, 'no "Our Website" menu');
+  assert.equal(await page.evaluate(() => typeof openSite), 'undefined');
 
   // ---- 9b-2. Join link: open it, QR + copy + share on the dashboard.
   await nav('dashboard');
@@ -389,31 +377,15 @@ try {
   assert.ok(dialogs.slice(d0).some(m => /handed over to a new admin/.test(m)), 'old admin told and signed out');
   assert.ok(await page.locator('#mainApp').isHidden());
 
-  // ---- 4b. The parish's public website (no login), at /site/?p=<code> like vercel.json.
-  const SITE = 'http://127.0.0.1:5058/site/', Q = '?p=' + codeOfA + '&emulator=1';
-  await page.goto(SITE + Q);
-  await page.waitForSelector('#events .ev');
-  assert.match(await page.textContent('.hero h1'), /Halleluyah 🙌[\s\S]*Welcome to TEST Ikeja Parish/);
-  assert.match(await page.textContent('#welcome'), /Come and worship with us/);
-  assert.match(await page.textContent('#events'), /Harvest Thanksgiving 2026/);
-  assert.match(await page.getAttribute('nav.menu a >> nth=2', 'href'), new RegExp('services.html\\?p=' + codeOfA));
-  await fullShot('p9b-09-site-home');
-  await page.goto(SITE + 'services.html' + Q); await page.waitForSelector('#svc tr');
-  const svcTxt = await page.textContent('#svc');
-  assert.match(svcTxt, /Sun\s*09:00\s*Sunday Service/); assert.match(svcTxt, /Extra Night Vigil/); assert.match(svcTxt, /Choir rehearsal/);
-  await fullShot('p9b-10-site-services');
-  await page.goto(SITE + 'contact.html' + Q); await page.waitForSelector('#contact a');
-  const ct = await page.textContent('#contact'); assert.match(ct, /info@ikeja\.test/); assert.doesNotMatch(ct, /SECRET/);
-  await fullShot('p9b-11-site-contact');
-  await page.goto(SITE + 'sermons.html' + Q); await page.waitForSelector('#sermons .sermon');
-  assert.match(await page.textContent('#sermons'), /Walk in the Light[\s\S]*Olumide Ajayi/);
-  await fullShot('p9b-12-site-sermons');
-  for (const f of ['about', 'events', 'privacy']) { await page.goto(SITE + f + '.html' + Q); await page.waitForSelector('header.top'); await fullShot('p9b-13-site-' + f); }
+  // ---- 4b. Phase 10: /site is gone; /join still works and shows the official logo.
+  assert.equal((await fetch('http://127.0.0.1:5058/site/')).status, 404);
+  await page.goto('http://127.0.0.1:5058/join?p=' + codeOfA + '&emulator=1');
+  await page.waitForSelector('header.top img.logo');
+  assert.ok(await page.evaluate(() => { const i = document.querySelector('header.top img.logo'); return i.complete && i.naturalWidth > 0; }), 'logo on /join');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), 'no horizontal scroll');
-  await page.goto(SITE + '?p=NOPE99&emulator=1'); await page.waitForSelector('.empty');
-  assert.match(await page.textContent('main'), /not published/);
+  await fullShot('p10-join-page');
   // Private data stays closed to an anonymous visitor.
-  for (const path of [`parishes/${pidA}`, `parishStats/${pidA}`, 'sharedSermons', `parishes/${pidA}/sermons`, `parishes/${pidA}/pendingMembers`, 'joinLinks']) {
+  for (const path of [`parishes/${pidA}`, `parishStats/${pidA}`, 'sharedSermons', 'publicSites', `parishes/${pidA}/sermons`, `parishes/${pidA}/pendingMembers`, 'joinLinks']) {
     const r = await fetch(`${FS}/${path}`);
     assert.equal(r.status, 403, 'anonymous read refused: ' + path);
   }
