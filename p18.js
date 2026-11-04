@@ -62,7 +62,7 @@ function obGo(id) {
 function obWebHelp() {
     p9Modal("Website logins", `<p>Website logins let your members sign in to the church website (members' wall, roster).</p>
         <ol class="list-decimal ml-5 space-y-1 mt-2"><li>Add your members first (step 3), with a phone or email each.</li>
-        <li>Ask the Super Admin to issue the logins for your parish from the website admin.</li>
+        <li>Website logins are issued by the <b>Ijaye parish admin</b> on the website's <b>Parish office</b> page (not by the Super Admin). Send them your member list.</li>
         <li>Each member gets a first-time password and must change it at first sign-in.</li></ol>
         <p class="mt-2 text-gray-500">When the logins are out, tap "Mark as done".</p>`,
         `<button onclick="lsSet(OB_WEB_KEY(),'1');closeModal('p9Modal');renderOnboarding()" class="w-full py-2.5 bg-emerald-600 text-white font-bold rounded">Mark as done</button>`);
@@ -169,6 +169,7 @@ function resolveRow(r) {
     if (r.nokPhone.length > 20) pr.nokPhone = "Phone too long";
     if (r.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email)) pr.email = "Email does not look right";
     r.problems = pr;
+    if (r.intake && typeof resolvePlacement === "function") resolvePlacement(r); // Batch 18 (p19.js)
     return r;
 }
 function parseWhatsApp(text) { return splitWhatsApp(String(text || "")).map(parseBlock).map(rowFrom).filter(r => r.fullName || Object.values(r.raw).some(Boolean)); }
@@ -222,12 +223,13 @@ function openImport() {
     try { const s = JSON.parse(lsGet(IMP_STORE()) || "null"); if (s && s.rows && s.rows.some(r => !r.saved)) imp = s; } catch { /* ignore */ }
     $("imp_text").value = ""; $("imp_file").value = ""; $("imp_consent").checked = false;
     $("imp_status").textContent = imp.rows.length ? `You have an unfinished import (${imp.rows.filter(r => !r.saved).length} not saved yet). Fix and tap Save all to continue, or Start over.` : "";
-    impTab(imp.source === "csv" ? "csv" : "whatsapp");
+    impTab(["csv", "intake"].includes(imp.source) ? imp.source : "whatsapp");
     renderImport();
     openModal("importModal");
 }
 function impTab(t) {
     imp.source = t;
+    $("imp_tabs").classList.toggle("hidden", t === "intake");
     ["whatsapp", "csv"].forEach(x => { $("imp_tab_" + x).classList.toggle("bg-blue-600", x === t); $("imp_tab_" + x).classList.toggle("text-white", x === t); $("imp_pane_" + x).classList.toggle("hidden", x !== t); });
 }
 function impReset() { imp.rows = []; lsSet(IMP_STORE(), null); $("imp_status").textContent = ""; renderImport(); }
@@ -265,19 +267,27 @@ async function impCheckDuplicates() {
 const IMP_COLS = [["fullName", "Name *", "w-40"], ["gender", "Gender *", "w-24"], ["maritalStatus", "Marital *", "w-28"], ["phone", "Phone", "w-32"],
     ["rankText", "Rank (M/C, E/B ...)", "w-28"], ["dobText", "Birthday * (15 April)", "w-32"], ["address", "Address", "w-44"], ["occupation", "Occupation", "w-28"],
     ["anointText", "Last anointment", "w-24"], ["email", "Email", "w-36"], ["nokName", "Next of kin", "w-36"], ["nokAddress", "Kin address", "w-40"], ["nokPhone", "Kin phone", "w-32"]];
+// Batch 18: rows from the Data Intake agent carry placement columns too (see p19.js).
+const IMP_X_COLS = [["track", "Member / Clergy", "w-28"], ["prophetFlag", "Prophet(ess)?", "w-24"], ["deptText", "Departments (Choir, Sidemen)", "w-44"],
+    ["deptRole", "Role in unit", "w-28"], ["cmtText", "Committees (name: role; ...)", "w-56"]];
+const impCols = () => imp.source !== "intake" ? IMP_COLS : [IMP_COLS[0], IMP_COLS[1], ...IMP_X_COLS, ...IMP_COLS.slice(2)];
 function renderImport() {
+    $("imp_head").innerHTML = `<th class="p-1 sticky left-0 bg-gray-100 text-left">#</th>` + impCols().map(([, l]) => `<th class="p-1 text-left">${esc(l)}</th>`).join("");
     const rows = imp.rows, saved = rows.filter(r => r.saved).length, bad = rows.filter(r => !r.saved && Object.keys(r.problems).length).length;
     $("imp_preview").classList.toggle("hidden", !rows.length);
     $("imp_summary").innerHTML = rows.length ? `<b>${rows.length}</b> rows · <span class="text-emerald-700 font-semibold">${saved} saved</span> · <span class="${bad ? "text-red-700 font-semibold" : ""}">${bad} with problems</span> · ${rows.filter(r => !r.saved && r.dup).length} possible duplicates` : "";
     const cell = (r, i, [k, , w]) => {
         const p = r.problems[k], ro = r.saved ? "disabled" : "";
         const base = `data-i="${i}" data-k="${k}" ${ro} title="${esc(p || "")}" class="imp-in ${w} border rounded p-2 text-xs ${p ? "imp-bad bg-red-50 border-red-500" : "bg-white"}"`;
-        const input = k === "gender" ? `<select ${base}>${["", "Male", "Female"].map(v => `<option${r[k] === v ? " selected" : ""} value="${v}">${v || "?"}</option>`).join("")}</select>`
+        const opts = k === "track" ? ["Member", "Clergy"] : k === "prophetFlag" ? ["No", "Yes"] : null;
+        const input = opts ? `<select ${base}>${opts.map(v => `<option${r[k] === v ? " selected" : ""}>${v}</option>`).join("")}</select>`
+            : k === "gender" ? `<select ${base}>${["", "Male", "Female"].map(v => `<option${r[k] === v ? " selected" : ""} value="${v}">${v || "?"}</option>`).join("")}</select>`
             : k === "maritalStatus" ? `<select ${base}>${["", "Single", "Married", "Widowed", "Divorced", "Separated"].map(v => `<option${r[k] === v ? " selected" : ""} value="${v}">${v || "?"}</option>`).join("")}</select>`
             : `<input ${base} value="${esc(r[k] || "")}">`;
         const note = k === "rankText" && r.rank ? `<div class="text-[10px] text-emerald-700 mt-0.5">= ${esc(rankText(r))}</div>`
             : k === "dobText" && r.dobDay ? `<div class="text-[10px] text-emerald-700 mt-0.5">= ${fmtDate(r.dobDay, r.dobMonth, r.dobYear)}</div>`
-            : p ? `<div class="text-[10px] text-red-700 mt-0.5">${esc(p)}</div>` : "";
+            : p ? `<div class="text-[10px] text-red-700 mt-0.5">${esc(p)}</div>`
+            : k === "track" && r.placementNote ? `<div class="text-[10px] text-amber-700 mt-0.5">${esc(r.placementNote)}</div>` : "";
         return `<td class="p-1 align-top">${input}${note}</td>`;
     };
     $("imp_rows").innerHTML = rows.map((r, i) => `<tr class="imp-row border-t ${r.saved ? "bg-emerald-50" : r.dup ? "bg-amber-50" : ""}" data-i="${i}">
@@ -287,13 +297,13 @@ function renderImport() {
             : r.error ? `<div class="imp-err text-red-700">${esc(r.error)}</div>` : ""}
           ${r.dup && !r.saved ? `<div class="imp-dup text-amber-800">Possible duplicate: ${esc(r.dup)}</div><label class="flex gap-1 items-center mt-0.5"><input type="checkbox" ${r.keepDup ? "checked" : ""} onchange="imp.rows[${i}].keepDup=this.checked;saveImpState()"> Save anyway</label>` : ""}
           ${!r.saved ? `<label class="flex gap-1 items-center mt-0.5 text-gray-500"><input type="checkbox" ${r.skip ? "checked" : ""} onchange="imp.rows[${i}].skip=this.checked;saveImpState()"> Skip</label>` : ""}
-        </td>${IMP_COLS.map(c => cell(r, i, c)).join("")}</tr>`).join("");
+        </td>${impCols().map(c => cell(r, i, c)).join("")}</tr>`).join("");
     $("imp_rows").querySelectorAll(".imp-in").forEach(el => el.addEventListener("change", () => {
         const r = imp.rows[el.dataset.i]; r[el.dataset.k] = el.value.trim();
         if (el.dataset.k === "phone" || el.dataset.k === "nokPhone") r[el.dataset.k] = r[el.dataset.k].replace(/[^\d+]/g, "");
         resolveRow(r); saveImpState(); renderImport();
     }));
-    $("imp_aiBtn").classList.toggle("hidden", !rows.some(r => !r.saved && Object.keys(r.problems).length && r.raw));
+    $("imp_aiBtn").classList.toggle("hidden", imp.source === "intake" || !rows.some(r => !r.saved && Object.keys(r.problems).length && r.raw));
     renderImportPhotos();
 }
 
@@ -338,22 +348,29 @@ async function impSaveAll() {
                 anointDay: r.anointDay, anointMonth: r.anointMonth, anointYear: r.anointYear, nokName: (r.nokName || "").slice(0, 120), nokAddress: (r.nokAddress || "").slice(0, 200),
                 nokPhone: r.nokPhone, photo: "", important: false, consentGiven: true, updatedAt: nowIso() };
             p.nameLower = p.fullName.toLowerCase(); p.phoneDigits = p.phone.replace(/\D/g, "");
-            const problem = checkPerson(p, "members");
+            const kind = r.intake && r.track === "Clergy" ? "clergy" : "members", source = ["csv", "intake"].includes(imp.source) ? imp.source : "whatsapp";
+            const problem = checkPerson(p, kind);
             if (problem) { r.error = problem; continue; }
             p.status = "Active"; p.consentDate = today(); p.createdAt = nowIso();
+            if (kind === "clergy") p.serviceRecord = p.rank ? [{ rank: p.rank, from: today() }] : [];
             try {
-                r.saved = await createRecord("members", p, (t, id) => {
+                r.saved = await createRecord(kind, p, (t, id) => {
                     const target = `parishes/${localState.currentParishId}/importLog/${id}`;
-                    t.set(parishRef().collection("importLog").doc(id), { memberNo: id, source: imp.source === "csv" ? "csv" : "whatsapp", version: 1, at: srv(), by: localState.user.uid });
-                    parishAudit(t, target, 1, "import-member", null, { memberNo: id, fullName: p.fullName, source: imp.source });
+                    t.set(parishRef().collection("importLog").doc(id), { memberNo: id, source, version: 1, at: srv(), by: localState.user.uid });
+                    parishAudit(t, target, 1, kind === "clergy" ? "import-clergy" : "import-member", null, { memberNo: id, fullName: p.fullName, source, departments: r.deptIds || [] });
+                    // Batch 18: department places in the same transaction (members only; clergy never join a department).
+                    if (kind === "members") (r.deptIds || []).forEach(dept => t.set(parishRef().collection("deptMembers").doc(`${dept}_${id}`),
+                        { dept, memberNo: id, fullName: p.fullName, role: (r.deptRole || "").slice(0, 40), status: "Current", joinedDate: today(), updatedAt: nowIso() }));
                 });
                 r.error = ""; ok++;
             } catch (e) { console.error("import save", e.code, e.message); r.error = "Not saved: " + e.message; }
             saveImpState(); renderImport();
         }
+        if (ok && imp.source === "intake" && typeof intakeSaveCommittees === "function") await intakeSaveCommittees(todo.filter(x => x.saved)); // Batch 18
         saveImpState(); renderImport();
         const left = imp.rows.filter(x => !x.saved && !x.skip).length;
-        $("imp_status").textContent = `Saved ${ok} member${ok === 1 ? "" : "s"}.` + (left ? ` ${left} still to fix - see the notes on the left, then tap Save all again.` : " All done. Add passport photos below.");
+        $("imp_status").textContent = `Saved ${ok} member${ok === 1 ? "" : "s"}.` + (left ? ` ${left} still to fix - see the notes on the left, then tap Save all again.` : " All done. Add passport photos below.")
+            + (imp.cmtNote ? " " + imp.cmtNote : "");
         if (!left) lsSet(IMP_STORE(), JSON.stringify({ rows: [], source: imp.source }));
         if (ok) { await Promise.all([loadMembers(true), refreshTotals()]).catch(() => {}); renderOnboarding().catch(() => {}); }
     });

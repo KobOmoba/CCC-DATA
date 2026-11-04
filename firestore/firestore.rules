@@ -586,9 +586,11 @@ service cloud.firestore {
       match /importLog/{memberNo} {
         allow read: if isParishAdminOf(parishId);
         allow create: if isParishAdminOf(parishId) && request.resource.data.keys().hasOnly(['memberNo', 'source', 'version', 'at', 'by'])
-          && request.resource.data.memberNo == memberNo && request.resource.data.source in ['whatsapp', 'csv']
+          && request.resource.data.memberNo == memberNo && request.resource.data.source in ['whatsapp', 'csv', 'intake']
           && request.resource.data.version == 1 && request.resource.data.by == request.auth.uid
-          && existsAfter(/databases/$(database)/documents/parishes/$(parishId)/members/$(memberNo))
+          // Batch 18: the intake agent can also add clergy (CLG numbers).
+          && (existsAfter(/databases/$(database)/documents/parishes/$(parishId)/members/$(memberNo))
+              || (request.resource.data.source == 'intake' && existsAfter(/databases/$(database)/documents/parishes/$(parishId)/clergy/$(memberNo))))
           && auditedAfter('parishes/' + parishId + '/importLog/' + memberNo, 1);
         allow update: if isParishAdminOf(parishId) && bumped()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['version', 'at', 'by'])
@@ -1548,11 +1550,44 @@ service cloud.firestore {
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
         || (d.target.matches('^parishes/[A-Za-z0-9]+/(pcommittees|celebrations|anointings|rankHistory|rosters|rosterConfig|importLog)/[A-Za-z0-9_-]+$')
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
+        || (d.target.matches('^archive/[A-Za-z0-9_-]+$') && d.parishId == getAfter(docAt(d.target)).data.parishId
+            && (isParishAdminOf(d.parishId) || isNamedSuper()))
         || (d.target.matches('^certificates/[A-Za-z0-9]+_[A-Za-z0-9]+_[A-Za-z0-9-]+$') && d.parishId == d.target.split('/')[1].split('_')[0]
             && (isParishAdminOf(d.parishId) || isNamedSuper()))
         || (d.target.matches('^postings/.+') && d.parishId == '' && (role() == 'parish_admin'
             ? (isParishAdminOf(getAfter(docAt(d.target)).data.fromParishId) || isParishAdminOf(getAfter(docAt(d.target)).data.toParishId))
             : (isNamedSuper() || isChurchHead())));
+    }
+    // ---- Batch 18: ARCHIVE index. The files live in Cloudflare R2 (private bucket ccc-archive) behind the ccc-ai
+    // worker; this doc is the searchable index. parishId 'HQ' = Headquarters archive (Super Admin).
+    // Never deleted: a doc is hidden (hidden: true) or shown again, every change versioned + audited.
+    function archiveCats() { return ['History', 'Minutes', 'Registers', 'Certificates', 'Photos', 'Letters', 'Other']; }
+    function validArchive(d, id) {
+      return d.keys().hasOnly(['title', 'titleLower', 'category', 'date', 'year', 'parishId', 'parishName', 'tags', 'description',
+          'fileKey', 'fileName', 'mime', 'size', 'hidden', 'hiddenReason', 'version', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+        && str(d.title, 160) && d.titleLower == d.title.lower() && d.category in archiveCats()
+        && d.date is string && (d.date == '' || d.date.matches('^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$'))
+        && (d.year == null || (d.year is int && d.year >= 1900 && d.year <= 2100))
+        && d.parishId is string && (d.parishId == 'HQ' || d.parishId.matches('^[A-Za-z0-9]{1,40}$')) && s(d.get('parishName', ''), 120)
+        && d.tags is list && d.tags.size() <= 12 && s(d.get('description', ''), 2000)
+        && d.fileKey is string && d.fileKey.size() <= 200 && d.fileKey.matches('^' + d.parishId + '/[0-9]{4}/[0-9a-f-]{36}[.](jpg|png|webp|pdf)$')
+        && s(d.get('fileName', ''), 120) && d.mime in ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+        && d.size is int && d.size > 0 && d.size <= 15728640
+        && d.hidden is bool && s(d.get('hiddenReason', ''), 300) && d.updatedBy == request.auth.uid;
+    }
+    function archiveWriter(pid) { return (pid != 'HQ' && isParishAdminOf(pid)) || isNamedSuper(); }
+    match /archive/{id} {
+      allow read: if isSuper() || isHQ() || isChurchHead() || (resource.data.parishId != 'HQ' && isParishAdminOf(resource.data.parishId));
+      allow create: if archiveWriter(request.resource.data.parishId) && validArchive(request.resource.data, id)
+        && request.resource.data.version == 1 && request.resource.data.hidden == false
+        && request.resource.data.createdBy == request.auth.uid
+        && auditedAfter('archive/' + id, 1);
+      // File, parish and creator never change; only the description fields and hidden / shown.
+      allow update: if archiveWriter(resource.data.parishId) && bumped() && validArchive(request.resource.data, id)
+        && request.resource.data.diff(resource.data).unchangedKeys().hasAll(['parishId', 'fileKey', 'fileName', 'mime', 'size', 'createdAt', 'createdBy'])
+        && (request.resource.data.hidden == resource.data.hidden || str(request.resource.data.get('hiddenReason', ''), 300))
+        && auditedAfter('archive/' + id, request.resource.data.version);
+      allow delete: if false;
     }
     match /auditLog/{id} {
       allow read: if isSuper() || (role() == 'parish_admin' && resource.data.parishId == profile().parishId);

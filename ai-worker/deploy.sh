@@ -2,6 +2,7 @@
 # Deploys worker.js as Cloudflare Worker "ccc-ai" using env CLOUDFLARE_API_TOKEN.
 # Secrets are read from env (GEMINI_API_KEY, optional GROQ_API_KEY, optional FIREBASE_SERVICE_ACCOUNT for the daily
 # church-wide checks) and never printed or written to files. Also sets the Cron Trigger (daily 02:17 UTC).
+# Batch 18: binds the private R2 bucket ccc-archive as ARCHIVE. The bucket must exist first (see wrangler.toml).
 set -euo pipefail
 cd "$(dirname "$0")"
 API=https://api.cloudflare.com/client/v4
@@ -9,7 +10,7 @@ H=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
 ACC=$(curl -sf "${H[@]}" $API/accounts | python3 -c "import sys,json;print(json.load(sys.stdin)['result'][0]['id'])")
 S=$API/accounts/$ACC/workers/scripts/ccc-ai
 curl -sf "${H[@]}" -X PUT "$S" \
-  -F 'metadata={"main_module":"worker.js","compatibility_date":"2026-10-01"};type=application/json' \
+  -F 'metadata={"main_module":"worker.js","compatibility_date":"2026-10-01","bindings":[{"type":"r2_bucket","name":"ARCHIVE","bucket_name":"ccc-archive"}],"keep_bindings":["secret_text"]};type=application/json' \
   -F 'worker.js=@worker.js;type=application/javascript+module' \
   -F 'alerts-core.js=@alerts-core.js;type=application/javascript+module' | python3 -c "import sys,json;print('upload', json.load(sys.stdin)['success'])"
 put_secret() { python3 -c "import json,os;print(json.dumps({'name':'$1','text':os.environ['$1'],'type':'secret_text'}))" \

@@ -164,6 +164,21 @@ Open the app with `?emulator=1` to point it at local emulators instead of the li
   `parishes/{p}/importLog/{no}` + an `auditLog` entry in the same transaction; passport photos can be added afterwards.
 - Test: `npm run test:e2e:b18`.
 
+## Data Intake agent + Archive (Batch 18, `p19.js`)
+- **Data Intake** (parish admin): upload many files at once (photos, screenshots, handwritten registers, PDF, DOCX, XLSX/CSV,
+  TXT/WhatsApp export). DOCX/XLSX are read on the phone (vendored `vendor/mammoth-1.8.0`, `vendor/xlsx-0.18.5`); photos (HEIC
+  tried as JPEG) and PDFs go to worker route `POST /classify`, which returns people with placement (member/clergy - women
+  never clergy, Prophet/Prophetess, departments, committees). Results open in the import preview with placement columns;
+  **Save all** creates each record + import log + department places (same transaction), then committee places (one audited
+  write per committee). Super Admin can read files and download a CSV (member records stay parish-private).
+- **Archive**: `archive/{id}` in Firestore is the index (title, category, date/year, parish, tags, description); the file is in
+  the private Cloudflare R2 bucket `ccc-archive`, uploaded and served only through the worker (`POST /archive/upload`,
+  `GET /archive/file?id=`), which checks the caller's Firebase token and lets the Firestore rules decide. Never deleted:
+  hide/show with a reason, versioned + audited. "Extract people" sends an archived page to the intake agent.
+- One-time setup (Bayo/AIOS, not done by the build): `cd ai-worker && npx wrangler r2 bucket create ccc-archive`, then
+  `npx wrangler deploy` (or `./deploy.sh`), then deploy `firestore/firestore.rules`.
+- Tests: `node --test ai-worker/worker.test.mjs`, `npm test`, `npm run test:e2e:p19` (AI + R2 mocked).
+
 ## Monthly Returns (Phase 6)
 - Parish: **Monthly Returns** tab. Income per month in 6 categories (tithes, offerings, thanksgiving, harvest, building fund, other)
   in the parish **currency** (set in Parish Settings; each return keeps the currency it was filed in). Optional receipt photo.
