@@ -19,7 +19,11 @@ const addMonths = (m, n) => { const [y, mo] = m.split("-").map(Number); const d 
 const lastMonth = () => addMonths(localToday().slice(0, 7), -1);
 const monthName = m => { const [y, mo] = m.split("-").map(Number); return `${MONTHS[mo - 1]} ${y}`; };
 const totalIncome = inc => r2(CATS.reduce((t, [k]) => t + (inc[k] || 0), 0));
-const dueOf = (inc, sh) => r2(CATS.reduce((t, [k]) => t + (inc[k] || 0) * sh[k].num / sh[k].den, 0));
+// Batch 14: tithes always count toward HQ's 1/3; any other line the parish marks in hqBase counts at the tithes fraction too.
+// Returns without hqBase compute exactly as before.
+const shareOf = (sh, k, base = []) => base.includes(k) ? sh.tithes : sh[k];
+const dueOf = (inc, sh, base = []) => r2(CATS.reduce((t, [k]) => t + (inc[k] || 0) * shareOf(sh, k, base).num / shareOf(sh, k, base).den, 0));
+const readHqBase = () => CATS.filter(([k]) => k !== "tithes" && $("rb_" + k) && $("rb_" + k).checked).map(([k]) => k);
 const statusOf = d => d.disputed ? "Disputed"
     : (d.confirmations > 0 && d.confirmed + 0.006 >= d.due && d.remitted + 0.006 >= d.due) ? "Confirmed"
     : d.remitted + 0.006 >= d.due ? "Paid" : d.remitted > 0 ? "Part paid" : "Due";
@@ -28,7 +32,7 @@ const fracText = s => s.num === 0 ? "none" : `${s.num}/${s.den}`;
 const srv = () => firebase.firestore.FieldValue.serverTimestamp();
 const auditRef = (target, v) => db.collection("auditLog").doc(target.replace("/", "_") + "_v" + v);
 const pick = (d, keys) => d ? Object.fromEntries(keys.filter(k => k in d).map(k => [k, d[k]])) : null;
-const SNAP = ["income", "due", "remitted", "confirmed", "status", "disputed", "disputeReason", "currency"];
+const SNAP = ["income", "hqBase", "due", "remitted", "confirmed", "status", "disputed", "disputeReason", "currency"];
 
 // One audit entry, written in the same batch/transaction as the change.
 function writeAudit(w, target, version, action, before, after, reason = "") {
@@ -93,6 +97,7 @@ async function loadReturn() {
     ret.doc = snap.exists ? snap.data() : null;
     const d = ret.doc;
     CATS.forEach(([k]) => $("r_" + k).value = d ? d.income[k] : "");
+    CATS.forEach(([k]) => { if (k !== "tithes") $("rb_" + k).checked = !!(d && (d.hqBase || []).includes(k)); });
     $("r_note").value = d ? d.note || "" : "";
     $("r_reason").value = "";
     $("r_reasonBox").classList.toggle("hidden", !d);
@@ -121,8 +126,9 @@ function readIncome() {
 function returnDuePreview() {
     const sh = ret.doc ? ret.doc.shares : hqShares;
     const inc = readIncome(), cur = ret.doc ? ret.doc.currency : localState.parish.currency;
-    $("r_due").textContent = money(cur, dueOf(inc, sh));
-    $("r_shareNote").textContent = "HQ share: " + CATS.filter(([k]) => sh[k].num > 0).map(([k, n]) => `${n} ${fracText(sh[k])}`).join(", ");
+    const base = readHqBase();
+    $("r_due").textContent = money(cur, dueOf(inc, sh, base));
+    $("r_shareNote").textContent = "HQ share: " + CATS.filter(([k]) => shareOf(sh, k, base).num > 0).map(([k, n]) => `${n} ${fracText(shareOf(sh, k, base))}`).join(", ");
 }
 function renderReturnSummary() {
     const d = ret.doc;
@@ -150,7 +156,7 @@ async function saveReturn() {
     if (!m) return alert("Pick the month.");
     if (!p.currency) return alert("Set your parish currency in Parish Settings first.");
     if (m > localToday().slice(0, 7)) return alert("You cannot file a return for a future month.");
-    const income = readIncome(), reason = val("r_reason"), a = await monthAttendance(m);
+    const income = readIncome(), hqBase = readHqBase(), reason = val("r_reason"), a = await monthAttendance(m);
     const ref = retRef(pid, m);
     await busy("saveReturnBtn", async () => {
         try {
@@ -161,9 +167,10 @@ async function saveReturn() {
                 const base = o || { parishId: pid, parishName: p.name, city: p.city || "", country: p.country || "", continent: p.continent || "",
                     month: m, currency: p.currency, shares: hqShares, remitted: 0, confirmed: 0, confirmations: 0, disputed: false,
                     disputeReason: "", version: 0, filedAt: nowIso(), filedBy: localState.user.uid };
-                const d = { ...base, income, due: dueOf(income, base.shares), attendance: a.attendance, services: a.services,
+                const d = { ...base, income, due: dueOf(income, base.shares, hqBase), attendance: a.attendance, services: a.services,
                     note: val("r_note").slice(0, 300), version: base.version + 1, updatedAt: nowIso() };
                 if (ret.receipt) d.receipt = ret.receipt;
+                if (hqBase.length || o && o.hqBase) d.hqBase = hqBase; else delete d.hqBase;
                 d.outstanding = r2(d.due - d.remitted);
                 d.status = statusOf(d);
                 t.set(ref, d);
@@ -250,7 +257,7 @@ async function openReturnDetail(id) {
     $("rd_body").innerHTML = `
       <div class="flex items-center justify-between"><p>${esc([d.city, d.country, d.continent].filter(Boolean).join(", "))}</p>${badge(d.status)}</div>
       <table class="w-full mt-2"><tbody class="divide-y">
-        ${CATS.map(([k, n]) => `<tr><td class="py-1 text-gray-500">${n}</td><td class="py-1 text-right">${esc(money(d.currency, d.income[k]))}</td></tr>`).join("")}
+        ${CATS.map(([k, n]) => `<tr><td class="py-1 text-gray-500">${n}${k === "tithes" || (d.hqBase || []).includes(k) ? ` <span class="hq-base text-[10px] text-emerald-700 font-semibold">· HQ ${fracText(shareOf(d.shares, k, d.hqBase))}</span>` : ""}</td><td class="py-1 text-right">${esc(money(d.currency, d.income[k]))}</td></tr>`).join("")}
         <tr><td class="py-1 font-bold">Total income</td><td class="py-1 text-right font-bold">${esc(money(d.currency, totalIncome(d.income)))}</td></tr>
         <tr><td class="py-1 font-bold">Expected (HQ share)</td><td id="rd_due" class="py-1 text-right font-bold">${esc(money(d.currency, d.due))}</td></tr>
         <tr><td class="py-1">Remitted</td><td id="rd_remitted" class="py-1 text-right">${esc(money(d.currency, d.remitted))}</td></tr>

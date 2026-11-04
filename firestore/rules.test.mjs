@@ -1480,3 +1480,126 @@ test('p9 handover: revoke now; revoking an admin without an audited handover is 
   auditW(c, sup, 'adminHandovers/h3', 2, 'admin-handover-cancel', '', 'Wrong email');
   await assertSucceeds(c.commit());
 });
+
+// ================= Batch 14: HQ 1/3 base + Letters of Introduction =================
+test('b14 HQ base: tithes 1/3 by default; lines marked in hqBase count at 1/3 too; old returns unchanged', async () => {
+  // Old shape (no hqBase) still files with due = 1/3 of tithes.
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-08'));
+  eq((await getRet('A_2026-08')).due, 30000);
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-07', { hqBase: [] }));
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-06', { hqBase: ['harvest'] }));
+  // Offerings marked: due = (90000 + 20000) / 3.
+  const due = r2((90000 + 20000) / 3);
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-10', { hqBase: ['offerings'], due }));
+  eq((await getRet('A_2026-10')).due, due);
+  // Marked line but due computed on tithes only -> refused; unknown / duplicate / tithes entries refused.
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['offerings'] }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['salary'], due: 30000 }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['offerings', 'offerings'], due }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['tithes'], due: 30000 }));
+  // Correction: parish can untick a line (due back to tithes only), audited.
+  const o = await getRet('A_2026-10');
+  const d = { ...o, hqBase: [], due: 30000, version: 2 }; d.outstanding = r2(d.due - d.remitted); d.status = statusOf(d);
+  const adb = as.adminA(), b = writeBatch(adb);
+  b.update(doc(adb, 'returns/A_2026-10'), d);
+  b.set(doc(adb, 'auditLog/' + auditId('returns/A_2026-10', 2)), audit('returns/A_2026-10', 2, 'correct', A, { reason: 'Offerings not in base' }));
+  await assertSucceeds(b.commit());
+  // Overpayment is just recorded (no block).
+  await assertSucceeds(pay(as.adminA(), A, 'A_2026-10', await getRet('A_2026-10'), 50000));
+  eq((await getRet('A_2026-10')).status, 'Paid');
+});
+
+async function issueLetter(db, who, pid, extra = {}, auditExtra = {}) {
+  return runTransaction(db, async t => {
+    const cRef = doc(db, `parishes/${pid}/meta/loi`);
+    const c = await t.get(cRef);
+    const n = (c.exists() ? c.data().n : 0) + 1, id = `CCC-${pid}${pid}${pid}-LAG-LOI-` + String(n).padStart(3, '0');
+    const target = `parishes/${pid}/letters/${id}`;
+    t.set(cRef, { n });
+    t.set(doc(db, target), { no: id, memberNo: 'CCC-MBR-001', memberName: 'Ade Bisi', gender: 'Female', addressedTo: 'To whom it may concern',
+      purpose: 'Worship while studying in Ibadan', date: '2026-11-04',
+      signatories: [{ role: 0, title: 'Head Shepherd', name: 'Sup Evang Olu' }, { role: 1, title: 'Parochial Chairperson', name: 'Mrs Bola Ade' }],
+      version: 1, issuedAt: '2026-11-04T10:00:00Z', issuedBy: who.uid, ...extra });
+    if (auditExtra !== null) t.set(doc(db, 'auditLog/' + target.replace(/\//g, '_') + '_v1'), { ...audit(target, 1, 'issue-letter', who), parishId: pid, ...auditExtra });
+    return id;
+  });
+}
+test('b14 letters: numbered LOI per parish, audited, editable signatories, immutable, private', async () => {
+  const a = as.adminA();
+  eq(await issueLetter(a, A, 'A'), 'CCC-AAA-LAG-LOI-001');
+  eq(await issueLetter(a, A, 'A', { signatories: [{ role: 0, title: 'Shepherd-in-charge', name: 'X Y' }, { role: 1, title: 'Parochial Chairman', name: 'A B' }, { role: 2, title: 'Church Secretary', name: 'C D' }] }), 'CCC-AAA-LAG-LOI-002');
+  // No audit, missing name, 4 signers, unknown member, wrong member name, other parish -> refused.
+  await assertFails(issueLetter(a, A, 'A', {}, null));
+  await assertFails(issueLetter(a, A, 'A', { signatories: [{ role: 0, title: 'Head Shepherd', name: '' }] }));
+  const s = { role: 0, title: 'T', name: 'N' };
+  await assertFails(issueLetter(a, A, 'A', { signatories: [s, s, s, s] }));
+  await assertFails(issueLetter(a, A, 'A', { memberNo: 'CCC-MBR-099' }));
+  await assertFails(issueLetter(a, A, 'A', { memberName: 'Someone Else' }));
+  await assertFails(issueLetter(as.adminB(), B, 'A'));
+  await assertFails(issueLetter(a, A, 'A', { purpose: '' }));
+  // Never edited or deleted; private to the parish.
+  await assertFails(updateDoc(doc(a, 'parishes/A/letters/CCC-AAA-LAG-LOI-001'), { purpose: 'x' }));
+  await assertFails(deleteDoc(doc(a, 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  await assertSucceeds(getDoc(doc(a, 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  await assertFails(getDoc(doc(as.adminB(), 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  await assertFails(getDoc(doc(as.hq(), 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  // Audit entry is readable by the parish.
+  await assertSucceeds(getDoc(doc(a, 'auditLog/parishes_A_letters_CCC-AAA-LAG-LOI-001_v1')));
+});
+
+// ---------------- Batch 15: parish committees, harvests, unit anniversaries
+const pTarget = (kind, id) => `parishes/A/${kind}/${id}`;
+async function pAudited(db, who, path, data, v, action = 'create', auditExtra = {}) {
+  const b = writeBatch(db);
+  b.set(doc(db, path), { version: v, updatedAt: 'now', updatedBy: who.uid, ...data });
+  if (auditExtra !== null) b.set(doc(db, 'auditLog/' + path.replace(/\//g, '_') + '_v' + v), { ...audit(path, v, action, who), parishId: path.split('/')[1], ...auditExtra });
+  return b.commit();
+}
+const pcom = (extra = {}) => ({ name: 'Harvest Committee 2026', nameLower: 'harvest committee 2026', template: 'Harvest', purpose: '', termStart: '2026-06-01',
+  termEnd: '2026-12-31', status: 'Active', members: [{ memberNo: 'CCC-MBR-001', fullName: 'Ade Bisi', role: 'Chairperson', status: 'Current', from: '2026-06-01', to: '' }],
+  createdAt: 'c', createdBy: 'uA', ...extra });
+const celeb = (y, kind, date, extra = {}) => ({ year: y, kind, title: 'T', date, committeeId: '', notes: '', ...extra });
+test('b15 parish committees: audited, never deleted, private to the parish', async () => {
+  const a = as.adminA(), p = pTarget('pcommittees', 'C1');
+  await assertFails(pAudited(a, A, p, pcom(), 1, 'create', null));            // no audit
+  await assertFails(pAudited(a, A, p, pcom({ termEnd: '2026-01-01' }), 1));   // ends before start
+  await assertFails(pAudited(a, A, p, pcom({ status: 'Gone' }), 1));
+  await assertSucceeds(pAudited(a, A, p, pcom(), 1));
+  await assertFails(pAudited(a, A, p, pcom({ status: 'Dissolved' }), 1, 'update'));  // not bumped
+  await assertSucceeds(pAudited(a, A, p, pcom({ status: 'Dissolved' }), 2, 'dissolve'));
+  await assertFails(deleteDoc(doc(a, p)));
+  await assertFails(getDoc(doc(as.adminB(), p)));
+  await assertFails(pAudited(as.adminB(), { uid: 'uB', email: 'b@x.org', role: 'parish_admin' }, p, pcom(), 3, 'update'));
+  await assertSucceeds(getDoc(doc(a, 'auditLog/' + p.replace(/\//g, '_') + '_v2')));
+});
+test('b15 harvests: juvenile 1st Sunday of June, adult window (default June), unit anniversaries, super reads all', async () => {
+  const a = as.adminA(), c = id => pTarget('celebrations', id);
+  await assertSucceeds(pAudited(a, A, c('2026_juvenile'), celeb(2026, 'juvenile', '2026-06-07'), 1));
+  await assertFails(pAudited(a, A, c('2027_juvenile'), celeb(2027, 'juvenile', '2027-06-13'), 1));   // 2nd Sunday
+  await assertFails(pAudited(a, A, c('2026_adult'), celeb(2026, 'adult', '2026-06-07'), 1));         // before 2nd Sunday of June
+  await assertFails(pAudited(a, A, c('2026_adult'), celeb(2026, 'adult', '2026-12-27'), 1));         // after Christmas
+  await assertFails(pAudited(a, A, c('2026_adult'), celeb(2026, 'adult', '2026-11-14'), 1));         // Saturday
+  await assertFails(pAudited(a, A, c('2026_adult'), celeb(2026, 'adult', '2025-11-15'), 1));         // wrong year
+  await assertSucceeds(pAudited(a, A, c('2026_adult'), celeb(2026, 'adult', '2026-06-14'), 1));
+  await assertSucceeds(pAudited(a, A, c('2026_adult'), celeb(2026, 'adult', '2026-12-20', { attendance: 450, income: 1250000.5 }), 2, 'update'));
+  await assertFails(pAudited(a, A, c('2026_adult'), celeb(2026, 'adult', '2026-12-20', { attendance: -1 }), 3, 'update'));
+  await assertFails(pAudited(a, A, c('2026_other'), celeb(2026, 'adult', '2026-12-20'), 1));         // id mismatch
+  await assertSucceeds(pAudited(a, A, c('2026_unit-choir'), celeb(2026, 'unit-choir', '2026-09-19'), 1));
+  await assertFails(pAudited(a, A, c('2026_unit-sundayschool'), celeb(2026, 'unit-sundayschool', '2026-09-19'), 1));
+  await assertFails(pAudited(a, A, c('2026_unit-parochial'), celeb(2026, 'unit-parochial', '2026-09-19'), 1));
+  await assertFails(deleteDoc(doc(a, c('2026_adult'))));
+  // HQ moves the start month to October: a September Adult Harvest is now refused.
+  const n = as.named(), save = (db, who, m, v) => { const b = writeBatch(db);
+    b.set(doc(db, 'hqSettings/harvest'), { startMonth: m, version: v, updatedAt: 'now', updatedBy: who.uid });
+    b.set(doc(db, 'auditLog/' + auditId('hqSettings/harvest', v)), audit('hqSettings/harvest', v, 'settings', who)); return b.commit(); };
+  await assertFails(save(as.adminA(), A, 10, 1));
+  await assertFails(save(n, NAMED, 13, 1));
+  await assertSucceeds(save(n, NAMED, 10, 1));
+  await assertFails(pAudited(a, A, c('2027_adult'), celeb(2027, 'adult', '2027-09-12'), 1));
+  await assertFails(pAudited(a, A, c('2027_adult'), celeb(2027, 'adult', '2027-10-03'), 1));        // 1st Sunday of Oct
+  await assertSucceeds(pAudited(a, A, c('2027_adult'), celeb(2027, 'adult', '2027-10-10'), 1));
+  // Super Admin sees every parish's Adult Harvest; other parishes cannot.
+  const all = await assertSucceeds(getDocs(query(collectionGroup(as.superA(), 'celebrations'), where('kind', '==', 'adult'), where('year', '==', 2026))));
+  eq(all.size, 1);
+  await assertFails(getDocs(collection(as.adminB(), 'parishes/A/celebrations')));
+});

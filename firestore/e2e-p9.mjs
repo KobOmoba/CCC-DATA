@@ -214,7 +214,7 @@ try {
   await page.click('#weekCard .wish-btn >> nth=0');
   await page.waitForSelector('#section-messages:not(.hidden) .msg-chip');
   assert.equal(await page.inputValue('#msg_tpl'), 'birthday');
-  assert.match(await page.textContent('#msg_preview'), /Happy birthday, Adaeze Okafor! The whole family of TEST Ikeja Parish/);
+  assert.match(await page.textContent('#msg_preview'), /^Halleluyah 🙌, happy birthday, Adaeze Okafor! The whole family of TEST Ikeja Parish/);
   await stubLinks();
   await page.click('#msg_start');
   await page.waitForSelector('#waSendBtn');
@@ -222,7 +222,7 @@ try {
   await page.click('#waSendBtn');
   await page.waitForSelector('#msg_queue:has-text("Done: 1")');
   let urls = await opened();
-  assert.match(urls[0], /^https:\/\/wa\.me\/2348030000001\?text=Happy%20birthday%2C%20Adaeze%20Okafor/);
+  assert.match(urls[0], /^https:\/\/wa\.me\/2348030000001\?text=Halleluyah%20%F0%9F%99%8C%2C%20happy%20birthday%2C%20Adaeze%20Okafor/);
   // A whole unit: Chidi has no phone (skipped); Bola's +44 number kept as is.
   await page.evaluate(() => { msg.recipients = []; renderRecipients(); });
   await page.selectOption('#msg_tpl', 'general');

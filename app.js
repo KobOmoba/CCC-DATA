@@ -249,6 +249,9 @@ function showSection(id) {
     if (id === "postings") openPostings().catch(e => alert("Could not load postings: " + e.message));
     if (id === "committees") openCommittees().catch(e => alert("Could not load committees: " + e.message));
     if (id === "sermons") openSermons().catch(e => alert("Could not load sermons: " + e.message));
+    if (id === "pcommittees") openPCommittees().catch(e => alert("Could not load committees: " + e.message)); // Batch 15
+    if (id === "harvests") openHarvests().catch(e => alert("Could not load harvests: " + e.message));
+    if (id === "harvestsAll") openHarvestsAll().catch(e => alert("Could not load harvest dates: " + e.message));
     if (id === "calendar") openCalendar().catch(e => alert("Could not load the calendar: " + e.message));
     if (id === "messages") openMessages().catch(e => alert("Could not load messages: " + e.message));
     if (id === "parishes" && localState.role === "super_admin") completeClaimedHandovers().catch(e => console.error("handovers", e.message));
@@ -283,6 +286,7 @@ async function loadParishData() {
     setTimetable(tt && tt.exists ? tt.data().services : null);
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
     renderWeekCard().catch(e => console.error("week card", e.message)); // Phase 9
+    renderCelebCard().catch(e => console.error("celebrations card", e.message)); // Batch 15
     renderJoinCard().catch(e => console.error("join card", e.message)); // Phase 9b
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
     // Phase 8: record activity for the "no activity for 30 days" alert, and apply any clergy posting now due.
@@ -591,6 +595,7 @@ async function openRecord(kind, id) {
     if (kind === "clergy" && p.status === "Active") actions += btn("Transfer / move to Former", "openTransfer()", "bg-amber-700 text-white");
     if (kind === "members" && p.status === "Active") actions += btn("Moved abroad", "openAbroad()", "bg-cyan-700 text-white");
     if (kind === "members" && p.status === "Diaspora") actions += btn("Returned home", "returnHome()", "bg-emerald-600 text-white");
+    if (kind === "members" && ["Active", "Diaspora"].includes(p.status)) actions += btn('<i class="fa-solid fa-envelope-open-text"></i> Letter of introduction', "openLetterForm()", "bg-blue-900 text-white");
     if (kind === "members" && ["Active", "Diaspora"].includes(p.status)) actions += btn("Transfer to another parish", "openSendTransfer()", "bg-indigo-700 text-white");
     if ((kind === "members" && ["Active", "Diaspora"].includes(p.status)) || (kind === "clergy" && p.status === "Active"))
         actions += btn("Called to glory", `openDeathForm('${kind}')`, "bg-gray-800 text-white");
@@ -1849,6 +1854,95 @@ async function showCertificate(kind, id) {
     openModal("certModal");
 }
 function closeCertificate() { document.body.classList.remove("cert-mode"); closeModal("certModal"); }
+
+// ---- Letter of Introduction (Batch 14): members get a letter on request instead of a certificate.
+// Saved as parishes/{p}/letters/CCC-{PARISH}-{CITY}-LOI-001 (own counter meta/loi) with an audit entry in the same write.
+// Signatories default to Head Shepherd + Parochial Chairman; Church Secretary is optional. Titles and names are editable per letter.
+const LETTER_SIGNERS = [["Head Shepherd", true], ["Parochial Chairman/Chairperson", true], ["Church Secretary", false]];
+let lform = { rec: null };
+async function openLetterForm() {
+    lform = { rec: current.rec };
+    if (!letteringOf()) return alert("Letters need the parish lettering (e.g. IJY-ABK). Ask the Super Admin to set it for your parish.");
+    $("l_member").textContent = `${lform.rec.fullName} (${lform.rec.memberNo})`;
+    $("l_to").value = "To whom it may concern"; $("l_purpose").value = ""; $("l_date").value = localToday();
+    // Names are remembered from the last letter this parish issued.
+    let last = [];
+    try { const s = await parishRef().collection("letters").orderBy("issuedAt", "desc").limit(1).get(); last = s.empty ? [] : s.docs[0].data().signatories; } catch (e) { last = []; }
+    LETTER_SIGNERS.forEach(([title, on], i) => {
+        const prev = last.find(x => x.role === i) || {};
+        $("l_sig" + i + "_on").checked = on || !!last.find(x => x.role === i && i === 2);
+        $("l_sig" + i + "_title").value = prev.title || title;
+        $("l_sig" + i + "_name").value = prev.name || "";
+    });
+    closeModal("recordModal");
+    openModal("letterModal");
+}
+function readSigners() {
+    return LETTER_SIGNERS.map((_, i) => ({ role: i, title: val("l_sig" + i + "_title").slice(0, 80), name: val("l_sig" + i + "_name").slice(0, 120), on: $("l_sig" + i + "_on").checked }))
+        .filter(x => x.on).map(({ role, title, name }) => ({ role, title, name }));
+}
+async function issueLetter() {
+    const m = lform.rec, signatories = readSigners();
+    const data = { memberNo: m.memberNo, memberName: m.fullName, gender: m.gender || "", addressedTo: val("l_to").slice(0, 200),
+        purpose: val("l_purpose").slice(0, 500), date: $("l_date").value, signatories };
+    if (!data.addressedTo || !data.purpose || !data.date) return alert("Fill in who it is addressed to, the purpose and the date.");
+    if (!signatories.length || signatories.some(x => !x.title || !x.name)) return alert("Each signatory needs a title and a name.");
+    const cRef = parishRef().collection("meta").doc("loi"), pid = localState.currentParishId;
+    await busy("issueLetterBtn", async () => {
+        try {
+            const no = await db.runTransaction(async t => {
+                const c = await t.get(cRef);
+                const n = (c.exists ? c.data().n : 0) + 1, id = numberFor("LOI-", n);
+                const target = `parishes/${pid}/letters/${id}`;
+                t.set(cRef, { n });
+                t.set(parishRef().collection("letters").doc(id), { ...data, no: id, version: 1, issuedAt: nowIso(), issuedBy: localState.user.uid });
+                t.set(db.collection("auditLog").doc(target.replace(/\//g, "_") + "_v1"), { action: "issue-letter", target, targetVersion: 1, parishId: pid,
+                    reason: "", before: null, after: { no: id, memberNo: m.memberNo, addressedTo: data.addressedTo, date: data.date },
+                    by: localState.user.uid, byEmail: (localState.user.email || "").toLowerCase(), byName: localState.name || "", role: localState.role,
+                    at: firebase.firestore.FieldValue.serverTimestamp() });
+                return id;
+            });
+            closeModal("letterModal");
+            await showLetterOfIntro(no);
+        } catch (e) { alert("Letter not issued: " + e.message); }
+    });
+}
+const letterText = (l, parish) => {
+    const pr = l.gender === "Female" ? ["her", "she"] : l.gender === "Male" ? ["him", "he"] : ["them", "they"];
+    return [`Halleluyah 🙌!`, `We write to introduce ${l.memberName} (${l.memberNo}), a bona fide member in good standing of Celestial Church of Christ, ${parish.name || ""}.`,
+        `Purpose: ${l.purpose}`, `We commend ${pr[0]} to you and pray that ${pr[1]} will be received in the Lord. Any assistance given will be appreciated.`,
+        `Yours in the service of Christ,`];
+};
+async function showLetterOfIntro(no) {
+    const d = await parishRef().collection("letters").doc(no).get();
+    if (!d.exists) return;
+    const l = d.data(), parish = localState.parish || {};
+    const paras = letterText(l, parish);
+    $("certPrint").innerHTML = `<div id="introLetter" class="border-4 border-double border-blue-950 p-5 space-y-3 bg-white text-gray-900 text-xs">
+        <div class="text-center space-y-1 border-b-2 border-blue-950 pb-2"><img src="assets/ccc-logo.png" alt="Celestial Church of Christ logo" class="ccc-logo h-20 w-auto object-contain mx-auto">
+            <p class="text-lg font-black tracking-wider text-blue-950">CELESTIAL CHURCH OF CHRIST</p>
+            <p class="text-[10px] tracking-[0.3em] text-gray-600">WORLD-WIDE</p>
+            <p class="text-sm font-bold">${esc(parish.name || "")}</p>
+            <p class="text-[11px] text-gray-600">${esc([parish.address, parish.city, parish.state, parish.country].filter(Boolean).join(", "))}</p></div>
+        <div class="flex justify-between"><p>Ref: <span id="letterNo" class="font-mono font-bold">${esc(l.no)}</span></p><p>${esc(fmtIso(l.date))}</p></div>
+        <p class="font-semibold">${esc(l.addressedTo)}</p>
+        <p class="text-center font-serif font-bold uppercase tracking-widest text-blue-950">Letter of Introduction</p>
+        ${paras.map(x => `<p>${esc(x)}</p>`).join("")}
+        <div class="grid grid-cols-${Math.min(l.signatories.length, 3)} gap-4 pt-10 text-[11px] text-center">
+            ${l.signatories.map(x => `<div class="letter-signer"><div class="border-t border-gray-700 pt-1 font-semibold">${esc(x.name)}</div><div>${esc(x.title)}</div></div>`).join("")}</div>
+        <p class="text-[10px] text-gray-500 text-center">Parish seal:</p></div>
+        <button onclick="shareLetter('${esc(l.no)}')" class="no-print mt-2 w-full py-2 bg-emerald-700 text-white rounded font-bold text-xs"><i class="fa-solid fa-share-nodes"></i> Share</button>`;
+    lform.last = l;
+    document.body.classList.add("cert-mode");
+    openModal("certModal");
+}
+async function shareLetter() {
+    const l = lform.last, parish = localState.parish || {};
+    const text = ["CELESTIAL CHURCH OF CHRIST", parish.name || "", `Ref: ${l.no} · ${fmtIso(l.date)}`, l.addressedTo, "LETTER OF INTRODUCTION",
+        ...letterText(l, parish), ...l.signatories.map(x => `${x.name}, ${x.title}`)].join("\n");
+    if (navigator.share) { try { await navigator.share({ title: "Letter of Introduction " + l.no, text }); return; } catch (e) { if (e.name === "AbortError") return; } }
+    window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
+}
 
 // ---- pending moves by age. There is no server: on app load the parish admin's browser lists who is due,
 // and one tap moves them all. Each move is one transaction (new record + new number + old record marked
