@@ -594,8 +594,8 @@ service cloud.firestore {
 
       // Batch 17: monthly duty roster. Duty types (editable list) + one roster doc per month and revision ({YYYY-MM}_r{n}).
       // Draft -> Published. A published roster is frozen (never changed or deleted); corrections are a new revision.
-      // Every write is audit-logged. NOTE (website, later): published rosters will be readable by this parish's signed-in
-      // website members; add that read rule here when member accounts exist. Nothing here is public today.
+      // Every write is audit-logged. Published rosters are readable by the Ijaye parish's signed-in
+      // website members (isWebMember, WEBSITE block). Drafts and other parishes stay private.
       match /rosterConfig/{k} {
         allow read: if isParishAdminOf(parishId);
         allow create, update: if isParishAdminOf(parishId) && k == 'dutyTypes' && validDutyTypes(request.resource.data)
@@ -604,7 +604,7 @@ service cloud.firestore {
         allow delete: if false;
       }
       match /rosters/{id} {
-        allow read: if isParishAdminOf(parishId);
+        allow read: if isParishAdminOf(parishId) || (resource.data.status == 'Published' && isWebMember() && parishId == ijayeParish());
         allow create: if isParishAdminOf(parishId) && validRoster(request.resource.data, id) && request.resource.data.version == 1
           && request.resource.data.status == 'Draft'
           && (request.resource.data.rev == 1 || exists(docAt('parishes/' + parishId + '/rosters/' + request.resource.data.month + '_r' + string(request.resource.data.rev - 1))))
@@ -1554,5 +1554,142 @@ service cloud.firestore {
         && (!(role() in ['super_admin', 'church_head']) || request.resource.data.byName == profile().name);
       allow update, delete: if false;
     }
+    // ===================== WEBSITE (paste from here) =====================
+    function ijayeParish() {
+      return exists(docAt('webSite/config')) ? get(docAt('webSite/config')).data.parishId : '__none__';
+    }
+    function isIjayeAdmin() { return isParishAdminOf(ijayeParish()); }
+    function isModerator() { return isIjayeAdmin() || isSuper(); }
+    function webAcct() { return get(docAt('webAccounts/' + request.auth.uid)).data; }
+    // An active Ijaye website member who has already chosen their own password.
+    function isWebMember() {
+      return signedIn() && exists(docAt('webAccounts/' + request.auth.uid))
+        && webAcct().status == 'Active' && webAcct().mustChangePassword == false && webAcct().parishId == ijayeParish();
+    }
+    function optUrl(m, k, re) { return !(k in m) || m[k] == '' || (m[k] is string && m[k].size() <= 300 && m[k].matches(re)); }
+    function optId(m, k, re) { return !(k in m) || m[k] == '' || (m[k] is string && m[k].matches(re)); }
+    function validMedia(m) {
+      return m is map && m.keys().hasOnly(['youtubeChannelId', 'youtubeUrl', 'playlistId', 'pastVideos', 'facebookUrl', 'tiktokUrl', 'instagramUrl'])
+        && optId(m, 'youtubeChannelId', '^UC[A-Za-z0-9_-]{22}$')
+        && optId(m, 'playlistId', '^(PL|UU|OL|FL)[A-Za-z0-9_-]{10,40}$')
+        && optUrl(m, 'youtubeUrl', '^https://(www\\.|m\\.)?youtube\\.com/[^\\s"<>]*$')
+        && optUrl(m, 'facebookUrl', '^https://(www\\.|m\\.|web\\.)?facebook\\.com/[^\\s"<>]*$')
+        && optUrl(m, 'tiktokUrl', '^https://(www\\.)?tiktok\\.com/[^\\s"<>]*$')
+        && optUrl(m, 'instagramUrl', '^https://(www\\.)?instagram\\.com/[^\\s"<>]*$')
+        && (!('pastVideos' in m) || (m.pastVideos is list && m.pastVideos.size() <= 12));
+    }
+
+    match /webSite/config {
+      allow read: if true;   // only the Portal parish id, so visitors can load that parish's public info
+      allow write: if isSuper()
+        && request.resource.data.keys().hasOnly(['parishId', 'updatedAt'])
+        && request.resource.data.parishId is string && request.resource.data.parishId.size() > 0;
+    }
+
+    match /webSite/home {
+      allow read: if true;   // public page content and media links
+      allow write: if isModerator()
+        && request.resource.data.keys().hasOnly(['serviceTimes', 'media', 'updatedAt', 'updatedBy'])
+        && (!('serviceTimes' in request.resource.data) || (request.resource.data.serviceTimes is list && request.resource.data.serviceTimes.size() <= 12))
+        && (!('media' in request.resource.data) || validMedia(request.resource.data.media))
+        && (!('updatedBy' in request.resource.data) || request.resource.data.updatedBy == request.auth.uid);
+    }
+
+    match /webAccounts/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || isIjayeAdmin() || isSuper();
+      // A member may only clear their own "must change password" flag (after changing it in Firebase Auth).
+      allow update: if signedIn() && request.auth.uid == uid
+        && resource.data.status == 'Active'
+        && resource.data.mustChangePassword == true
+        && request.resource.data.mustChangePassword == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'passwordChangedAt'])
+        && request.resource.data.passwordChangedAt == request.time;
+      allow create, delete: if false;   // Cloud Function (Admin SDK) only
+    }
+
+    match /webAudit/{id} {
+      allow read: if isIjayeAdmin() || isSuper();
+      allow write: if false;            // Cloud Function (Admin SDK) only
+    }
+
+    // ---- Duty roster: published rosters are readable by Ijaye website members (see parishes/{p}/rosters read rule).
+
+    // ---- Members' wall. No private messages exist anywhere: everything here is a wall post or a comment.
+    // Moderation changes only `status` (Visible <-> Hidden), bumps modVersion and MUST write a webModLog entry in the
+    // same batch. Nothing is ever deleted.
+    function moderated(target) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'modVersion', 'moderatedBy', 'moderatedAt'])
+        && request.resource.data.status in ['Visible', 'Hidden']
+        && request.resource.data.modVersion == resource.data.modVersion + 1
+        && request.resource.data.moderatedBy == request.auth.uid && request.resource.data.moderatedAt == request.time
+        && existsAfter(docAt('webModLog/' + target + '_' + string(request.resource.data.modVersion)));
+    }
+    match /webWall/{postId} {
+      allow read: if isModerator()
+        || (isWebMember() && (resource.data.status == 'Visible' || resource.data.authorUid == request.auth.uid))
+        || (resource.data.status == 'Visible' && resource.data.visibility == 'public');
+      allow create: if isWebMember()
+        && request.resource.data.keys().hasOnly(['kind', 'authorUid', 'authorName', 'text', 'photoPath', 'visibility', 'status', 'modVersion', 'createdAt'])
+        && request.resource.data.kind == 'post'
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorName == webAcct().displayName
+        && str(request.resource.data.text, 1000)
+        && (request.resource.data.photoPath == ''
+            || request.resource.data.photoPath.matches('^web/wall/' + request.auth.uid + '/' + postId + '/[A-Za-z0-9._-]{1,60}$'))
+        && request.resource.data.visibility in ['members', 'public']
+        && request.resource.data.status == 'Visible' && request.resource.data.modVersion == 0
+        && request.resource.data.createdAt == request.time;
+      // Admin approves / hides; the author may hide (never un-hide) their own post.
+      allow update: if (isModerator() || (isWebMember() && resource.data.authorUid == request.auth.uid
+          && request.resource.data.status == 'Hidden')) && moderated('post_' + postId);
+      allow delete: if false;
+
+      match /likes/{uid} {
+        allow read: if isWebMember() || isModerator();
+        allow create: if isWebMember() && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['at']) && request.resource.data.at == request.time
+          && get(docAt('webWall/' + postId)).data.status == 'Visible';
+        allow delete: if isWebMember() && uid == request.auth.uid;   // un-like
+        allow update: if false;
+      }
+    }
+
+    match /webComments/{id} {
+      // postPublic is copied from the post at creation (a post's visibility never changes), so visitor queries can be checked.
+      allow read: if isModerator()
+        || (resource.data.status == 'Visible' && (isWebMember() || resource.data.postPublic == true));
+      allow create: if request.resource.data.keys().hasOnly(['postId', 'postPublic', 'authorUid', 'authorName', 'text', 'visitor', 'status', 'modVersion', 'createdAt'])
+        && str(request.resource.data.text, 500) && request.resource.data.modVersion == 0 && request.resource.data.createdAt == request.time
+        && get(docAt('webWall/' + request.resource.data.postId)).data.status == 'Visible'
+        && request.resource.data.postPublic == (get(docAt('webWall/' + request.resource.data.postId)).data.visibility == 'public')
+        && (
+          // Member: shows at once.
+          (isWebMember() && request.resource.data.visitor == false && request.resource.data.status == 'Visible'
+            && request.resource.data.authorUid == request.auth.uid && request.resource.data.authorName == webAcct().displayName)
+          // Visitor (not signed in): only on public posts, always Pending until an admin approves.
+          || (!signedIn() && request.resource.data.visitor == true && request.resource.data.status == 'Pending'
+            && request.resource.data.postPublic == true && request.resource.data.authorUid == ''
+            && str(request.resource.data.authorName, 60))
+        );
+      allow update: if isModerator() && moderated('cmt_' + id);
+      allow delete: if false;
+    }
+
+    match /webModLog/{id} {
+      allow read: if isModerator();
+      allow create: if request.resource.data.keys().hasOnly(['target', 'action', 'by', 'at', 'reason'])
+        && request.resource.data.by == request.auth.uid && request.resource.data.at == request.time
+        && request.resource.data.action in ['approve', 'hide', 'unhide']
+        && (!('reason' in request.resource.data) || request.resource.data.reason.size() <= 300)
+        && (
+          (request.resource.data.target.matches('^webWall/[A-Za-z0-9_-]+$')
+            && id == 'post_' + request.resource.data.target.split('/')[1] + '_' + string(getAfter(docAt(request.resource.data.target)).data.modVersion)
+            && (isModerator() || (isWebMember() && getAfter(docAt(request.resource.data.target)).data.authorUid == request.auth.uid)))
+          || (request.resource.data.target.matches('^webComments/[A-Za-z0-9_-]+$') && isModerator()
+            && id == 'cmt_' + request.resource.data.target.split('/')[1] + '_' + string(getAfter(docAt(request.resource.data.target)).data.modVersion))
+        );
+      allow update, delete: if false;
+    }
+    // ===================== WEBSITE (paste to here) =======================
   }
 }
