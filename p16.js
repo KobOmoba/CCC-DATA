@@ -405,6 +405,8 @@ async function issueCert(id) {
 // ================================================================= 5. PRINTABLES
 function showPrintSheet(html) {
     $("printSheetBody").innerHTML = html;
+    $("printSheetBody").className = "ps-sheet";
+    $("pageSize").textContent = "@page { size: A4 portrait; margin: 12mm; }";
     $("printSheet").classList.remove("hidden");
     document.body.classList.add("p16-print");
 }
