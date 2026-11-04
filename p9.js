@@ -306,7 +306,7 @@ async function wish(tpl, no) {
 
 // ================================================================= 3. MESSAGES (WhatsApp + email)
 const TEMPLATES = {
-    birthday: { name: "Birthday", text: "Happy birthday, {name}! The whole family of {parish} celebrates you today ({date}). May the Lord bless you with long life, joy and good health. Halleluyah 🙌" },
+    birthday: { name: "Birthday", text: "Halleluyah 🙌, happy birthday, {name}! The whole family of {parish} celebrates you today ({date}). May the Lord bless you with long life, joy and good health." },
     anniversary: { name: "Wedding anniversary", text: "Happy wedding anniversary, {name}! {parish} rejoices with you today ({date}). May God keep your home in love and peace." },
     absent: { name: "Absent follow-up", text: "Halleluyah 🙌, {name}! We have missed you at {parish}. We hope all is well. We are praying for you. Do let us know if you need anything. God bless you." },
     event: { name: "Event reminder", text: "Halleluyah 🙌, {name}! This is a reminder from {parish}: {event}. Thank you for serving. God bless you." },

@@ -9,7 +9,8 @@
     "test:e2e:p7": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p7.mjs\"",
     "test:e2e:p8": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p8.mjs\"",
     "test:e2e:p9": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p9.mjs\"",
-    "test:rehearsal": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node rehearsal.mjs\""
+    "test:rehearsal": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node rehearsal.mjs\"",
+    "test:e2e:p14": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p14.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "6.0.0",

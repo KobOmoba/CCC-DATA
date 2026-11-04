@@ -1480,3 +1480,69 @@ test('p9 handover: revoke now; revoking an admin without an audited handover is 
   auditW(c, sup, 'adminHandovers/h3', 2, 'admin-handover-cancel', '', 'Wrong email');
   await assertSucceeds(c.commit());
 });
+
+// ================= Batch 14: HQ 1/3 base + Letters of Introduction =================
+test('b14 HQ base: tithes 1/3 by default; lines marked in hqBase count at 1/3 too; old returns unchanged', async () => {
+  // Old shape (no hqBase) still files with due = 1/3 of tithes.
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-08'));
+  eq((await getRet('A_2026-08')).due, 30000);
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-07', { hqBase: [] }));
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-06', { hqBase: ['harvest'] }));
+  // Offerings marked: due = (90000 + 20000) / 3.
+  const due = r2((90000 + 20000) / 3);
+  await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-10', { hqBase: ['offerings'], due }));
+  eq((await getRet('A_2026-10')).due, due);
+  // Marked line but due computed on tithes only -> refused; unknown / duplicate / tithes entries refused.
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['offerings'] }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['salary'], due: 30000 }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['offerings', 'offerings'], due }));
+  await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { hqBase: ['tithes'], due: 30000 }));
+  // Correction: parish can untick a line (due back to tithes only), audited.
+  const o = await getRet('A_2026-10');
+  const d = { ...o, hqBase: [], due: 30000, version: 2 }; d.outstanding = r2(d.due - d.remitted); d.status = statusOf(d);
+  const adb = as.adminA(), b = writeBatch(adb);
+  b.update(doc(adb, 'returns/A_2026-10'), d);
+  b.set(doc(adb, 'auditLog/' + auditId('returns/A_2026-10', 2)), audit('returns/A_2026-10', 2, 'correct', A, { reason: 'Offerings not in base' }));
+  await assertSucceeds(b.commit());
+  // Overpayment is just recorded (no block).
+  await assertSucceeds(pay(as.adminA(), A, 'A_2026-10', await getRet('A_2026-10'), 50000));
+  eq((await getRet('A_2026-10')).status, 'Paid');
+});
+
+async function issueLetter(db, who, pid, extra = {}, auditExtra = {}) {
+  return runTransaction(db, async t => {
+    const cRef = doc(db, `parishes/${pid}/meta/loi`);
+    const c = await t.get(cRef);
+    const n = (c.exists() ? c.data().n : 0) + 1, id = `CCC-${pid}${pid}${pid}-LAG-LOI-` + String(n).padStart(3, '0');
+    const target = `parishes/${pid}/letters/${id}`;
+    t.set(cRef, { n });
+    t.set(doc(db, target), { no: id, memberNo: 'CCC-MBR-001', memberName: 'Ade Bisi', gender: 'Female', addressedTo: 'To whom it may concern',
+      purpose: 'Worship while studying in Ibadan', date: '2026-11-04',
+      signatories: [{ role: 0, title: 'Head Shepherd', name: 'Sup Evang Olu' }, { role: 1, title: 'Parochial Chairperson', name: 'Mrs Bola Ade' }],
+      version: 1, issuedAt: '2026-11-04T10:00:00Z', issuedBy: who.uid, ...extra });
+    if (auditExtra !== null) t.set(doc(db, 'auditLog/' + target.replace(/\//g, '_') + '_v1'), { ...audit(target, 1, 'issue-letter', who), parishId: pid, ...auditExtra });
+    return id;
+  });
+}
+test('b14 letters: numbered LOI per parish, audited, editable signatories, immutable, private', async () => {
+  const a = as.adminA();
+  eq(await issueLetter(a, A, 'A'), 'CCC-AAA-LAG-LOI-001');
+  eq(await issueLetter(a, A, 'A', { signatories: [{ role: 0, title: 'Shepherd-in-charge', name: 'X Y' }, { role: 1, title: 'Parochial Chairman', name: 'A B' }, { role: 2, title: 'Church Secretary', name: 'C D' }] }), 'CCC-AAA-LAG-LOI-002');
+  // No audit, missing name, 4 signers, unknown member, wrong member name, other parish -> refused.
+  await assertFails(issueLetter(a, A, 'A', {}, null));
+  await assertFails(issueLetter(a, A, 'A', { signatories: [{ role: 0, title: 'Head Shepherd', name: '' }] }));
+  const s = { role: 0, title: 'T', name: 'N' };
+  await assertFails(issueLetter(a, A, 'A', { signatories: [s, s, s, s] }));
+  await assertFails(issueLetter(a, A, 'A', { memberNo: 'CCC-MBR-099' }));
+  await assertFails(issueLetter(a, A, 'A', { memberName: 'Someone Else' }));
+  await assertFails(issueLetter(as.adminB(), B, 'A'));
+  await assertFails(issueLetter(a, A, 'A', { purpose: '' }));
+  // Never edited or deleted; private to the parish.
+  await assertFails(updateDoc(doc(a, 'parishes/A/letters/CCC-AAA-LAG-LOI-001'), { purpose: 'x' }));
+  await assertFails(deleteDoc(doc(a, 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  await assertSucceeds(getDoc(doc(a, 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  await assertFails(getDoc(doc(as.adminB(), 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  await assertFails(getDoc(doc(as.hq(), 'parishes/A/letters/CCC-AAA-LAG-LOI-001')));
+  // Audit entry is readable by the parish.
+  await assertSucceeds(getDoc(doc(a, 'auditLog/parishes_A_letters_CCC-AAA-LAG-LOI-001_v1')));
+});
