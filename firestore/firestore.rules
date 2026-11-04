@@ -569,6 +569,29 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Batch 16: rank history per member (append-only, never deleted) and anointing events (audited, never deleted).
+      match /rankHistory/{memberNo} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validRankHist(request.resource.data, memberNo) && request.resource.data.version == 1
+          && auditedAfter('parishes/' + parishId + '/rankHistory/' + memberNo, 1);
+        allow update: if isParishAdminOf(parishId) && bumped() && validRankHist(request.resource.data, memberNo)
+          && request.resource.data.gender == resource.data.gender
+          && request.resource.data.entries.size() == resource.data.entries.size() + 1
+          && request.resource.data.entries[0:resource.data.entries.size()] == resource.data.entries
+          && auditedAfter('parishes/' + parishId + '/rankHistory/' + memberNo, request.resource.data.version);
+        allow delete: if false;
+      }
+      match /anointings/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validAnointing(request.resource.data) && request.resource.data.version == 1
+          && request.resource.data.status == 'Planned' && auditedAfter('parishes/' + parishId + '/anointings/' + id, 1);
+        allow update: if isParishAdminOf(parishId) && bumped() && validAnointing(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt
+          && (resource.data.status == 'Planned' || request.resource.data.status == 'Done')
+          && auditedAfter('parishes/' + parishId + '/anointings/' + id, request.resource.data.version);
+        allow delete: if false;
+      }
+
       // Letters of Introduction (Batch 14): issued on request to an Active/Diaspora member, numbered LOI-001 from meta/loi,
       // audited in the same write, never changed or deleted. 1-3 signatories, each with an editable title and name.
       match /letters/{id} {
@@ -1223,6 +1246,46 @@ service cloud.firestore {
       allow read: if isSuper();
     }
 
+    // ---- Batch 16: anointment / rank promotions ----
+    function validRankHist(d, no) {
+      return d.keys().hasOnly(['memberNo', 'fullName', 'gender', 'entries', 'version', 'updatedAt', 'updatedBy'])
+        && d.memberNo == no && str(d.fullName, 120) && d.gender in ['Male', 'Female']
+        && d.entries is list && d.entries.size() >= 1 && d.entries.size() <= 60
+        && isDate(d.entries[d.entries.size() - 1].date) && isRank(d.entries[d.entries.size() - 1].to, d.gender)
+        && d.entries[d.entries.size() - 1].keys().hasOnly(['date', 'from', 'to', 'parish', 'pastor', 'approvedBy', 'eventId', 'kind', 'by'])
+        && d.entries[d.entries.size() - 1].kind in ['start', 'anointment', 'record']
+        && d.entries[d.entries.size() - 1].by == request.auth.uid && d.updatedBy == request.auth.uid;
+    }
+    function validAnointing(d) {
+      return d.keys().hasOnly(['date', 'state', 'parishName', 'pastor', 'approvedBy', 'notes', 'status', 'candidates', 'version',
+          'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+        && isDate(d.date) && s(d.get('state', ''), 60) && s(d.get('parishName', ''), 120) && s(d.get('pastor', ''), 120)
+        && s(d.get('approvedBy', ''), 120) && s(d.get('notes', ''), 1000) && d.status in ['Planned', 'Done']
+        && d.candidates is list && d.candidates.size() <= 100 && d.updatedBy == request.auth.uid;
+    }
+    // Super Admin: every parish's anointing events (dashboard).
+    match /{path=**}/anointings/{id} {
+      allow read: if isSuper();
+    }
+    // HQ certificates, one per anointed candidate: id = {parishId}_{eventId}_{memberNo}. The parish requests,
+    // a named Super Admin issues (number + date). Audited, never deleted.
+    match /certificates/{id} {
+      allow read: if isSuper() || isParishAdminOf(resource.data.parishId);
+      allow create: if isParishAdminOf(request.resource.data.parishId)
+        && request.resource.data.keys().hasOnly(['parishId', 'parishName', 'eventId', 'eventDate', 'memberNo', 'fullName', 'rank',
+            'status', 'version', 'updatedAt', 'updatedBy'])
+        && id == request.resource.data.parishId + '_' + request.resource.data.eventId + '_' + request.resource.data.memberNo
+        && str(request.resource.data.fullName, 120) && s(request.resource.data.get('rank', ''), 60) && isDate(request.resource.data.eventDate)
+        && exists(docAt('parishes/' + request.resource.data.parishId + '/anointings/' + request.resource.data.eventId))
+        && request.resource.data.status == 'Requested' && request.resource.data.version == 1
+        && request.resource.data.updatedBy == request.auth.uid && auditedAfter('certificates/' + id, 1);
+      allow update: if isNamedSuper() && resource.data.status == 'Requested' && request.resource.data.status == 'Issued'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'certNo', 'issuedDate', 'version', 'updatedAt', 'updatedBy'])
+        && str(request.resource.data.certNo, 40) && isDate(request.resource.data.issuedDate) && bumped()
+        && request.resource.data.updatedBy == request.auth.uid && auditedAfter('certificates/' + id, request.resource.data.version);
+      allow delete: if false;
+    }
+
     // ---- Committees (Super Admin). Members are picked church-wide; clergy may join (by clergy number). ----
     function validCommittee(d) {
       return d.keys().hasOnly(['name', 'nameLower', 'purpose', 'duties', 'termStart', 'termEnd', 'status', 'version',
@@ -1401,8 +1464,10 @@ service cloud.firestore {
         || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqLeave|committees|committeeMembers|leaders|adminHandovers)/.+') && isNamedSuper() && d.parishId == '')
         || (d.target.matches('^parishes/[A-Za-z0-9]+/letters/CCC-[A-Z0-9-]+$') && d.action == 'issue-letter'
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
-        || (d.target.matches('^parishes/[A-Za-z0-9]+/(pcommittees|celebrations)/[A-Za-z0-9_-]+$')
+        || (d.target.matches('^parishes/[A-Za-z0-9]+/(pcommittees|celebrations|anointings|rankHistory)/[A-Za-z0-9_-]+$')
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
+        || (d.target.matches('^certificates/[A-Za-z0-9]+_[A-Za-z0-9]+_[A-Za-z0-9-]+$') && d.parishId == d.target.split('/')[1].split('_')[0]
+            && (isParishAdminOf(d.parishId) || isNamedSuper()))
         || (d.target.matches('^postings/.+') && d.parishId == '' && (role() == 'parish_admin'
             ? (isParishAdminOf(getAfter(docAt(d.target)).data.fromParishId) || isParishAdminOf(getAfter(docAt(d.target)).data.toParishId))
             : (isNamedSuper() || isChurchHead())));
