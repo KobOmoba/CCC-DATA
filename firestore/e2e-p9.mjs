@@ -340,21 +340,40 @@ try {
   }
   await login('ikeja@test.local');
   await page.waitForFunction(() => document.querySelectorAll('#joinCard .pend-row').length === 2);
-  await page.locator('#joinCard').screenshot({ path: join(SHOTS, 'p11-01-pending-four-actions.png') });
+  await page.locator('#joinCard').screenshot({ path: join(SHOTS, 'p12-01-pending-three-actions.png') });
   d0 = dialogs.length;
-  await page.click('#joinCard .pend-row:has-text("Tunde Friend") button:has-text("Save as visitor")');
-  await page.waitForFunction(() => document.querySelectorAll('#joinCard .pend-row').length === 1); noFail(d0);
-  promptAnswer = 'Which parish did you attend before?';
-  await page.click('#joinCard .pend-row:has-text("Kemi Unsure") button:has-text("Ask to clarify")');
-  await page.waitForSelector('#joinCard .pend-row .pend-note'); noFail(d0); promptAnswer = '';
-  assert.match(await page.textContent('#joinCard .pend-row'), /Clarify[\s\S]*Which parish did you attend before\?/);
-  const wa = await page.getAttribute('#joinCard .pend-wa', 'href');
-  assert.match(wa, /^https:\/\/wa\.me\/2348035550000\?text=.*Which%20parish/);
-  await page.locator('#joinCard').screenshot({ path: join(SHOTS, 'p11-02-clarify-whatsapp.png') });
-  const reqs = await page.evaluate(async () => Object.fromEntries((await parishRef().collection('pendingMembers').get()).docs.map(d => [d.data().fullName, d.data()])));
-  assert.equal(reqs['Tunde Friend'].status, 'Visitor'); assert.equal(reqs['Kemi Unsure'].status, 'Clarify');
-  const vis = await page.evaluate(async (id) => (await parishRef().collection('visitors').doc(id).get()).data(), reqs['Tunde Friend'].visitorId);
-  assert.equal(vis.name, 'Tunde Friend'); assert.equal(vis.consentGiven, true); assert.equal(vis.status, 'New');
+  // Flag & pend Tunde (reason + note): stays pending with one-tap contact; then approve him as a member.
+  const tunde = '#joinCard .pend-row:has-text("Tunde Friend")', kemi = '#joinCard .pend-row:has-text("Kemi Unsure")';
+  await page.click(tunde + ' button:has-text("Flag & pend")');
+  await page.selectOption(tunde + ' .pend-reason', 'May be a friend of the house');
+  await page.fill(tunde + ' .pend-flagnote', 'Which parish did you attend before?');
+  await page.locator('#joinCard').screenshot({ path: join(SHOTS, 'p12-02-flag-reason-picker.png') });
+  await page.click(tunde + ' .pend-flagsave');
+  await page.waitForSelector(tunde + ' .pend-note'); noFail(d0);
+  assert.match(await page.textContent(tunde), /Flagged[\s\S]*May be a friend of the house: Which parish did you attend before\?/);
+  assert.match(await page.getAttribute(tunde + ' .pend-wa', 'href'), /^https:\/\/wa\.me\/2348035550000\?text=.*Which%20parish/);
+  // Kemi: flagged with reason only (no note).
+  await page.click(kemi + ' button:has-text("Flag & pend")');
+  await page.selectOption(kemi + ' .pend-reason', 'Details look suspicious');
+  await page.click(kemi + ' .pend-flagsave');
+  await page.waitForSelector(kemi + ' .pend-note'); noFail(d0);
+  assert.equal(await page.locator('#joinCard .pend-row').count(), 2);
+  assert.equal(await page.locator('#joinCard button:has-text("Save as visitor")').count(), 0);
+  await page.locator('#joinCard').screenshot({ path: join(SHOTS, 'p12-03-flagged-whatsapp.png') });
+  let reqs = await page.evaluate(async () => Object.fromEntries((await parishRef().collection('pendingMembers').get()).docs.map(d => [d.data().fullName, d.data()])));
+  assert.equal(reqs['Tunde Friend'].status, 'Clarify'); assert.equal(reqs['Tunde Friend'].clarifyReason, 'May be a friend of the house');
+  assert.equal(reqs['Kemi Unsure'].clarifyReason, 'Details look suspicious'); assert.equal(reqs['Kemi Unsure'].clarifyNote, '');
+  // Clarified: approve Tunde (normal flow), reject Kemi with a reason.
+  await page.click(tunde + ' button:has-text("Approve as member")');
+  await page.waitForSelector('#personModal:not(.hidden)');
+  await page.click('#savePersonBtn'); await modalClosed('personModal');
+  await page.waitForFunction(() => document.querySelectorAll('#joinCard .pend-row').length === 1);
+  promptAnswer = 'Could not confirm details';
+  await page.click(kemi + ' button:has-text("Reject")');
+  await page.waitForFunction(() => document.querySelectorAll('#joinCard .pend-row').length === 0); promptAnswer = '';
+  reqs = await page.evaluate(async () => Object.fromEntries((await parishRef().collection('pendingMembers').get()).docs.map(d => [d.data().fullName, d.data()])));
+  assert.equal(reqs['Tunde Friend'].status, 'Approved'); assert.match(reqs['Tunde Friend'].memberNo, /^CCC-TIP-IKJ-MBR-\d{3}$/);
+  assert.equal(reqs['Kemi Unsure'].status, 'Rejected'); assert.equal(reqs['Kemi Unsure'].reason, 'Could not confirm details');
   await shot('p11-03-dashboard-palette');
   await logout();
   await shot('p11-04-sign-in-logo');
