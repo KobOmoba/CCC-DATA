@@ -214,6 +214,7 @@ async function onAuthChanged(user) {
         document.querySelectorAll(".parish-only").forEach(el => el.classList.toggle("hidden", !isParish));
         document.querySelectorAll(".super-only").forEach(el => el.classList.toggle("hidden", role !== "super_admin"));
         document.querySelectorAll(".leader-only").forEach(el => el.classList.toggle("hidden", !(role === "super_admin" || role === "church_head")));
+        document.querySelectorAll(".admin-only").forEach(el => el.classList.toggle("hidden", !(isParish || role === "super_admin"))); // Batch 18
         if (role === "super_admin" || role === "hq") $("circularComposer").classList.remove("hidden");
         if (isParish && !localState.currentParishId) {
             alert("Your account is not linked to a parish.");
@@ -261,6 +262,8 @@ function showSection(id) {
     if (id === "parishes" && localState.role === "super_admin") completeClaimedHandovers().catch(e => console.error("handovers", e.message));
     if (id === "settings" && localState.role === "parish_admin") openTimetable();
     if (id === "settings" && localState.role === "parish_admin") openPublicInfo().catch(e => console.error("public info", e.message)); // Batch 17
+    if (id === "intake") openIntake(); // Batch 18
+    if (id === "archive") openArchive().catch(e => alert("Could not load the archive: " + e.message));
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -2026,8 +2029,9 @@ const AI_URL = "https://ccc-ai.aarinat-company-limited.workers.dev/extract";
 const LIBS = {
     pdf: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
     pdfWorker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
-    mammoth: "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js",
-    xlsx: "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+    // Batch 18: vendored (pinned copies served with the app, no CDN at runtime). mammoth 1.8.0 (BSD-2), SheetJS 0.18.5 (Apache-2.0).
+    mammoth: "vendor/mammoth-1.8.0.browser.min.js",
+    xlsx: "vendor/xlsx-0.18.5.full.min.js"
 };
 const AI_FIELDS = [["fullName", "Name"], ["gender", "Gender"], ["maritalStatus", "Marital status"], ["address", "Address"],
     ["phone", "Phone"], ["email", "Email"], ["rank", "Rank"], ["occupation", "Occupation"], ["nokName", "Next of kin"],

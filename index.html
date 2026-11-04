@@ -26,6 +26,7 @@
     <script src="p16.js" defer></script>
     <script src="p17.js" defer></script>
     <script src="p18.js" defer></script>
+    <script src="p19.js" defer></script>
     <style id="pageSize"></style>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
@@ -94,6 +95,8 @@
                 <button onclick="showSection('anointing')" id="nav-anointing" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-oil-can text-amber-300 w-4"></i> Anointing</button>
                 <button onclick="showSection('roster')" id="nav-roster" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-clipboard-list text-lime-300 w-4"></i> Duty Roster</button>
                 <button onclick="showSection('readings')" id="nav-readings" class="nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-book-open text-sky-300 w-4"></i> Bible Readings</button>
+                <button onclick="showSection('intake')" id="nav-intake" class="admin-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-inbox text-violet-300 w-4"></i> Data Intake</button>
+                <button onclick="showSection('archive')" id="nav-archive" class="nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-box-archive text-amber-300 w-4"></i> Archive</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('ai')" id="nav-ai" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wand-magic-sparkles text-fuchsia-300 w-4"></i> AI Dashboard</button>
                 <button onclick="showSection('postings')" id="nav-postings" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-route text-amber-300 w-4"></i> Clergy Postings</button>
@@ -567,6 +570,41 @@
                     <div id="aa_certs" class="space-y-2"></div>
                 </section>
                 <!-- BATCH 15: parish committees -->
+                <!-- BATCH 18: Data Intake agent -->
+                <section id="section-intake" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold"><i class="fa-solid fa-inbox text-violet-600"></i> Data Intake</h2>
+                        <p class="text-gray-500">Upload many files at once. The AI finds every person and where they belong (member or clergy, rank, departments, committees). Nothing is saved until you check and tap Save all.</p></div>
+                    <p id="in_superNote" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-2">Super Admin: member records are private to each parish, so here you can read files and download the result as a CSV for the parish admin to import. Saving is done by the parish admin.</p>
+                    <div class="bg-white border rounded-xl p-3 space-y-2">
+                        <label class="block font-semibold">Files: photos, screenshots, handwritten registers, PDF, Word (DOCX), Excel (XLSX), CSV, TXT / WhatsApp export</label>
+                        <input type="file" id="in_files" multiple accept="image/*,.heic,.heif,.pdf,.docx,.xlsx,.xls,.csv,.txt,application/pdf" class="w-full border p-2 rounded bg-gray-50">
+                        <details><summary class="font-semibold text-blue-800 py-1">Or paste text (WhatsApp chat, list)</summary><textarea id="in_text" rows="5" class="w-full border p-2 rounded mt-1" placeholder="Paste here..."></textarea></details>
+                        <button id="in_readBtn" onclick="intakeRun()" class="w-full py-3 bg-violet-700 text-white rounded font-bold"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Read and place people</button>
+                        <p class="text-[10px] text-gray-500">Word and Excel are read on this phone. Photos and PDFs are sent to the church's AI reader (needs internet). Max 6 MB per photo/PDF.</p>
+                    </div>
+                    <div id="in_fileList" class="space-y-1"></div>
+                    <p id="in_status" class="text-gray-700"></p>
+                    <div id="in_result" class="hidden space-y-2">
+                        <button id="in_previewBtn" onclick="intakePreview()" class="admin-parish w-full py-3 bg-emerald-600 text-white rounded font-bold"><i class="fa-solid fa-table mr-1"></i> Check and save (preview)</button>
+                        <button id="in_csvBtn" onclick="intakeCsv()" class="w-full py-2.5 bg-white border rounded font-semibold"><i class="fa-solid fa-download mr-1"></i> Download as CSV</button>
+                        <div id="in_people" class="space-y-1"></div>
+                    </div>
+                </section>
+                <!-- BATCH 18: Archive -->
+                <section id="section-archive" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b flex justify-between items-center gap-2"><div><h2 class="text-lg font-bold"><i class="fa-solid fa-box-archive text-amber-600"></i> Archive</h2>
+                        <p class="text-gray-500">History, minutes, registers, certificates, photos and letters. Kept for good: never deleted, only hidden.</p></div>
+                        <button id="ar_addBtn" onclick="archiveForm()" class="hidden px-3 py-2 bg-blue-900 text-white rounded font-bold whitespace-nowrap">+ Add</button></div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input id="ar_q" oninput="renderArchive()" class="col-span-2 border p-2.5 rounded" placeholder="Search title, tags, description">
+                        <select id="ar_cat" onchange="renderArchive()" class="border p-2 rounded"><option value="">All categories</option></select>
+                        <input id="ar_year" oninput="renderArchive()" inputmode="numeric" maxlength="4" class="border p-2 rounded" placeholder="Year e.g. 1990">
+                        <select id="ar_parish" onchange="openArchive()" class="hidden col-span-2 border p-2 rounded"></select>
+                        <label id="ar_hiddenBox" class="hidden col-span-2 flex items-center gap-2"><input type="checkbox" id="ar_showHidden" onchange="renderArchive()" class="w-5 h-5"> Show hidden items</label>
+                    </div>
+                    <p id="ar_count" class="text-gray-500"></p>
+                    <div id="ar_list" class="space-y-2"></div>
+                </section>
                 <section id="section-pcommittees" class="space-y-3 hidden text-xs">
                     <div class="pb-2 border-b flex justify-between items-center"><div><h2 class="text-lg font-bold">Parish Committees</h2><p class="text-gray-500">Current, upcoming and past committees. Nothing is deleted.</p></div>
                     <button onclick="openPCommitteeForm()" id="newPcBtn" class="px-3 py-2 bg-blue-900 text-white rounded font-bold">+ New</button></div>
@@ -855,7 +893,7 @@
                 <button onclick="closeModal('importModal')" class="text-white text-lg px-2" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="p-3 space-y-3">
-                <div class="grid grid-cols-2 gap-2">
+                <div id="imp_tabs" class="grid grid-cols-2 gap-2">
                     <button id="imp_tab_whatsapp" onclick="impTab('whatsapp')" class="py-2.5 border rounded font-semibold"><i class="fa-brands fa-whatsapp mr-1"></i> Paste WhatsApp</button>
                     <button id="imp_tab_csv" onclick="impTab('csv')" class="py-2.5 border rounded font-semibold"><i class="fa-solid fa-table mr-1"></i> CSV / Excel</button>
                 </div>
@@ -874,9 +912,7 @@
                 <div id="imp_preview" class="hidden space-y-2">
                     <div class="flex justify-between items-center gap-2"><p id="imp_summary" class="text-xs"></p><button onclick="impReset()" class="text-xs underline text-gray-500 whitespace-nowrap">Start over</button></div>
                     <p class="text-[11px] text-gray-500">Swipe sideways to see every column. Red = needs fixing.</p>
-                    <div class="overflow-x-auto border rounded"><table class="text-xs min-w-max"><thead class="bg-gray-100"><tr><th class="p-1 sticky left-0 bg-gray-100 text-left">#</th>
-                        <th class="p-1 text-left">Name *</th><th class="p-1 text-left">Gender *</th><th class="p-1 text-left">Marital *</th><th class="p-1 text-left">Phone</th><th class="p-1 text-left">Rank</th><th class="p-1 text-left">Birthday *</th>
-                        <th class="p-1 text-left">Address</th><th class="p-1 text-left">Occupation</th><th class="p-1 text-left">Last anointment</th><th class="p-1 text-left">Email</th><th class="p-1 text-left">Next of kin</th><th class="p-1 text-left">Kin address</th><th class="p-1 text-left">Kin phone</th></tr></thead>
+                    <div class="overflow-x-auto border rounded"><table class="text-xs min-w-max"><thead class="bg-gray-100"><tr id="imp_head"></tr></thead>
                         <tbody id="imp_rows"></tbody></table></div>
                     <button id="imp_aiBtn" onclick="impAskAi()" class="hidden w-full bg-violet-100 text-violet-800 border border-violet-300 py-2 rounded text-xs font-semibold"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Unsure? Ask the AI to help with red rows (optional)</button>
                     <label class="flex items-start gap-2 bg-amber-50 border border-amber-200 p-2 rounded text-xs"><input type="checkbox" id="imp_consent" class="mt-0.5 w-5 h-5"><span>Every person here has given consent for the parish to store these details (NDPA 2023). *</span></label>

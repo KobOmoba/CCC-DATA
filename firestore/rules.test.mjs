@@ -1763,3 +1763,62 @@ test('b17 public church info: anyone reads; only that parish admin writes; only 
   await assertFails(deleteDoc(doc(as.adminA(), 'publicInfo/A')));
   await assertFails(getDoc(doc(as.stranger(), 'parishes/A')));                              // the parish itself stays private
 });
+
+// ---------------- Batch 18: archive index + intake import log ----------------
+const KEY = (p) => `${p}/2026/0f8fad5b-d9cb-469f-a165-70867728950e.jpg`;
+const arc = (pid, extra = {}) => ({ title: 'Minutes 1990', titleLower: 'minutes 1990', category: 'Minutes', date: '1990-05', year: 1990, parishId: pid,
+  parishName: 'Parish ' + pid, tags: ['minutes', 'harvest'], description: 'Old minutes', fileKey: KEY(pid), fileName: 'm.jpg', mime: 'image/jpeg',
+  size: 120000, hidden: false, createdAt: 'now', createdBy: 'uA', ...extra });
+async function arcWrite(db, who, id, data, v, action = 'archive-add', withAudit = true) {
+  const b = writeBatch(db), path = 'archive/' + id;
+  b.set(doc(db, path), { version: v, updatedAt: 'now', updatedBy: who.uid, ...data });
+  if (withAudit) b.set(doc(db, 'auditLog/archive_' + id + '_v' + v), { ...audit(path, v, action, who), parishId: data.parishId });
+  return b.commit();
+}
+test('b18 archive: parish admin adds to own parish, Super Admin to HQ; never deleted; hide needs a reason; audited', async () => {
+  const a = as.adminA(), N = { ...NAMED };
+  await assertFails(arcWrite(a, A, 'x1', arc('A'), 1, 'archive-add', false));                      // no audit
+  await assertFails(arcWrite(a, A, 'x1', arc('B'), 1));                                             // other parish
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { fileKey: KEY('B') }), 1));                      // file of another parish
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { category: 'Gossip' }), 1));
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { mime: 'text/html' }), 1));
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { size: 16 * 1024 * 1024 }), 1));
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { hidden: true }), 1));
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { createdBy: 'uB' }), 1));
+  await assertFails(arcWrite(a, A, 'x1', arc('HQ', { fileKey: KEY('HQ') }), 1));                    // HQ is Super Admin only
+  await assertFails(arcWrite(as.adminS(), { uid: 'uS', email: '', role: 'parish_admin' }, 'x9', arc('S', { createdBy: 'uS' }), 1));
+  await assertSucceeds(arcWrite(a, A, 'x1', arc('A'), 1));
+  await assertSucceeds(arcWrite(as.named(), N, 'h1', arc('HQ', { fileKey: KEY('HQ'), createdBy: 'uNamed' }), 1));
+  await assertFails(arcWrite(as.superA(), UNNAMED, 'h2', arc('HQ', { fileKey: KEY('HQ'), createdBy: 'uSuper' }), 1)); // named accounts only
+  // Edit the description: version bump + audit; file / parish fixed.
+  await assertSucceeds(arcWrite(a, A, 'x1', arc('A', { title: 'Minutes May 1990', titleLower: 'minutes may 1990' }), 2, 'archive-edit'));
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { fileKey: KEY('A').replace('0f8f', '1f8f') }), 3, 'archive-edit'));
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { size: 5 }), 3, 'archive-edit'));
+  await assertFails(arcWrite(a, A, 'x1', arc('A'), 2, 'archive-edit'));                             // must bump
+  await assertFails(arcWrite(a, A, 'x1', arc('A', { hidden: true }), 3, 'archive-hide'));            // reason needed
+  await assertSucceeds(arcWrite(a, A, 'x1', arc('A', { hidden: true, hiddenReason: 'Duplicate scan' }), 3, 'archive-hide'));
+  await assertFails(deleteDoc(doc(a, 'archive/x1')));
+  await assertFails(deleteDoc(doc(as.named(), 'archive/x1')));
+  // Reads: own parish only; HQ docs for Super Admin / HQ.
+  await assertSucceeds(getDocs(query(collection(a, 'archive'), where('parishId', '==', 'A'))));
+  await assertFails(getDocs(query(collection(as.adminB(), 'archive'), where('parishId', '==', 'A'))));
+  await assertFails(getDoc(doc(as.adminB(), 'archive/x1')));
+  await assertFails(getDoc(doc(a, 'archive/h1')));
+  await assertFails(getDoc(doc(as.stranger(), 'archive/x1')));
+  await assertSucceeds(getDoc(doc(as.superA(), 'archive/x1')));
+  await assertSucceeds(getDoc(doc(as.hq(), 'archive/h1')));
+  await assertFails(arcWrite(as.adminB(), B, 'x1', arc('A', { hidden: false, hiddenReason: 'x' }), 4, 'archive-show'));
+  await assertSucceeds(arcWrite(as.named(), N, 'x1', arc('A', { hidden: false, hiddenReason: 'Restored' }), 4, 'archive-show')); // Super Admin may hide/show
+});
+test('b18 intake: import log accepts source intake, also for new clergy; other sources unchanged', async () => {
+  const a = as.adminA();
+  const log = (no, source, v = 1) => { const b = writeBatch(a), path = `parishes/A/importLog/${no}`;
+    b.set(doc(a, path), { memberNo: no, source, version: v, at: serverTimestamp(), by: 'uA' });
+    b.set(doc(a, 'auditLog/' + path.replace(/\//g, '_') + '_v' + v), { ...audit(path, v, 'import-member', A), parishId: 'A' });
+    return b.commit(); };
+  await assertSucceeds(log('CCC-MBR-001', 'intake'));
+  await assertSucceeds(log('CCC-CLG-001', 'intake'));          // clergy via the intake agent
+  await assertFails(log('CCC-CLG-001', 'csv'));                // csv/whatsapp stay members-only (already exists anyway)
+  await assertFails(log('CCC-MBR-002', 'robot'));
+  await assertFails(log('CCC-MBR-404', 'intake'));             // record must exist
+});

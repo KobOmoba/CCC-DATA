@@ -7,6 +7,15 @@
 // Route: POST /summary  JSON {totals}: counts only (Phase 8). Returns {text}: a short plain-language summary of the month's alerts.
 // Cron Trigger (Phase 8): daily church-wide checks -> parishMonthly, statsRollups, alerts (+ audit) in Firestore via the REST API.
 //   Needs secret FIREBASE_SERVICE_ACCOUNT (service-account JSON with Cloud Datastore User role). Without it the job does nothing.
+// Route: POST /classify (Batch 18 intake agent) JSON {text} or {file, mime} plus {units:[{id,name}], committees:[name]}.
+//   Returns people WITH placement: track member|clergy (women never clergy), prophet, departments (ids from `units` only),
+//   committees ({name, role} from `committees` only), deptRole.
+// Archive (Batch 18), files in Cloudflare R2 (binding ARCHIVE, bucket ccc-archive); Firestore archive/{id} is the index:
+//   POST /archive/upload  raw file body, headers Content-Type + X-Parish-Id (+ X-File-Name). Parish admin of that
+//                         parish (checked by reading users/{uid} and parishes/{p} WITH THE CALLER'S OWN token, so the
+//                         Firestore rules decide) or Super Admin. Returns {key, size, mime}.
+//   GET  /archive/file?id={archiveId}  proxied download: the worker reads archive/{id} with the caller's token (rules
+//                         decide who may see it), then streams the R2 object. No public bucket, no signed links to leak.
 // Header: Authorization: Bearer <Firebase ID token of project ccc-data-aarinat>
 
 import './alerts-core.js'; // symlink to ../alerts-core.js (shared with the browser)
@@ -20,6 +29,9 @@ const GROQ_MODEL = 'qwen/qwen3.8-27b';
 const MAX_FILE_CHARS = 8_000_000; // ~6 MB
 const MAX_TEXT_CHARS = 60_000;
 const RATE = { perMinute: 6, perDay: 200 }; // per signed-in user, per worker instance
+const ARCHIVE_RATE = { perMinute: 30, perDay: 1000 };
+const MAX_ARCHIVE_BYTES = 15 * 1024 * 1024; // 15 MB per archived file
+const ARCHIVE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 
 const RANKS_M = ["Brother", "Elder Brother", "Cape Elder Brother", "Full Elder Brother", "Senior Elder Brother",
   "Superior Senior Elder Brother", "Assistant Leader", "Leader", "Senior Leader", "Superior Senior Leader",
@@ -46,7 +58,7 @@ function cors(origin) {
   return {
     'Access-Control-Allow-Origin': allowedOrigin(origin) ? origin : ALLOWED[0],
     'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Parish-Id, X-File-Name',
     'Vary': 'Origin',
   };
 }
@@ -83,10 +95,10 @@ async function verifyIdToken(token) {
 
 // ---------- simple rate limit (per isolate; good enough to stop a runaway loop) ----------
 const hits = new Map();
-function limited(uid) {
+function limited(uid, rate = RATE) {
   const now = Date.now(), h = (hits.get(uid) || []).filter(t => now - t < 86_400_000);
   const lastMin = h.filter(t => now - t < 60_000).length;
-  if (lastMin >= RATE.perMinute || h.length >= RATE.perDay) { hits.set(uid, h); return true; }
+  if (lastMin >= rate.perMinute || h.length >= rate.perDay) { hits.set(uid, h); return true; }
   h.push(now); hits.set(uid, h); return false;
 }
 
@@ -99,7 +111,7 @@ function parseJSON(text) {
 
 async function callGemini(env, input) {
   if (!env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not set');
-  const parts = [{ text: PROMPT }];
+  const parts = [{ text: input.prompt || PROMPT }];
   if (input.text) parts.push({ text: 'THE LIST:\n' + input.text });
   else parts.push({ inline_data: { mime_type: input.mime, data: input.file } });
   let last = 'no model tried';
@@ -126,8 +138,9 @@ async function callGemini(env, input) {
 async function callGroq(env, input) {
   if (!env.GROQ_API_KEY) throw new Error('GROQ_API_KEY not set');
   if (input.mime === 'application/pdf') throw new Error('Groq cannot read PDF');
-  const content = input.text ? [{ type: 'text', text: PROMPT + '\n\nTHE LIST:\n' + input.text }]
-    : [{ type: 'image_url', image_url: { url: `data:${input.mime};base64,${input.file}` } }, { type: 'text', text: PROMPT }];
+  const prompt = input.prompt || PROMPT;
+  const content = input.text ? [{ type: 'text', text: prompt + '\n\nTHE LIST:\n' + input.text }]
+    : [{ type: 'image_url', image_url: { url: `data:${input.mime};base64,${input.file}` } }, { type: 'text', text: prompt }];
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.GROQ_API_KEY },
@@ -162,6 +175,98 @@ function cleanPerson(x) {
     anointDay: intIn(x.anointDay, 1, 31), anointMonth: intIn(x.anointMonth, 1, 12), anointYear: intIn(x.anointYear, 1900, yr),
     nokName: str(x.nokName, 120), nokAddress: str(x.nokAddress, 200), nokPhone: str(x.nokPhone, 20),
   };
+}
+
+// ---------- Batch 18: intake agent, people WITH placement ----------
+// The parish sends its own unit list (fixed departments + its own units) and its committee names; the AI may only
+// place people in those. Anything else is dropped here, so a made-up unit can never reach the preview.
+function cleanUnits(units) {
+  return (Array.isArray(units) ? units : []).slice(0, 60)
+    .map(u => ({ id: str(u && u.id, 40), name: str(u && u.name, 60) }))
+    .filter(u => /^(parochial|choir|ict|sidemen|prophets|sundayschool|u_[A-Za-z0-9]{1,30})$/.test(u.id) && u.name);
+}
+const cleanNames = list => [...new Set((Array.isArray(list) ? list : []).slice(0, 60).map(x => str(x, 120)).filter(Boolean))];
+function classifyPrompt(units, committees) {
+  return PROMPT + ' ALSO work out where each person belongs in the parish and add to each person: '
+    + '"track":"member|clergy", "prophet":true|false, "departments":[unit ids], "deptRole":"", "committees":[{"name":"","role":""}]. '
+    + 'Rules: clergy are MEN only (shepherd, evangelist ministers, pastor, "Rev", "Ven", "clergy" written); a woman is NEVER clergy, she is a member. '
+    + 'prophet = true when written as Prophet/Prophetess or a rank short form ending in /P (a man can be clergy AND prophet). '
+    + 'departments: ONLY ids from this list, when the document says the person is in that unit (a heading, a column, or a note): '
+    + (units.map(u => u.id + ' = ' + u.name).join('; ') || 'none') + '. Clergy are never in departments. '
+    + 'deptRole = their position in the unit if written (e.g. Choir Master, Leader, Secretary), else "". '
+    + 'committees: ONLY these names, copied exactly, with the role written (Chairman, Chairperson, Secretary, Treasurer, Member): '
+    + (committees.join('; ') || 'none') + '. Never guess a placement that is not written.';
+}
+function cleanPlacement(x, units, committees) {
+  const p = cleanPerson(x);
+  const ids = new Set(units.map(u => u.id)), names = new Map(committees.map(c => [norm(c), c]));
+  let track = /^cler/i.test(String(x.track || '')) ? 'clergy' : 'member';
+  const notes = [];
+  if (track === 'clergy' && p.gender === 'Female') { track = 'member'; notes.push('Women are never clergy: placed as a member.'); }
+  const departments = track === 'clergy' ? [] : [...new Set((Array.isArray(x.departments) ? x.departments : []).map(d => str(d, 40)).filter(d => ids.has(d)))];
+  const seen = new Set(), cmts = [];
+  for (const c of Array.isArray(x.committees) ? x.committees : []) {
+    const name = names.get(norm(str(c && (c.name || c), 120)));
+    if (!name || seen.has(name)) continue;
+    seen.add(name); cmts.push({ name, role: str(c && c.role, 40) || 'Member' });
+  }
+  return { ...p, track, prophet: x.prophet === true || x.prophet === 'true', departments, deptRole: track === 'clergy' ? '' : str(x.deptRole, 40),
+    committees: cmts.slice(0, 10), placementNote: notes.join(' ') };
+}
+
+// ---------- Batch 18: archive in R2 ----------
+// Firestore REST read with the CALLER's ID token: the security rules decide, the worker holds no Firestore credential.
+async function readAsUser(env, idToken, path) {
+  const emu = env.FIRESTORE_EMULATOR_HOST, project = env.FIRESTORE_PROJECT || FIREBASE_PROJECT;
+  const url = `${emu ? 'http://' + emu : 'https://firestore.googleapis.com'}/v1/projects/${project}/databases/(default)/documents/${path}`;
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + idToken } });
+  if (r.status === 403 || r.status === 404) return null;
+  if (!r.ok) throw new Error('firestore ' + r.status);
+  return fromFields((await r.json()).fields || {});
+}
+function sniff(bytes) {
+  const b = new Uint8Array(bytes.slice(0, 12)), at = (i, ...v) => v.every((x, j) => b[i + j] === x);
+  if (at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (at(0, 0x89, 0x50, 0x4e, 0x47)) return 'image/png';
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return 'image/webp';
+  if (at(0, 0x25, 0x50, 0x44, 0x46)) return 'application/pdf';
+  return '';
+}
+async function handleArchive(req, env, route, uid, idToken, origin) {
+  if (!env.ARCHIVE) return json({ error: 'archive storage not set up yet' }, 503, origin);
+  if (route === 'archive/upload') {
+    if (req.method !== 'POST') return json({ error: 'POST only' }, 405, origin);
+    const parishId = String(req.headers.get('X-Parish-Id') || '');
+    if (!/^(HQ|[A-Za-z0-9]{1,40})$/.test(parishId)) return json({ error: 'bad parish' }, 400, origin);
+    const mime = String(req.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+    if (!ARCHIVE_TYPES[mime]) return json({ error: 'Only JPG, PNG, WEBP photos or PDF files.' }, 415, origin);
+    if (Number(req.headers.get('Content-Length') || 0) > MAX_ARCHIVE_BYTES) return json({ error: 'File too big (max 15 MB).' }, 413, origin);
+    const me = await readAsUser(env, idToken, 'users/' + uid);
+    const isSuper = me && me.role === 'super_admin';
+    const isAdmin = me && me.role === 'parish_admin' && me.parishId === parishId && parishId !== 'HQ'
+      && !!(await readAsUser(env, idToken, 'parishes/' + parishId)); // rules hide a Suspended parish from its admin
+    if (!isSuper && !isAdmin) return json({ error: 'You can only add files to your own parish archive.' }, 403, origin);
+    const bytes = await req.arrayBuffer();
+    if (!bytes.byteLength) return json({ error: 'empty file' }, 400, origin);
+    if (bytes.byteLength > MAX_ARCHIVE_BYTES) return json({ error: 'File too big (max 15 MB).' }, 413, origin);
+    if (sniff(bytes) !== mime) return json({ error: 'The file does not match its type.' }, 415, origin);
+    const key = `${parishId}/${new Date().getUTCFullYear()}/${crypto.randomUUID()}.${ARCHIVE_TYPES[mime]}`;
+    const fileName = String(req.headers.get('X-File-Name') || '').replace(/[^\w .()-]/g, '_').slice(0, 120);
+    await env.ARCHIVE.put(key, bytes, { httpMetadata: { contentType: mime }, customMetadata: { uid, parishId, fileName } });
+    return json({ key, size: bytes.byteLength, mime }, 200, origin);
+  }
+  if (route === 'archive/file') {
+    const id = new URL(req.url).searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{1,60}$/.test(id)) return json({ error: 'bad id' }, 400, origin);
+    const doc = await readAsUser(env, idToken, 'archive/' + id);
+    if (!doc || !doc.fileKey || !String(doc.fileKey).startsWith(doc.parishId + '/')) return json({ error: 'not found or not allowed' }, 404, origin);
+    const obj = await env.ARCHIVE.get(doc.fileKey);
+    if (!obj) return json({ error: 'file missing' }, 404, origin);
+    const type = (obj.httpMetadata && obj.httpMetadata.contentType) || 'application/octet-stream';
+    return new Response(obj.body, { status: 200, headers: { ...cors(origin), 'Content-Type': ARCHIVE_TYPES[type] ? type : 'application/octet-stream',
+      'Content-Disposition': 'inline', 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' } });
+  }
+  return json({ error: 'unknown route' }, 404, origin);
 }
 
 // ---------- Phase 8: AI summary (totals only) ----------
@@ -305,8 +410,11 @@ async function runChecks(env, today = new Date().toISOString().slice(0, 10)) {
   return { parishes: plist.length, alerts: found.length, fresh: fresh.length, rollups: Object.keys(roll).length, summary };
 }
 
+// Token check behind one seam so the unit tests can stand in for Google's keys.
+const deps = { verify: verifyIdToken };
+
 export default {
-  runChecks, cleanTotals, allowedOrigin, // exposed for the emulator test (ai-worker/checks.test.mjs)
+  runChecks, cleanTotals, allowedOrigin, cleanPlacement, cleanUnits, classifyPrompt, sniff, deps, // exposed for the unit tests
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runChecks(env).then(r => console.log('ccc checks', JSON.stringify(r)), e => console.error('ccc checks failed', e.message)));
   },
@@ -314,8 +422,9 @@ export default {
     const origin = req.headers.get('Origin') || '';
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors(origin) });
     const route = new URL(req.url).pathname.replace(/^\/+/, '');
-    if (req.method === 'GET') return json({ name: 'CCC AI data entry', version: 1, engines: ['gemini', 'groq'] }, 200, origin);
-    if (route !== 'extract' && route !== 'summary') return json({ error: 'unknown route' }, 404, origin);
+    const archive = route.startsWith('archive/');
+    if (req.method === 'GET' && !archive) return json({ name: 'CCC AI data entry', version: 2, engines: ['gemini', 'groq'] }, 200, origin);
+    if (!['extract', 'summary', 'classify'].includes(route) && !archive) return json({ error: 'unknown route' }, 404, origin);
 
     const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     const testKey = req.headers.get('X-Test-Key');
@@ -324,7 +433,13 @@ export default {
     else {
       if (!allowedOrigin(origin)) return json({ error: 'origin not allowed' }, 403, origin);
       if (!token) return json({ error: 'sign in first' }, 401, origin);
-      try { uid = await verifyIdToken(token); } catch (e) { return json({ error: 'invalid login: ' + e.message }, 401, origin); }
+      try { uid = await deps.verify(token); } catch (e) { return json({ error: 'invalid login: ' + e.message }, 401, origin); }
+    }
+    if (archive) {
+      if (uid === 'accuracy-test') return json({ error: 'sign in first' }, 401, origin);
+      if (limited('archive:' + uid, ARCHIVE_RATE)) return json({ error: 'Too many requests. Wait a minute and try again.' }, 429, origin);
+      try { return await handleArchive(req, env, route, uid, token, origin); }
+      catch (e) { return json({ error: 'archive failed: ' + String(e.message || e) }, 502, origin); }
     }
     if (limited(uid)) return json({ error: 'Too many requests. Wait a minute and try again.' }, 429, origin);
 
@@ -343,11 +458,17 @@ export default {
       if (!input.file || input.file.length > MAX_FILE_CHARS) return json({ error: 'missing or too large file' }, 400, origin);
     }
 
+    let clean = cleanPerson;
+    if (route === 'classify') {
+      const units = cleanUnits(body.units), committees = cleanNames(body.committees);
+      input.prompt = classifyPrompt(units, committees);
+      clean = x => cleanPlacement(x, units, committees);
+    }
     const errors = [];
     for (const engine of ENGINES) {
       try {
         const { data, engine: used } = await engine(env, input);
-        const people = (Array.isArray(data) ? data : data.people || []).map(cleanPerson).filter(p => p.fullName);
+        const people = (Array.isArray(data) ? data : data.people || []).map(clean).filter(p => p.fullName);
         if (!people.length) throw new Error('0 people');
         return json({ people, engine: used }, 200, origin);
       } catch (e) { errors.push(String(e.message || e)); }

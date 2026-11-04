@@ -1,0 +1,16 @@
+# Cloudflare Worker "ccc-ai" (Batch 18 adds the R2 archive binding).
+# Deploy with `npx wrangler deploy` from this folder, or ./deploy.sh (Cloudflare API). NOT deployed by AIOS.
+# Secrets are set with `npx wrangler secret put NAME`, never written here.
+name = "ccc-ai"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[triggers]
+crons = ["17 2 * * *"]
+
+# Batch 18 archive: create the bucket once with `npx wrangler r2 bucket create ccc-archive`. Keep it PRIVATE
+# (no public r2.dev access, no custom domain): files are only served through GET /archive/file.
+[[r2_buckets]]
+binding = "ARCHIVE"
+bucket_name = "ccc-archive"
