@@ -5,7 +5,7 @@
 //     Month and list views. Dashboard card "This week": services, events, birthdays and wedding anniversaries.
 //  3. Messages: personalised WhatsApp (one tap each, with a "next" queue) + email (mailto, BCC batches).
 //     The log keeps who / when / template only. sendWhatsApp(to, text) is the adapter for the future Cloud API.
-//  4. Phase 9b: one public website per parish (publicSites/{code}), member sign-up link + pending queue, editable timetable,
+//  4. Phase 9b: member sign-up link (/join) + pending queue, editable timetable,
 //     WhatsApp "send to many".
 
 // ================================================================= shared helpers
@@ -107,8 +107,7 @@ function viewSermon(id) {
         ${(x.tags || []).length ? `<p class="text-blue-800">${x.tags.map(t => "#" + esc(t)).join(" ")}</p>` : ""}
         ${x.mediaUrl ? `<a href="${esc(x.mediaUrl)}" target="_blank" rel="noopener" class="inline-block bg-red-600 text-white rounded px-3 py-2 font-bold"><i class="fa-solid fa-play mr-1"></i> Watch / listen (${mediaKind(x.mediaUrl)})</a>` : ""}
         ${x.text ? `<div class="border rounded p-2 bg-gray-50 whitespace-pre-wrap max-h-80 overflow-y-auto">${esc(x.text)}</div>` : `<p class="text-gray-400">No transcript.</p>`}`;
-    const acts = (mine ? `<button onclick="openSermonForm('${id}')" class="px-3 py-2 bg-blue-600 text-white rounded">Edit</button>` : "")
-        + (mine ? `<button id="pubSermonBtn" onclick="publishSermon('${id}')" class="px-3 py-2 bg-emerald-600 text-white rounded">Put on our website</button>` : "");
+    const acts = (mine ? `<button onclick="openSermonForm('${id}')" class="px-3 py-2 bg-blue-600 text-white rounded">Edit</button>` : "");
     p9Modal(x.title, body, acts);
 }
 
@@ -309,9 +308,9 @@ async function wish(tpl, no) {
 const TEMPLATES = {
     birthday: { name: "Birthday", text: "Happy birthday, {name}! The whole family of {parish} celebrates you today ({date}). May the Lord bless you with long life, joy and good health. Halleluyah!" },
     anniversary: { name: "Wedding anniversary", text: "Happy wedding anniversary, {name}! {parish} rejoices with you today ({date}). May God keep your home in love and peace." },
-    absent: { name: "Absent follow-up", text: "Dear {name}, we have missed you at {parish}. We hope all is well. We are praying for you. Do let us know if you need anything. God bless you." },
-    event: { name: "Event reminder", text: "Dear {name}, this is a reminder from {parish}: {event}. Thank you for serving. God bless you." },
-    general: { name: "General", text: "Dear {name}, greetings from {parish} ({date}). " } };
+    absent: { name: "Absent follow-up", text: "Halleluyah 🙌, {name}! We have missed you at {parish}. We hope all is well. We are praying for you. Do let us know if you need anything. God bless you." },
+    event: { name: "Event reminder", text: "Halleluyah 🙌, {name}! This is a reminder from {parish}: {event}. Thank you for serving. God bless you." },
+    general: { name: "General", text: "Halleluyah 🙌, {name}! From {parish}, Celestial Church of Christ ({date}). " } };
 let msg = { recipients: [], queue: [], at: 0, channel: "whatsapp" };
 function fill(text, r) {
     return text.replace(/\{name\}/g, r ? r.name : "Beloved").replace(/\{parish\}/g, localState.parish.name || "our parish").replace(/\{date\}/g, fmtDay(localToday()));
@@ -434,55 +433,10 @@ async function loadMsgLog() {
         || `<p class="text-gray-400">Nothing sent yet.</p>`;
 }
 
-// ================================================================= 4. PARISH WEBSITE (Phase 9b: one site per parish)
-// Served at /site/?p=<parish code>. The parish admin controls it. Only public fields are copied into publicSites/{code}.
-const siteBase = () => location.origin + "/site/?p=";
+// ================================================================= 4. MEMBER SIGN-UP LINK
+// The parish website is a separate project (Batch 12). This app keeps only the /join?p=<parish code> sign-up link.
 const joinBase = () => location.origin + "/join?p=";
 const myCode = () => localState.parish.code || "";
-const siteRef = () => db.collection("publicSites").doc(myCode());
-const publicServices = () => SCHEDULE.concat(ACTIVITIES).map(s => ({ day: DOW[s.dow], time: s.time || "", name: s.name + (s.week === "first" ? " (1st of month)" : s.week === "other" ? " (other weeks)" : "") }));
-async function openSite() {
-    if (!myCode()) { $("ws_body").innerHTML = `<p class="text-red-700">This parish has no parish code yet. Ask the Super Admin to "Give a parish code".</p>`; return; }
-    $("ws_link").textContent = siteBase() + myCode();
-    $("ws_link").href = siteBase() + myCode();
-    const [site, evs, sms] = await Promise.all([siteRef().get(), siteRef().collection("events").get(), siteRef().collection("sermons").get()]);
-    const d = site.exists ? site.data() : {};
-    $("ws_welcome").value = d.welcome || ""; $("ws_email").value = d.contactEmail || ""; $("ws_phone").value = d.contactPhone || "";
-    $("ws_status").textContent = site.exists ? "Live" : "Not published yet";
-    const up = (await parishRef().collection("events").where("date", ">=", localToday()).orderBy("date").limit(30).get()).docs;
-    const shown = new Set(evs.docs.map(x => x.id));
-    $("ws_events").innerHTML = up.map(x => `<label class="ws-ev flex items-center gap-2 border rounded p-2"><input type="checkbox" ${shown.has(x.id) ? "checked" : ""} ${site.exists ? "" : "disabled"} onchange="toggleSiteEvent('${x.id}', this.checked)">
-        <span>${esc(x.data().title)} · ${esc(fmtDay(x.data().date))} ${esc(x.data().time)}</span></label>`).join("") || `<p class="text-gray-400">No upcoming events. Add them in Calendar.</p>`;
-    $("ws_sermons").innerHTML = sms.docs.map(x => `<div class="flex justify-between border rounded p-2"><span>${esc(x.data().title)} · ${esc(x.data().date)}</span><button onclick="unpublishSermon('${x.id}')" class="text-red-600">Remove</button></div>`).join("")
-        || `<p class="text-gray-400">None. Open a sermon and tap "Put on our website".</p>`;
-}
-async function publishSite() {
-    if (!myCode()) return alert("This parish has no parish code yet.");
-    const email = val("ws_email");
-    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return alert("That email does not look right.");
-    const p = localState.parish;
-    await busy("ws_publish", () => siteRef().set({ parishId: localState.currentParishId, name: p.name, city: p.city || "", country: p.country || "", mapsUrl: p.mapsUrl || "",
-        welcome: $("ws_welcome").value.slice(0, 2000), contactEmail: email.toLowerCase(), contactPhone: val("ws_phone").slice(0, 30), services: publicServices(), updatedAt: nowIso() }))
-        .catch(e => alert("Not published: " + e.message));
-    await openSite();
-}
-// Only title, type, date, time, venue, notes: volunteer names never go public.
-async function toggleSiteEvent(id, on) {
-    const ref = siteRef().collection("events").doc(id);
-    if (!on) return ref.delete().catch(e => alert("Not removed: " + e.message));
-    const e = (await parishRef().collection("events").doc(id).get()).data();
-    await ref.set({ title: e.title, kind: e.kind, date: e.date, time: e.time, venue: e.venue || "", notes: (e.notes || "").slice(0, 600), updatedAt: nowIso() })
-        .catch(err => alert("Not published: " + err.message));
-}
-async function publishSermon(id) {
-    const x = sermonState.list.find(s => s.id === id);
-    if (!(await siteRef().get().catch(() => null))?.exists) return alert("Publish your parish website first (Our Website).");
-    await siteRef().collection("sermons").doc(id).set({ title: x.title, preacher: x.preacher, date: x.date, scripture: x.scripture || "",
-        mediaUrl: x.mediaUrl || "", summary: (x.text || "").slice(0, 300), updatedAt: nowIso() })
-        .then(() => { $("pubSermonBtn").textContent = "On our website ✓"; })
-        .catch(e => alert("Not published: " + e.message));
-}
-async function unpublishSermon(id) { await siteRef().collection("sermons").doc(id).delete().catch(e => alert("Not removed: " + e.message)); await openSite(); }
 function copyText(t, btn) {
     (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { if (btn) $(btn).textContent = "Copied ✓"; })
         .catch(() => prompt("Copy this:", t));

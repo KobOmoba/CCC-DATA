@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CELESTIAL CHURCH OF CHRIST</title>
+    <link rel="icon" href="assets/ccc-logo.webp" type="image/webp">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome CDN -->
@@ -27,7 +28,7 @@
     <div id="landingPage" class="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 text-white p-4 overflow-y-auto">
         <div class="max-w-md mx-auto my-auto w-full bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 shadow-2xl">
             <div class="text-center mb-6">
-                <div class="w-16 h-16 mx-auto mb-4 bg-white rounded-full flex items-center justify-center shadow-lg p-1 text-blue-900 font-extrabold text-xs">CCC</div>
+                <img id="landingLogo" src="assets/ccc-logo.webp" alt="Celestial Church of Christ logo" class="w-20 h-20 mx-auto mb-4 bg-white rounded-full object-contain shadow-lg p-1">
                 <h1 class="text-lg font-black uppercase tracking-wider text-yellow-400">CELESTIAL CHURCH OF CHRIST</h1>
                 <p class="text-xs tracking-widest text-gray-300 font-semibold uppercase">Get Started &middot; Parish Sign-in</p>
             </div>
@@ -79,7 +80,6 @@
                 <button onclick="showSection('calendar')" id="nav-calendar" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-days text-rose-300 w-4"></i> Calendar</button>
                 <button onclick="showSection('sermons')" id="nav-sermons" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-book-bible text-sky-300 w-4"></i> Sermons</button>
                 <button onclick="showSection('messages')" id="nav-messages" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-brands fa-whatsapp text-emerald-400 w-4"></i> Messages</button>
-                <button onclick="showSection('site')" id="nav-site" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-globe text-emerald-300 w-4"></i> Our Website</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('ai')" id="nav-ai" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wand-magic-sparkles text-fuchsia-300 w-4"></i> AI Dashboard</button>
                 <button onclick="showSection('postings')" id="nav-postings" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-route text-amber-300 w-4"></i> Clergy Postings</button>
@@ -98,11 +98,10 @@
         </aside>
 
         <main class="flex-1 flex flex-col min-w-0">
-            <!-- Branding bar: church title, parish logo + name, global search -->
+            <!-- Branding bar: official CCC logo + church title (fixed), parish name, global search -->
             <header class="bg-white border-b shadow-sm p-3 space-y-2 sticky top-0 z-30">
                 <div class="flex items-center gap-3">
-                    <img id="parishLogo" alt="Parish logo" class="hidden w-12 h-12 rounded-full object-cover border">
-                    <div id="logoFallback" class="w-12 h-12 rounded-full bg-blue-900 text-yellow-300 flex items-center justify-center font-extrabold text-xs">CCC</div>
+                    <img id="appLogo" src="assets/ccc-logo.webp" alt="Celestial Church of Christ logo" class="w-12 h-12 rounded-full object-contain bg-white border shrink-0">
                     <div class="min-w-0">
                         <h1 class="text-sm font-black text-blue-950 uppercase tracking-wide leading-tight">CELESTIAL CHURCH OF CHRIST</h1>
                         <p id="dashParishName" class="text-xs text-gray-500 truncate">Parish</p>
@@ -374,22 +373,23 @@
 
                 <!-- PARISH SETTINGS -->
                 <section id="section-settings" class="space-y-3 hidden">
-                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Parish Settings</h2><p class="text-xs text-gray-500">Name, logo and location of your parish.</p></div>
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Parish Settings</h2><p class="text-xs text-gray-500">Your parish of CELESTIAL CHURCH OF CHRIST: name and location.</p></div>
                     <div class="bg-white border rounded-xl p-4 space-y-3 text-xs">
-                        <div class="flex items-center gap-3">
-                            <img id="settingsLogo" alt="" class="hidden w-16 h-16 rounded-full object-cover border">
-                            <label class="flex-1">Parish logo<input type="file" id="s_logo" accept="image/*" onchange="pickLogo(this)" class="block w-full text-xs mt-1"></label>
-                        </div>
+                        <p class="font-black text-blue-950 tracking-wide">CELESTIAL CHURCH OF CHRIST</p>
                         <label class="block">Parish name *<input id="s_name" class="w-full border p-2.5 rounded mt-1"></label>
-                        <label class="block">Address<input id="s_address" class="w-full border p-2.5 rounded mt-1"></label>
-                        <label class="block">Google Maps link (open Maps, tap Share, copy link)<input id="s_maps" class="w-full border p-2.5 rounded mt-1" placeholder="https://maps.app.goo.gl/..."></label>
                         <div class="grid grid-cols-2 gap-2">
                             <label>City<input id="s_city" class="w-full border p-2.5 rounded mt-1"></label>
                             <label>State<input id="s_state" class="w-full border p-2.5 rounded mt-1"></label>
                             <label>Country<input id="s_country" class="w-full border p-2.5 rounded mt-1"></label>
+                        </div>
+                        <details id="s_extras" class="border rounded p-2"><summary class="font-semibold cursor-pointer">More (optional): address, map, continent, currency</summary>
+                        <div class="space-y-2 mt-2">
+                        <label class="block">Address<input id="s_address" class="w-full border p-2.5 rounded mt-1"></label>
+                        <label class="block">Google Maps link (open Maps, tap Share, copy link)<input id="s_maps" class="w-full border p-2.5 rounded mt-1" placeholder="https://maps.app.goo.gl/..."></label>
+                        <div class="grid grid-cols-2 gap-2">
                             <label>Continent<select id="s_continent" class="continent-select w-full border p-2.5 rounded mt-1 bg-white"></select></label>
                             <label>Currency (for Monthly Returns)<select id="s_currency" class="currency-select w-full border p-2.5 rounded mt-1 bg-white"></select></label>
-                        </div>
+                        </div></div></details>
                         <a id="s_mapsOpen" target="_blank" rel="noopener" class="hidden text-blue-700 underline">Open pin in Google Maps</a>
                         <button id="saveParishBtn" onclick="saveParishSettings()" class="w-full py-2.5 bg-blue-600 text-white font-bold rounded">Save parish details</button>
                     </div>
@@ -407,16 +407,21 @@
                     <div class="pb-2 border-b"><h2 class="text-lg font-bold">Parishes</h2><p class="text-xs text-gray-500">Create a parish and invite its admin. There is no self-registration.</p></div>
                     <div class="bg-white border rounded-xl p-4 space-y-2 text-xs">
                         <p class="font-bold">New parish</p>
+                        <p class="text-gray-500">Church: <b>CELESTIAL CHURCH OF CHRIST</b> (fixed for every parish)</p>
                         <input id="np_name" class="w-full border p-2.5 rounded" placeholder="Parish name *">
-                        <input id="np_address" class="w-full border p-2.5 rounded" placeholder="Address">
-                        <input id="np_maps" class="w-full border p-2.5 rounded" placeholder="Google Maps link (https://...)">
                         <div class="grid grid-cols-2 gap-2">
                             <input id="np_city" class="border p-2.5 rounded" placeholder="City">
                             <input id="np_state" class="border p-2.5 rounded" placeholder="State">
                             <input id="np_country" class="border p-2.5 rounded" placeholder="Country">
+                        </div>
+                        <details id="np_extras" class="border rounded p-2"><summary class="font-semibold cursor-pointer">Admin extras (optional): address, map, continent, currency</summary>
+                        <div class="space-y-2 mt-2">
+                        <input id="np_address" class="w-full border p-2.5 rounded" placeholder="Address">
+                        <input id="np_maps" class="w-full border p-2.5 rounded" placeholder="Google Maps link (https://...)">
+                        <div class="grid grid-cols-2 gap-2">
                             <select id="np_continent" class="continent-select border p-2.5 rounded bg-white"></select>
                             <select id="np_currency" class="currency-select border p-2.5 rounded bg-white"></select>
-                        </div>
+                        </div></div></details>
                         <div class="grid grid-cols-2 gap-2"><input id="np_pletters" maxlength="4" class="w-full border p-2.5 rounded uppercase font-mono" placeholder="Parish letters * (IJY)"><input id="np_cletters" maxlength="4" class="w-full border p-2.5 rounded uppercase font-mono" placeholder="City letters * (ABK)"></div>
                         <p class="text-[11px] text-gray-500">Lettering goes on certificate numbers, e.g. CCC-IJY-ABK-BRT-001. Unique worldwide; cannot be changed later.</p>
                         <input id="np_email" type="email" class="w-full border p-2.5 rounded" placeholder="Parish admin email * (must not be clergy)">
@@ -477,19 +482,6 @@
 
 
 
-                <!-- PHASE 9b: the parish's own public website -->
-                <section id="section-site" class="space-y-3 hidden text-xs">
-                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Our Website</h2><p class="text-gray-500">Your parish's public page. Only what you put here goes public: never member records.</p></div>
-                    <div id="ws_body" class="bg-white border rounded-xl p-3 space-y-2">
-                        <p>Address: <a id="ws_link" target="_blank" rel="noopener" class="font-mono break-all text-blue-800"></a> · <b id="ws_status"></b></p>
-                        <label class="block">Welcome text<textarea id="ws_welcome" rows="4" class="w-full border p-2.5 rounded mt-1" placeholder="Halleluyah! Welcome to our parish..."></textarea></label>
-                        <div class="grid grid-cols-2 gap-2"><input id="ws_email" type="email" class="border p-2.5 rounded" placeholder="Public contact email"><input id="ws_phone" class="border p-2.5 rounded" placeholder="Public phone"></div>
-                        <p class="text-gray-500">Name, city, country, map link and your weekly timetable are added from Parish Settings.</p>
-                        <button id="ws_publish" onclick="publishSite()" class="w-full py-2.5 bg-emerald-600 text-white rounded font-bold">Publish / update website</button>
-                    </div>
-                    <div class="bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">Events on the website</p><div id="ws_events" class="space-y-1"></div></div>
-                    <div class="bg-white border rounded-xl p-3 space-y-2"><p class="font-bold">Sermons on the website</p><div id="ws_sermons" class="space-y-1"></div></div>
-                </section>
                 <!-- PHASE 7: church-wide member directory (work profile only) -->
                 <section id="section-directory" class="space-y-3 hidden">
                     <div class="pb-2 border-b"><h2 class="text-lg font-bold">Member Directory</h2><p class="text-xs text-gray-500">Work profile + church participation, for forming committees. Address, next of kin, birth year and family stay private to each parish.</p></div>

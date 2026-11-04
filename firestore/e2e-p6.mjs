@@ -16,7 +16,7 @@ const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/doc
 const PASS = 'Passw0rd!';
 
 // Tiny static server for index.html / app.js / styles.css.
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp' };
 const server = createServer((req, res) => {
   const path = new URL(req.url, 'http://x').pathname.replace(/^\/$/, '/index.html');
   let body;
@@ -80,7 +80,8 @@ async function login(email) {
   await page.waitForSelector('#mainApp:not(.hidden)');
 }
 async function logout() { await page.evaluate(() => logout()); await page.waitForSelector('#landingPage:not(.hidden)'); }
-const nav = (id) => page.click('#nav-' + id);
+// Phase 10: optional parish extras sit in a collapsed <details>; tests open it to fill them.
+const nav = async (id) => { await page.click('#nav-' + id); if (id === 'parishes' || id === 'settings') await page.evaluate(() => document.querySelectorAll('#np_extras, #s_extras').forEach(d => d.open = true)); };
 const modalClosed = (id) => page.waitForSelector(`#${id}.hidden`, { state: 'attached', timeout: 15000 });
 
 const noFail = (d0, re = /Not saved|not saved|failed|Not confirmed|Could not/) => assert.ok(!dialogs.slice(d0).some(m => re.test(m)), 'no failure dialog: ' + dialogs.slice(d0).join(' | '));

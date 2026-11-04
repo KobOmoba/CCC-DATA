@@ -16,7 +16,7 @@ const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/doc
 const PASS = 'Passw0rd!';
 
 // Tiny static server for index.html / app.js / styles.css.
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp' };
 const server = createServer((req, res) => {
   const path = new URL(req.url, 'http://x').pathname.replace(/^\/$/, '/index.html');
   let body;
@@ -90,7 +90,8 @@ async function login(email) {
   await page.waitForSelector('#mainApp:not(.hidden)');
 }
 async function logout() { await page.evaluate(() => logout()); await page.waitForSelector('#landingPage:not(.hidden)'); }
-const nav = (id) => page.click('#nav-' + id);
+// Phase 10: optional parish extras sit in a collapsed <details>; tests open it to fill them.
+const nav = async (id) => { await page.click('#nav-' + id); if (id === 'parishes' || id === 'settings') await page.evaluate(() => document.querySelectorAll('#np_extras, #s_extras').forEach(d => d.open = true)); };
 const modalClosed = (id) => page.waitForSelector(`#${id}.hidden`, { state: 'attached', timeout: 15000 });
 
 async function addPerson(kind, i, p, expectRefused = false) {
@@ -171,14 +172,13 @@ try {
   assert.ok(dialogs.slice(d0).some(m => /Could not activate/.test(m)), 'invite reuse refused');
   await login('admin@test.local');
 
-  // 5. Admin edits the parish name and uploads a logo -> shown at the top.
+  // 5. Admin edits the parish name. Church name + official logo are fixed (Phase 10): no logo upload.
   await nav('settings');
+  assert.equal(await page.locator('#s_logo').count(), 0, 'no per-parish logo upload');
   await page.fill('#s_name', 'TEST Grace Cathedral Parish');
-  await page.setInputFiles('#s_logo', await makeImage('CCC', '#1e3a8a'));
-  await page.waitForSelector('#settingsLogo:not(.hidden)');
   await page.click('#saveParishBtn');
   await page.waitForFunction(() => document.getElementById('dashParishName').textContent === 'TEST Grace Cathedral Parish');
-  await page.waitForSelector('#parishLogo:not(.hidden)');
+  assert.ok(await page.evaluate(() => { const i = document.getElementById('appLogo'); return i.complete && i.naturalWidth > 0 && /ccc-logo\.webp$/.test(i.src); }), 'official logo shown');
   await fullShot('04-parish-name-logo');
 
   // 6. Five church members with photos (member 1 flagged important).

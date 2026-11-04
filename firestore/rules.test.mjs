@@ -1354,29 +1354,15 @@ const seedCodes = () => env.withSecurityRulesDisabled(async (c) => {
 const pending = (extra = {}) => ({ fullName: 'Ngozi New', gender: 'Female', maritalStatus: 'Single', phone: '08031112222', email: '',
   address: 'Ikeja', occupation: 'Nurse', dobDay: 5, dobMonth: 6, dobYear: null, weddingDay: null, weddingMonth: null, nokName: '', nokPhone: '',
   photo: '', consentGiven: true, status: 'Pending', website: '', submittedAt: serverTimestamp(), ...extra });
-test('p9b public site: one per parish, by its own admin, public fields only; anyone reads', async () => {
+test('p10 parish website removed: publicSites is closed to everyone', async () => {
   await seedCodes();
-  const site = { parishId: 'A', name: 'Parish A', city: 'Lagos', country: 'Nigeria', mapsUrl: 'https://maps.app.goo.gl/x', welcome: 'Halleluyah!',
-    contactEmail: 'info@a.org', contactPhone: '0803', services: [{ day: 'Sun', time: '10:00', name: 'Sunday Service' }], updatedAt: 'x' };
-  const a = as.adminA();
-  await assertSucceeds(setDoc(doc(a, 'publicSites/AAA111'), site));
-  await assertFails(setDoc(doc(a, 'publicSites/BBB222'), site));                         // not its code
-  await assertFails(setDoc(doc(as.adminB(), 'publicSites/AAA111'), { ...site, parishId: 'B' }));
-  await assertFails(setDoc(doc(a, 'publicSites/AAA111'), { ...site, address: '12 Secret Close' }));
-  await assertFails(setDoc(doc(a, 'publicSites/AAA111'), { ...site, memberCount: 40 }));
-  await assertFails(setDoc(doc(as.superA(), 'publicSites/AAA111'), site));               // parish controls its own site
-  const ev = { title: 'Harvest', kind: 'harvest', date: '2026-12-05', time: '10:00', venue: 'Main church', notes: '', updatedAt: 'x' };
-  await assertSucceeds(setDoc(doc(a, 'publicSites/AAA111/events/e1'), ev));
-  await assertFails(setDoc(doc(a, 'publicSites/AAA111/events/e2'), { ...ev, slots: [{ role: 'Ushers', assigned: [{ name: 'Ade' }] }] }));
-  await assertFails(setDoc(doc(as.adminB(), 'publicSites/AAA111/events/e3'), ev));
-  const se = { title: 'Walk in the Light', preacher: 'Ven Olu', date: '2026-11-01', scripture: 'John 8:12', mediaUrl: 'https://youtu.be/a', summary: 'Short', updatedAt: 'x' };
-  await assertSucceeds(setDoc(doc(a, 'publicSites/AAA111/sermons/s1'), se));
-  await assertFails(setDoc(doc(a, 'publicSites/AAA111/sermons/s2'), { ...se, text: 'full transcript' }));
-  for (const p of ['publicSites/AAA111', 'publicSites/AAA111/events/e1', 'publicSites/AAA111/sermons/s1']) await assertSucceeds(getDoc(doc(as.stranger(), p)));
-  await assertSucceeds(getDocs(collection(as.stranger(), 'publicSites/AAA111/events')));
+  const site = { parishId: 'A', name: 'Parish A', city: 'Lagos', country: 'Nigeria', services: [], updatedAt: 'x' };
+  await assertFails(setDoc(doc(as.adminA(), 'publicSites/AAA111'), site));
+  await assertFails(setDoc(doc(as.superA(), 'publicSites/AAA111'), site));
+  await assertFails(setDoc(doc(as.adminA(), 'publicSites/AAA111/sermons/s1'), { title: 'x', updatedAt: 'x' }));
+  for (const p of ['publicSites/AAA111', 'publicSites/AAA111/events/e1']) await assertFails(getDoc(doc(as.stranger(), p)));
   await assertFails(getDoc(doc(as.stranger(), 'parishes/A')));
   await assertFails(getDocs(collection(as.stranger(), 'sharedSermons')));
-  await assertSucceeds(deleteDoc(doc(as.superA(), 'publicSites/AAA111/sermons/s1')));    // moderation
 });
 test('p9b join link + pendingMembers: anonymous create only, strict, honeypot, admin reads/decides', async () => {
   await seedCodes();

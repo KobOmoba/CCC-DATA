@@ -1,3 +1,30 @@
+// CCC member sign-up page, served at /join?p=<parish code> (see vercel.json). No login, no cookies, no SDK:
+// reads joinLinks/{code} and writes one Pending request through the Firestore REST API.
+const SITE = { project: "ccc-data-aarinat" };
+const QS = new URLSearchParams(location.search);
+const EMU = QS.has("emulator");
+const CODE = (QS.get("p") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+const API = EMU ? "http://127.0.0.1:8080/v1/projects/demo-ccc/databases/(default)/documents"
+    : `https://firestore.googleapis.com/v1/projects/${SITE.project}/databases/(default)/documents`;
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function dec(v) {
+    if ("stringValue" in v) return v.stringValue;
+    if ("integerValue" in v) return Number(v.integerValue);
+    if ("doubleValue" in v) return v.doubleValue;
+    if ("booleanValue" in v) return v.booleanValue;
+    if ("nullValue" in v) return null;
+    if ("arrayValue" in v) return (v.arrayValue.values || []).map(dec);
+    if ("mapValue" in v) return Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, dec(x)]));
+    if ("timestampValue" in v) return v.timestampValue;
+    return null;
+}
+async function getDoc(path) {
+    const r = await fetch(`${API}/${path}`);
+    if (r.status === 404 || r.status === 403) return null;
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    return { id: d.name.split("/").pop(), ...dec({ mapValue: d }) };
+}
 // Member self-registration (no login). Sends ONE Pending request to parishes/{p}/pendingMembers; only the parish admin can read it.
 // The Firestore rules re-check every field, the consent, the empty honeypot, the photo size and that the parish's link is open.
 let joinParish = null, joinPhoto = "";
