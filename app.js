@@ -48,6 +48,11 @@ function numberFor(tail, n) {
 const noType = no => (String(no).toUpperCase().match(NO_RE) || [])[3] || "";
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const CURRENCIES = ["NGN", "GHS", "XOF", "XAF", "ZAR", "KES", "GBP", "EUR", "USD", "CAD", "AUD", "CHF", "SEK", "NOK", "DKK", "AED", "INR", "CNY", "JPY", "BRL"];
+const COUNTRY_DEFAULTS = { nigeria: ["NGN", "Africa"], ghana: ["GHS", "Africa"], "benin": ["XOF", "Africa"], "benin republic": ["XOF", "Africa"], togo: ["XOF", "Africa"],
+    "cote d'ivoire": ["XOF", "Africa"], "ivory coast": ["XOF", "Africa"], cameroon: ["XAF", "Africa"], "south africa": ["ZAR", "Africa"], kenya: ["KES", "Africa"],
+    "united kingdom": ["GBP", "Europe"], uk: ["GBP", "Europe"], england: ["GBP", "Europe"], ireland: ["EUR", "Europe"], germany: ["EUR", "Europe"], france: ["EUR", "Europe"],
+    italy: ["EUR", "Europe"], spain: ["EUR", "Europe"], netherlands: ["EUR", "Europe"], belgium: ["EUR", "Europe"], "united states": ["USD", "North America"],
+    usa: ["USD", "North America"], canada: ["CAD", "North America"], australia: ["AUD", "Oceania"] };
 const CONTINENTS = ["Africa", "Europe", "Asia", "North America", "South America", "Oceania", "Antarctica"];
 // New numbers carry the parish lettering: CCC-IJY-ABK-MBR-001. Old records keep CCC-MBR-001 and still work.
 const SERIES = { members: { key: "mbr", prefix: "MBR-", stat: "memberCount" }, clergy: { key: "clg", prefix: "CLG-", stat: "clergyCount" },
@@ -711,6 +716,10 @@ function readLocation(prefix) {
         state: val(prefix + "state"), country: val(prefix + "country"), continent: val(prefix + "continent") };
     const cur = $(prefix + "currency");
     if (cur && cur.value) p.currency = cur.value;
+    // Only name/city/state/country are asked for: fill currency + continent from a known country so returns work at once.
+    const known = COUNTRY_DEFAULTS[p.country.toLowerCase()];
+    if (known && cur && !p.currency) p.currency = known[0];
+    if (known && !p.continent) p.continent = known[1];
     if (p.mapsUrl && !/^https:\/\//.test(p.mapsUrl)) return { error: "The Google Maps link must start with https://" };
     if (!p.name) return { error: "The parish name is required." };
     return p;

@@ -306,7 +306,7 @@ async function wish(tpl, no) {
 
 // ================================================================= 3. MESSAGES (WhatsApp + email)
 const TEMPLATES = {
-    birthday: { name: "Birthday", text: "Happy birthday, {name}! The whole family of {parish} celebrates you today ({date}). May the Lord bless you with long life, joy and good health. Halleluyah!" },
+    birthday: { name: "Birthday", text: "Happy birthday, {name}! The whole family of {parish} celebrates you today ({date}). May the Lord bless you with long life, joy and good health. Halleluyah 🙌" },
     anniversary: { name: "Wedding anniversary", text: "Happy wedding anniversary, {name}! {parish} rejoices with you today ({date}). May God keep your home in love and peace." },
     absent: { name: "Absent follow-up", text: "Halleluyah 🙌, {name}! We have missed you at {parish}. We hope all is well. We are praying for you. Do let us know if you need anything. God bless you." },
     event: { name: "Event reminder", text: "Halleluyah 🙌, {name}! This is a reminder from {parish}: {event}. Thank you for serving. God bless you." },
@@ -499,7 +499,7 @@ const FLAG_REASONS = ["May be a visitor", "May be a friend of the house", "Detai
 // One-tap contact with the flag note prefilled.
 function contactLinks(p) {
     const d = String(p.phone || "").replace(/\D/g, ""), wa = d.startsWith("0") ? "234" + d.slice(1) : d;
-    const msg = "Halleluyah " + p.fullName + ", about your registration with " + (localState.parish.name || "our parish") + ": " + (p.clarifyNote || "please could you confirm a few details?");
+    const msg = "Halleluyah 🙌, " + p.fullName + "! About your registration with " + (localState.parish.name || "our parish") + ": " + (p.clarifyNote || "please could you confirm a few details?");
     return `<span class="flex gap-1"><a class="pend-wa px-2 py-1 bg-emerald-700 text-white rounded" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a><a class="pend-sms px-2 py-1 border rounded" href="sms:${esc(p.phone)}?body=${encodeURIComponent(msg)}"><i class="fa-solid fa-message"></i> SMS</a><a class="px-2 py-1 border rounded" href="tel:${esc(p.phone)}"><i class="fa-solid fa-phone"></i> Call</a></span>`;
 }
 function flagForm(id) { $("flag_" + id).classList.toggle("hidden"); }
