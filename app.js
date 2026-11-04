@@ -295,6 +295,7 @@ async function loadParishData() {
     renderReadingsCard().catch(e => console.error("readings card", e.message)); // Batch 17
     renderCelebCard().catch(e => console.error("celebrations card", e.message)); // Batch 15
     renderJoinCard().catch(e => console.error("join card", e.message)); // Phase 9b
+    renderOnboarding().catch(e => console.error("onboarding", e.message)); // Batch 18
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
     // Phase 8: record activity for the "no activity for 30 days" alert, and apply any clergy posting now due.
     await markParishActive().catch(e => console.error("activity", e.message));
@@ -732,7 +733,7 @@ async function showFamily(id) {
 function fillSettingsForm(p) {
     const set = (id, v) => $(id).value = v || "";
     set("s_name", p.name); set("s_address", p.address); set("s_maps", p.mapsUrl); set("s_city", p.city);
-    set("s_state", p.state); set("s_country", p.country); set("s_continent", p.continent); set("s_currency", p.currency);
+    setLocationFields("s_", p.country, p.state, p.city); set("s_continent", p.continent); set("s_currency", p.currency);
     $("s_mapsOpen").classList.toggle("hidden", !p.mapsUrl);
     if (p.mapsUrl) $("s_mapsOpen").href = p.mapsUrl;
 }
@@ -742,8 +743,8 @@ function readLocation(prefix) {
     const cur = $(prefix + "currency");
     if (cur && cur.value) p.currency = cur.value;
     // Only name/city/state/country are asked for: fill currency + continent from a known country so returns work at once.
-    const known = COUNTRY_DEFAULTS[p.country.toLowerCase()];
-    if (known && cur && !p.currency) p.currency = known[0];
+    const known = COUNTRY_DEFAULTS[p.country.toLowerCase()] || (LOC_COUNTRIES.continent[p.country] ? [LOC_CURRENCY[p.country], LOC_COUNTRIES.continent[p.country]] : null);
+    if (known && known[0] && cur && !p.currency) p.currency = known[0];
     if (known && !p.continent) p.continent = known[1];
     if (p.mapsUrl && !/^https:\/\//.test(p.mapsUrl)) return { error: "The Google Maps link must start with https://" };
     if (!p.name) return { error: "The parish name is required." };
@@ -863,7 +864,8 @@ async function createParish() {
                 <p>Parish code (for member transfers): <span id="newParishCode" class="font-mono font-bold select-all">${esc(pcode)}</span></p>
                 <p class="text-gray-600 mt-1">They open the portal, tap "First time? I have an invite code", and choose a password.</p>`;
             $("inviteResult").classList.remove("hidden");
-            ["np_pletters", "np_cletters", "np_name", "np_address", "np_maps", "np_city", "np_state", "np_country", "np_continent", "np_email"].forEach(id => $(id).value = "");
+            ["np_pletters", "np_cletters", "np_name", "np_address", "np_maps", "np_continent", "np_currency", "np_email"].forEach(id => $(id).value = "");
+            setLocationFields("np_", "", "", "");
             await loadWorld();
         } catch (e) {
             alert(e.code === "permission-denied" ? "Not created. Check the details; the admin email must not belong to clergy." : e.message);
