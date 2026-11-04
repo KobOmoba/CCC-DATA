@@ -1689,3 +1689,77 @@ test('tracks: a woman cannot be created as clergy; prophet is a yes/no on member
   await assertSucceeds(addRecord(a, 'A', 'members', person('x', { rank: 'Lace Superior Senior Elder Sister', prophet: true })));
   await assertFails(addRecord(a, 'A', 'members', person('x', { prophet: 'yes' })));
 });
+
+// ---- Batch 17: Bible readings (public, named Super Admin writes), duty roster (parish, draft -> published), public info ----
+async function readingWrite(db, who, date, data, v, parishId = '') {
+  const b = writeBatch(db), t = 'bibleReadings/' + date;
+  b.set(doc(db, t), { date, services: [{ service: 'Sunday Service', readings: 'Psalm 23; John 3:16-21' }], version: v, updatedAt: 'now', ...data });
+  b.set(doc(db, 'auditLog/' + auditId(t, v)), { ...audit(t, v, v === 1 ? 'readings-add' : 'readings-edit', who), parishId });
+  return b.commit();
+}
+test('b17 bible readings: public + signed-in read, only a named Super Admin writes, audited, never deleted', async () => {
+  const D = '2026-11-08';
+  await assertFails(readingWrite(as.adminA(), A, D, {}, 1));
+  await assertFails(readingWrite(as.superA(), UNNAMED, D, {}, 1));                       // unnamed Super Admin
+  await assertFails(readingWrite(as.named(), NAMED, '2026-11-09', { date: D }, 1));       // id must be the date
+  await assertFails(readingWrite(as.named(), NAMED, D, { services: [] }, 1));
+  await assertFails(readingWrite(as.named(), NAMED, D, { updatedBy: 'uNamed' }, 1));      // public doc: no uid
+  await assertSucceeds(readingWrite(as.named(), NAMED, D, {}, 1));
+  await assertFails(readingWrite(as.named(), NAMED, D, {}, 1));                           // must bump the version
+  await assertSucceeds(readingWrite(as.named(), NAMED, D, { services: [{ service: 'Sunday Service', readings: 'Psalm 24' }] }, 2));
+  await assertFails(readingWrite(as.adminA(), A, D, {}, 3, 'A'));
+  await assertFails(deleteDoc(doc(as.named(), 'bibleReadings/' + D)));
+  await assertSucceeds(getDoc(doc(as.stranger(), 'bibleReadings/' + D)));                // website, no login
+  await assertSucceeds(getDoc(doc(as.adminA(), 'bibleReadings/' + D)));
+  await assertSucceeds(getDocs(query(collection(as.adminB(), 'bibleReadings'), where('date', '>=', '2026-11-01'))));
+  await assertFails(setDoc(doc(as.stranger(), 'bibleReadings/2026-11-15'), { date: '2026-11-15', services: [{ service: 'S', readings: 'R' }], version: 1, updatedAt: 'x' }));
+});
+const roster = (extra = {}) => ({ month: '2026-11', rev: 1, status: 'Draft', rows: [{ date: '2026-11-01', service: 'Sunday Service',
+  lesson1: '2 KINGS 23:4-9', lesson2: '', duties: [{ duty: 'Preacher', no: 'CCC-CLG-001', name: 'Ven Olu', kind: 'clergy' }] }], nos: ['CCC-CLG-001'], replaces: '', reason: '', parishName: 'Parish A',
+  secretary: 'S/L JOHN', shepherd: 'VEN/M/EVANG. ISSAC', createdAt: '2026-11-01', createdBy: 'uA', ...extra });
+test('b17 duty roster: parish-scoped, draft -> published, published frozen, corrections are new versions, audited', async () => {
+  const a = as.adminA(), p1 = 'parishes/A/rosters/2026-11_r1', p2 = 'parishes/A/rosters/2026-11_r2';
+  await assertFails(pAudited(a, A, p1, roster(), 1, 'create', null));                      // no audit entry
+  await assertFails(pAudited(a, A, p1, roster({ status: 'Published' }), 1));               // starts as Draft
+  await assertFails(pAudited(a, A, 'parishes/A/rosters/2026-11_r9', roster(), 1));          // id = month_r{rev}
+  await assertFails(pAudited(a, A, 'parishes/A/rosters/2026-13_r1', roster({ month: '2026-13' }), 1));
+  await assertFails(pAudited(as.adminB(), B, p1, roster(), 1));                            // other parish
+  await assertFails(pAudited(as.adminS(), { uid: 'uS', email: '', role: 'parish_admin' }, 'parishes/S/rosters/2026-11_r1', roster(), 1));
+  await assertSucceeds(pAudited(a, A, p1, roster(), 1));
+  await assertSucceeds(pAudited(a, A, p1, roster({ rows: [] , nos: [] }), 2, 'roster-save'));
+  await assertFails(pAudited(a, A, p1, roster({ month: '2026-12' }), 3, 'roster-save'));
+  await assertSucceeds(pAudited(a, A, p1, roster({ status: 'Published', publishedAt: 'now' }), 3, 'roster-publish'));
+  await assertFails(pAudited(a, A, p1, roster({ status: 'Published', rows: [] }), 4, 'roster-save'));   // published is frozen
+  await assertFails(pAudited(a, A, p1, roster({ status: 'Draft' }), 4, 'roster-save'));
+  await assertFails(deleteDoc(doc(a, p1)));
+  await assertFails(pAudited(a, A, p2, roster({ rev: 2, replaces: '2026-11_r1' }), 1));    // a correction needs a reason
+  await assertFails(pAudited(a, A, 'parishes/A/rosters/2026-11_r4', roster({ rev: 4, reason: 'skip' }), 1)); // no gaps
+  await assertSucceeds(pAudited(a, A, p2, roster({ rev: 2, replaces: '2026-11_r1', reason: 'Usher changed' }), 1, 'roster-correct'));
+  await assertSucceeds(getDocs(query(collection(a, 'parishes/A/rosters'), where('nos', 'array-contains', 'CCC-CLG-001'))));
+  await assertFails(getDoc(doc(as.adminB(), p1)));
+  await assertFails(getDoc(doc(as.stranger(), p1)));
+  await assertFails(getDoc(doc(as.superA(), p1)));                                         // parish-private
+  // Duty types: editable list, versioned + audited.
+  const dt = 'parishes/A/rosterConfig/dutyTypes', types = { types: [{ name: 'Sermon', clergyOnly: true }] };
+  await assertFails(pAudited(a, A, dt, { types: [] }, 1));
+  await assertFails(pAudited(a, A, 'parishes/A/rosterConfig/other', types, 1));
+  await assertFails(pAudited(a, A, dt, { ...types, days: [0,1,2,3,4,5,6,0] }, 1));
+  await assertSucceeds(pAudited(a, A, dt, { ...types, days: [0, 3, 5] }, 1));
+  await assertFails(pAudited(a, A, dt, types, 1));
+  await assertSucceeds(pAudited(a, A, dt, { types: [{ name: 'Usher', clergyOnly: false }] }, 2, 'duty-types'));
+  await assertFails(pAudited(as.adminB(), B, dt, types, 3));
+  await assertFails(getDoc(doc(as.adminB(), dt)));
+});
+test('b17 public church info: anyone reads; only that parish admin writes; only the public fields', async () => {
+  const info = { parishName: 'Parish A', services: ['Sunday 10:00 Sunday Service'], address: '1 Church Rd', phone: '0801', mapsUrl: 'https://maps.app.goo.gl/x', about: 'Welcome', updatedAt: 'now' };
+  await assertFails(setDoc(doc(as.adminB(), 'publicInfo/A'), info));
+  await assertFails(setDoc(doc(as.stranger(), 'publicInfo/A'), info));
+  await assertFails(setDoc(doc(as.adminA(), 'publicInfo/A'), { ...info, members: 120 }));  // nothing private
+  await assertFails(setDoc(doc(as.adminA(), 'publicInfo/A'), { ...info, mapsUrl: 'javascript:alert(1)' }));
+  await assertFails(setDoc(doc(as.adminS(), 'publicInfo/S'), info));                        // suspended parish
+  await assertSucceeds(setDoc(doc(as.adminA(), 'publicInfo/A'), info));
+  await assertSucceeds(getDoc(doc(as.stranger(), 'publicInfo/A')));
+  await assertSucceeds(getDocs(collection(as.stranger(), 'publicInfo')));
+  await assertFails(deleteDoc(doc(as.adminA(), 'publicInfo/A')));
+  await assertFails(getDoc(doc(as.stranger(), 'parishes/A')));                              // the parish itself stays private
+});

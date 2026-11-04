@@ -252,12 +252,15 @@ function showSection(id) {
     if (id === "pcommittees") openPCommittees().catch(e => alert("Could not load committees: " + e.message)); // Batch 15
     if (id === "harvests") openHarvests().catch(e => alert("Could not load harvests: " + e.message));
     if (id === "anointing") openAnointing().catch(e => alert("Could not load anointing: " + e.message)); // Batch 16
+    if (id === "readings") openReadings().catch(e => alert("Could not load readings: " + e.message)); // Batch 17
+    if (id === "roster") openRoster().catch(e => alert("Could not load the roster: " + e.message));
     if (id === "anointingAll") openAnointingAll().catch(e => alert("Could not load anointing: " + e.message));
     if (id === "harvestsAll") openHarvestsAll().catch(e => alert("Could not load harvest dates: " + e.message));
     if (id === "calendar") openCalendar().catch(e => alert("Could not load the calendar: " + e.message));
     if (id === "messages") openMessages().catch(e => alert("Could not load messages: " + e.message));
     if (id === "parishes" && localState.role === "super_admin") completeClaimedHandovers().catch(e => console.error("handovers", e.message));
     if (id === "settings" && localState.role === "parish_admin") openTimetable();
+    if (id === "settings" && localState.role === "parish_admin") openPublicInfo().catch(e => console.error("public info", e.message)); // Batch 17
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -289,6 +292,7 @@ async function loadParishData() {
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
     renderWeekCard().catch(e => console.error("week card", e.message)); // Phase 9
     renderFemaleClergyParish().catch(e => console.error("female clergy", e.message)); // Batch 16
+    renderReadingsCard().catch(e => console.error("readings card", e.message)); // Batch 17
     renderCelebCard().catch(e => console.error("celebrations card", e.message)); // Batch 15
     renderJoinCard().catch(e => console.error("join card", e.message)); // Phase 9b
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
@@ -613,6 +617,8 @@ async function openRecord(kind, id) {
     if ((kind === "members" && ["Active", "Diaspora"].includes(p.status)) || (kind === "clergy" && p.status === "Active"))
         actions += btn("Called to glory", `openDeathForm('${kind}')`, "bg-gray-800 text-white");
     $("recordActions").innerHTML = actions + btn("Close", "closeModal('recordModal')", "border");
+    $("recordBody").insertAdjacentHTML("beforeend", `<div id="recordDuties" class="bg-lime-50 border border-lime-200 rounded p-2 space-y-1"></div>`); // Batch 17
+    renderPersonDuties(p.memberNo).catch(e => console.error("duties", e.message));
     openModal("recordModal");
 }
 function editCurrent() { openPersonForm(current.kind, current.rec); }

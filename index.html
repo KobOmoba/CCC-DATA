@@ -23,6 +23,8 @@
     <script src="p9.js" defer></script>
     <script src="p15.js" defer></script>
     <script src="p16.js" defer></script>
+    <script src="p17.js" defer></script>
+    <style id="pageSize"></style>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
 
@@ -88,6 +90,8 @@
                 <button onclick="showSection('pcommittees')" id="nav-pcommittees" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-group text-pink-300 w-4"></i> Committees</button>
                 <button onclick="showSection('harvests')" id="nav-harvests" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wheat-awn text-amber-400 w-4"></i> Harvests &amp; Anniversaries</button>
                 <button onclick="showSection('anointing')" id="nav-anointing" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-oil-can text-amber-300 w-4"></i> Anointing</button>
+                <button onclick="showSection('roster')" id="nav-roster" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-clipboard-list text-lime-300 w-4"></i> Duty Roster</button>
+                <button onclick="showSection('readings')" id="nav-readings" class="nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-book-open text-sky-300 w-4"></i> Bible Readings</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('ai')" id="nav-ai" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wand-magic-sparkles text-fuchsia-300 w-4"></i> AI Dashboard</button>
                 <button onclick="showSection('postings')" id="nav-postings" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-route text-amber-300 w-4"></i> Clergy Postings</button>
@@ -154,6 +158,7 @@
                     <div class="parish-only"><div id="joinCard" class="hidden bg-white border border-emerald-300 rounded-xl p-3 text-xs space-y-2 shadow-sm"></div></div>
                     <div class="parish-only"><div id="celebCard" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-1"></div></div>
                     <div class="parish-only"><div id="femaleClergyCard" class="hidden bg-rose-50 border-2 border-rose-400 rounded-xl p-3 text-xs space-y-2"></div></div>
+                    <div class="parish-only"><div id="readingsCard" class="hidden bg-sky-50 border border-sky-300 rounded-xl p-3 text-xs space-y-2"></div></div>
                     <div class="parish-only"><div id="weekCard" class="hidden bg-white border rounded-xl p-3 text-xs space-y-2 shadow-sm"></div></div>
                     <div class="parish-only"><div id="parishPostings" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-2"></div></div>
                     <div id="pendingMoves" class="parish-only hidden bg-violet-50 border border-violet-300 rounded-xl p-3 text-xs space-y-2"></div>
@@ -416,6 +421,17 @@
                             <button onclick="resetTimetable()" class="py-2 border rounded">Standard</button>
                             <button id="tt_save" onclick="saveTimetable()" class="py-2 bg-blue-700 text-white rounded font-bold">Save</button></div>
                     </div>
+                    <div class="bg-white border rounded-xl p-4 space-y-2 text-xs">
+                        <p class="font-bold"><i class="fa-solid fa-globe text-emerald-700"></i> Public church info (website) <span class="ml-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">PUBLIC</span></p>
+                        <p class="text-gray-500">Anyone can see these on the church website, without signing in. Nothing else about your parish is shown.</p>
+                        <label class="block">Service days &amp; times (one per line)<textarea id="pi_services" rows="4" class="w-full border p-2 rounded mt-1" placeholder="Sunday 10:00 Sunday Service"></textarea></label>
+                        <label class="block">Address<input id="pi_address" class="w-full border p-2.5 rounded mt-1" maxlength="200"></label>
+                        <label class="block">Phone<input id="pi_phone" class="w-full border p-2.5 rounded mt-1" maxlength="40"></label>
+                        <label class="block">Map link<input id="pi_maps" class="w-full border p-2.5 rounded mt-1" placeholder="https://maps.app.goo.gl/..."></label>
+                        <label class="block">Short about<textarea id="pi_about" rows="3" class="w-full border p-2 rounded mt-1" maxlength="1000"></textarea></label>
+                        <p id="pi_saved" class="text-gray-500"></p>
+                        <button id="piSaveBtn" onclick="savePublicInfo()" class="w-full py-2.5 bg-emerald-700 text-white font-bold rounded">Save public info</button>
+                    </div>
                 </section>
 
                 <!-- SUPER ADMIN: PARISHES + INVITES -->
@@ -508,6 +524,28 @@
                 </section>
 
                 <!-- PHASE 7: committees -->
+                <!-- BATCH 17: church-wide Bible readings (Super Admin writes; everyone reads) -->
+                <section id="section-readings" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Bible Readings</h2><p class="text-gray-500">The same readings for every parish worldwide, set by HQ.</p></div>
+                    <div class="flex gap-2"><input id="rd_month" type="month" onchange="readingsMonth()" class="flex-1 min-w-0 border p-2 rounded">
+                        <button onclick="printReadings()" class="px-3 py-2 bg-slate-800 text-white rounded font-bold"><i class="fa-solid fa-print"></i> Print month</button></div>
+                    <div id="rd_admin" class="hidden bg-white border rounded-xl p-3 space-y-2">
+                        <p class="font-bold">Add readings (Super Admin)</p>
+                        <p class="text-gray-500">One line per date and service: <b>2026-11-08 | Sunday Service | Psalm 23; John 3:16-21</b>. A date already entered is updated.</p>
+                        <textarea id="rd_bulk" rows="5" class="w-full border p-2 rounded font-mono" placeholder="2026-11-08 | Sunday Service | Psalm 23; John 3:16-21"></textarea>
+                        <button id="rdBulkBtn" onclick="saveBulkReadings()" class="w-full py-2 bg-blue-900 text-white rounded font-bold">Save readings</button>
+                    </div>
+                    <div id="rd_list" class="space-y-2"></div>
+                </section>
+                <!-- BATCH 17: monthly duty roster (parish) -->
+                <section id="section-roster" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b flex justify-between items-center gap-2"><div><h2 class="text-lg font-bold">Duty Roster</h2><p class="text-gray-500">Who does what each week. Published rosters are kept; corrections are a new version.</p></div>
+                    <button onclick="openDutyTypes()" id="roTypesBtn" class="px-3 py-2 border rounded font-bold whitespace-nowrap">Duty types</button></div>
+                    <input id="ro_month" type="month" onchange="rosterMonth()" class="w-full border p-2 rounded">
+                    <div id="ro_types"></div>
+                    <div id="ro_editor" class="space-y-2"></div>
+                    <div id="ro_history" class="text-gray-500"></div>
+                </section>
                 <!-- BATCH 16: anointing events (parish) -->
                 <section id="section-anointing" class="space-y-3 hidden text-xs">
                     <div class="pb-2 border-b flex justify-between items-center"><div><h2 class="text-lg font-bold">Anointing</h2><p class="text-gray-500">Anointing dates, candidates, amounts paid and HQ certificates. Nothing is deleted.</p></div>

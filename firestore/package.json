@@ -13,7 +13,8 @@
     "test:e2e:p14": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p14.mjs\"",
     "test:e2e:p15": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p15.mjs\"",
     "test:e2e:p16": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p16.mjs\"",
-    "test:e2e:p17": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p17.mjs\""
+    "test:e2e:p17": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p17.mjs\"",
+    "test:e2e:b17": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-b17.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "6.0.0",
