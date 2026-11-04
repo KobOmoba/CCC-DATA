@@ -107,7 +107,7 @@ service cloud.firestore {
     // TransferredOut (sent to another parish; history link only).
     function validMember(d, id) {
       return d.keys().hasOnly(personKeys().concat(['ordainedAs', 'abroadCountry', 'abroadCity', 'abroadParish',
-          'abroadSince', 'transferId', 'lifeNo', 'lifeParishCode', 'fromNo', 'deathId']))
+          'abroadSince', 'transferId', 'lifeNo', 'lifeParishCode', 'fromNo', 'deathId', 'formerClergyNo']))
         && validPerson(d, id) && d.status in ['Active', 'Ordained', 'Diaspora', 'TransferredOut', 'Called to glory']
         && (d.status != 'Ordained' || str(d.get('ordainedAs', ''), 30))
         && (d.status != 'Diaspora' || (str(d.get('abroadCountry', ''), 80) && s(d.get('abroadCity', ''), 80)
@@ -171,7 +171,7 @@ service cloud.firestore {
         && getAfter(docAt('clergyIndex/' + d.email)).data.parishId != null
         && s(d.get('formerMemberNo', ''), 30) && s(d.get('transferredTo', ''), 120) && s(d.get('letterId', ''), 60)
         && s(d.get('joinedDate', ''), 10) && s(d.get('leftDate', ''), 10)
-        && d.get('leaveReason', '') in ['', 'Transfer', 'Posting', 'Retired', 'Called to glory', 'Other']
+        && d.get('leaveReason', '') in ['', 'Transfer', 'Posting', 'Retired', 'Called to glory', 'Other', 'Converted to member']
         && d.get('serviceRecord', []) is list && d.get('serviceRecord', []).size() <= 40
         && (d.status == 'Active' || isDate(d.get('leftDate', '')));
     }
@@ -964,7 +964,7 @@ service cloud.firestore {
         && money(m.tithes) && money(m.offerings) && money(m.thanksgiving) && money(m.harvest) && money(m.building) && money(m.other);
     }
     // Batch 14: income lines the parish marks in hqBase count toward HQ at the tithes fraction (1/3); others use their own share.
-    function part(d, c) { return d.income[c] * d.shares[c].num / d.shares[c].den; }
+    function part(d, c) { return float(d.income[c]) * d.shares[c].num / d.shares[c].den; }
     // A marked line pays the tithes fraction instead of its own: add income * (tithes share - own share).
     function lift(d, b, c) { return b.hasAny([c]) ? (float(d.income[c]) * d.shares.tithes.num / d.shares.tithes.den - float(d.income[c]) * d.shares[c].num / d.shares[c].den) : 0; }
     function baseLift(d) {

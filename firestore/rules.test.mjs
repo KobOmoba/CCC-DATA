@@ -853,6 +853,27 @@ test('p6 file: parish files own return with due = 1/3 of tithes, currency from p
   await assertFails(fileReturn(as.adminA(), A, 'A', '2026-09', { remitted: 30000 }));
 });
 
+// Regression (London demo): 1/3 of a tithe not divisible by 3 (GBP 3,200 -> 1,066.67) was refused because the
+// rules divided integers (3200 / 3 = 1066). Due must be worked out in decimals for every currency.
+test('p6 file: GBP parish (London) files a return whose 1/3 is not a whole number', async () => {
+  const London = { city: 'London', country: 'United Kingdom', continent: 'Europe', currency: 'GBP' };
+  const setA = f => env.withSecurityRulesDisabled(c => updateDoc(doc(c.firestore(), 'parishes/A'), f));
+  await setA(London);
+  try {
+    const inc = { tithes: 3200, offerings: 900, thanksgiving: 0, harvest: 0, building: 0, other: 0 };
+    await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-08', { ...London, income: inc }));
+    const r = await getRet('A_2026-08');
+    eq(r.due, 1066.67); eq(r.currency, 'GBP');
+    // still exact: a truncated due is refused, and so is NGN on a GBP parish
+    await assertFails(fileReturn(as.adminA(), A, 'A', '2026-07', { ...London, income: inc, due: 1066 }));
+    await assertFails(fileReturn(as.adminA(), A, 'A', '2026-07', { ...London, currency: 'NGN', income: inc }));
+    // paying it in full and the 1/3 of 100 pence-level amounts both work
+    await assertSucceeds(pay(as.adminA(), A, 'A_2026-08', r, 1066.67));
+    eq((await getRet('A_2026-08')).status, 'Paid');
+    await assertSucceeds(fileReturn(as.adminA(), A, 'A', '2026-06', { ...London, income: { ...inc, tithes: 100.5 } }));
+  } finally { await setA({ city: 'Lagos', country: 'Nigeria', continent: 'Africa', currency: 'NGN' }); }
+});
+
 test('p6 privacy: super reads returns, HQ/other parish/stranger cannot; nobody but the parish reads individual giving', async () => {
   await seedReturn('A', '2026-10');
   await assertSucceeds(getDoc(doc(as.named(), 'returns/A_2026-10')));

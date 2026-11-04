@@ -445,3 +445,59 @@ async function printProfile() {
         ${entries.map(e => `<tr><td>${esc(fmtLong(e.date))}</td><td>${e.from ? esc(e.from) + " → " : ""}<b>${esc(e.to)}</b></td><td>${esc(e.parish || "")}</td></tr>`).join("")}</table>
         <p class="ps-help">Printed ${esc(fmtLong(localToday()))}. Private: keep safe.</p>`);
 }
+
+// ================================================================= 5. WOMEN RECORDED AS CLERGY (old data)
+// New female clergy are blocked; records made before that rule are listed for the Super Admin and the parish admin.
+// The parish admin converts each one to a member record: new CCC-MBR number, rank history kept, the clergy record
+// moves to Former (never deleted), and the change is audit-logged on the new member's rank history.
+const FC_TITLE = "Women recorded as clergy — please correct";
+const isWrongClergy = c => c.gender === "Female" && c.status === "Active";
+function fcRows(list, fix) {
+    return list.map(c => `<div class="fc-row bg-white border rounded p-2 flex items-center gap-2"><div class="flex-1"><b>${esc(c.fullName)}</b>
+        <span class="font-mono text-gray-500">${esc(c.memberNo)}</span>${c.parish ? ` · ${esc(c.parish)}` : ""}<br><span class="text-gray-600">${esc(rankText(c) || "")}</span></div>
+        ${fix ? `<button onclick="convertFemaleClergy('${esc(c.memberNo)}')" class="fc-fix px-2 py-1 bg-rose-700 text-white rounded font-semibold">Convert to member</button>` : ""}</div>`).join("");
+}
+async function renderFemaleClergyParish() {
+    const box = $("femaleClergyCard");
+    const s = await parishRef().collection("clergy").where("gender", "==", "Female").get();
+    const list = s.docs.map(d => d.data()).filter(isWrongClergy);
+    box.classList.toggle("hidden", !list.length);
+    box.innerHTML = list.length ? `<p class="font-bold text-rose-800"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(FC_TITLE)} (${list.length})</p>
+        <p class="text-gray-700">Women cannot be clergy in CCC. "Convert to member" gives her a member number and keeps her rank history. Nothing is deleted.</p>${fcRows(list, true)}` : "";
+}
+function renderFemaleClergySuper(register) {
+    const box = $("femaleClergySuper");
+    const list = register.filter(isWrongClergy);
+    box.classList.toggle("hidden", !list.length);
+    box.innerHTML = list.length ? `<p class="font-bold text-rose-800"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(FC_TITLE)} (${list.length})</p>
+        <p class="text-gray-700">Old records only. Each parish admin converts them to member records (rank history kept, audit-logged).</p>${fcRows(list, false)}` : "";
+}
+async function convertFemaleClergy(no) {
+    const ref = parishRef().collection("clergy").doc(no), snap = await ref.get();
+    if (!snap.exists) return;
+    const c = snap.data();
+    if (!isWrongClergy(c)) return alert("This record is not an active woman clergy record.");
+    if (!confirm(`Convert ${c.fullName} (${no}) to a member record?\nShe gets a new member number. Her rank history is kept and the clergy record moves to Former. Nothing is deleted.`)) return;
+    const keep = ["fullName", "nameLower", "gender", "maritalStatus", "address", "phone", "phoneDigits", "email", "rank", "occupation", "dobDay", "dobMonth", "dobYear",
+        "anointDay", "anointMonth", "anointYear", "nokName", "nokAddress", "nokPhone", "photo", "important", "consentGiven", "consentDate", "weddingDay", "weddingMonth", "prophet"];
+    const m = Object.fromEntries(keep.filter(k => k in c).map(k => [k, c[k]]));
+    Object.assign(m, { status: "Active", formerClergyNo: no, createdAt: nowIso(), updatedAt: nowIso() });
+    const female = ranksFor("Female"), by = localState.user.uid, parish = localState.parish.name || "", day = today();
+    try {
+        const id = await createRecord("members", m, (t, newId) => {
+            // Rank history: Sister start, then each rank on her old clergy service record, ending at today's rank.
+            const entries = [{ date: String(c.consentDate || c.joinedDate || day).slice(0, 10), from: "", to: baseRank("Female"), parish, pastor: "", approvedBy: "", eventId: "", kind: "start", by }];
+            const add = (to, date) => { const last = entries[entries.length - 1]; if (to && female.includes(to) && to !== last.to) entries.push({ date: String(date || day).slice(0, 10), from: last.to, to, parish, pastor: "", approvedBy: "", eventId: "", kind: "record", by }); };
+            (c.serviceRecord || []).forEach(r => add(r.rank, r.from));
+            add(c.rank, c.anointYear ? ymdOf(c.anointYear, c.anointMonth || 1, c.anointDay || 1) : day);
+            t.set(rhRef(newId), { memberNo: newId, fullName: c.fullName, gender: "Female", entries, version: 1, updatedAt: nowIso(), updatedBy: by });
+            parishAudit(t, rhTarget(newId), 1, "convert-clergy", { clergyNo: no, status: "Active clergy", rank: c.rank || "" },
+                { memberNo: newId, status: "Active member", rank: c.rank || "" }, "Women cannot be clergy: old clergy record converted to a member record");
+            t.update(ref, { status: "Former", leftDate: day, leaveReason: "Converted to member", transferredTo: "Member " + newId,
+                serviceRecord: (c.serviceRecord || []).map(r => r.to ? r : { ...r, to: day }), updatedAt: nowIso() });
+            t.set(statsRef(), { clergyCount: inc(-1), formerClergyCount: inc(1) }, { merge: true });
+        });
+        alert(`Done. ${c.fullName} is now member ${id}. Her rank history is kept.`);
+        await loadParishData();
+    } catch (e) { alert("Not converted: " + e.message); }
+}

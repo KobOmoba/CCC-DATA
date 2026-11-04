@@ -288,6 +288,7 @@ async function loadParishData() {
     setTimetable(tt && tt.exists ? tt.data().services : null);
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
     renderWeekCard().catch(e => console.error("week card", e.message)); // Phase 9
+    renderFemaleClergyParish().catch(e => console.error("female clergy", e.message)); // Batch 16
     renderCelebCard().catch(e => console.error("celebrations card", e.message)); // Batch 15
     renderJoinCard().catch(e => console.error("join card", e.message)); // Phase 9b
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
@@ -786,6 +787,7 @@ async function loadWorld() {
     const parishOf = d => d.ref.parent.parent.id;
     register = clergy.docs.map(d => ({ ...d.data(), parishId: parishOf(d), parish: localState.parishNames[parishOf(d)] || parishOf(d) }));
     renderRegister();
+    renderFemaleClergySuper(register); // Batch 16
     $("importantList").innerHTML = important.empty ? `<p class="text-xs text-gray-400 italic">No members flagged yet.</p>` :
         important.docs.map(d => worldCard({ ...d.data(), parish: localState.parishNames[parishOf(d)] })).join("");
 }
