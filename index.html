@@ -15,6 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
     <link rel="stylesheet" href="styles.css">
     <script src="alerts-core.js" defer></script>
+    <script src="locations.js" defer></script>
     <script src="app.js" defer></script>
     <script src="returns.js" defer></script>
     <script src="hq.js" defer></script>
@@ -398,10 +399,11 @@
                     <div class="bg-white border rounded-xl p-4 space-y-3 text-xs">
                         <p class="font-black text-blue-950 tracking-wide">CELESTIAL CHURCH OF CHRIST</p>
                         <label class="block">Parish name *<input id="s_name" class="w-full border p-2.5 rounded mt-1"></label>
-                        <div class="grid grid-cols-2 gap-2">
-                            <label>City<input id="s_city" class="w-full border p-2.5 rounded mt-1"></label>
-                            <label>State<input id="s_state" class="w-full border p-2.5 rounded mt-1"></label>
-                            <label>Country<input id="s_country" class="w-full border p-2.5 rounded mt-1"></label>
+                        <div class="space-y-2">
+                            <label class="block">Continent / Region<select id="s_region_sel" aria-label="Continent / Region" class="w-full border p-3 rounded bg-white text-base"></select></label>
+                            <label class="block">Country<input type="hidden" id="s_country"><input id="s_country_q" type="search" class="w-full border p-3 rounded mb-1 text-base" placeholder="Search country..." autocomplete="off"><select id="s_country_sel" aria-label="Country" class="w-full border p-3 rounded bg-white text-base"></select><input id="s_country_other" class="hidden w-full border p-3 rounded mt-1 text-base" placeholder="Type the country"></label>
+                            <label class="block">State / region<input type="hidden" id="s_state"><input id="s_state_q" type="search" class="w-full border p-3 rounded mb-1 text-base" placeholder="Search state..." autocomplete="off"><select id="s_state_sel" aria-label="State / region" class="w-full border p-3 rounded bg-white text-base"></select><input id="s_state_other" class="hidden w-full border p-3 rounded mt-1 text-base" placeholder="Type the state"></label>
+                            <label class="block">City / town<input type="hidden" id="s_city"><input id="s_city_q" type="search" class="w-full border p-3 rounded mb-1 text-base" placeholder="Search city..." autocomplete="off"><select id="s_city_sel" aria-label="City / town" class="w-full border p-3 rounded bg-white text-base"></select><input id="s_city_other" class="hidden w-full border p-3 rounded mt-1 text-base" placeholder="Type the city"></label>
                         </div>
                         <details id="s_extras" class="border rounded p-2"><summary class="font-semibold cursor-pointer">More (optional): address, map, continent, currency</summary>
                         <div class="space-y-2 mt-2">
@@ -441,10 +443,11 @@
                         <p class="font-bold">New parish</p>
                         <p class="text-gray-500">Church: <b>CELESTIAL CHURCH OF CHRIST</b> (fixed for every parish)</p>
                         <input id="np_name" class="w-full border p-2.5 rounded" placeholder="Parish name *">
-                        <div class="grid grid-cols-2 gap-2">
-                            <input id="np_city" class="border p-2.5 rounded" placeholder="City">
-                            <input id="np_state" class="border p-2.5 rounded" placeholder="State">
-                            <input id="np_country" class="border p-2.5 rounded" placeholder="Country">
+                        <div class="space-y-2">
+                            <label class="block">Continent / Region<select id="np_region_sel" aria-label="Continent / Region" class="w-full border p-3 rounded bg-white text-base"></select></label>
+                            <label class="block">Country<input type="hidden" id="np_country"><input id="np_country_q" type="search" class="w-full border p-3 rounded mb-1 text-base" placeholder="Search country..." autocomplete="off"><select id="np_country_sel" aria-label="Country" class="w-full border p-3 rounded bg-white text-base"></select><input id="np_country_other" class="hidden w-full border p-3 rounded mt-1 text-base" placeholder="Type the country"></label>
+                            <label class="block">State / region<input type="hidden" id="np_state"><input id="np_state_q" type="search" class="w-full border p-3 rounded mb-1 text-base" placeholder="Search state..." autocomplete="off"><select id="np_state_sel" aria-label="State / region" class="w-full border p-3 rounded bg-white text-base"></select><input id="np_state_other" class="hidden w-full border p-3 rounded mt-1 text-base" placeholder="Type the state"></label>
+                            <label class="block">City / town<input type="hidden" id="np_city"><input id="np_city_q" type="search" class="w-full border p-3 rounded mb-1 text-base" placeholder="Search city..." autocomplete="off"><select id="np_city_sel" aria-label="City / town" class="w-full border p-3 rounded bg-white text-base"></select><input id="np_city_other" class="hidden w-full border p-3 rounded mt-1 text-base" placeholder="Type the city"></label>
                         </div>
                         <details id="np_extras" class="border rounded p-2"><summary class="font-semibold cursor-pointer">Admin extras (optional): address, map, continent, currency</summary>
                         <div class="space-y-2 mt-2">

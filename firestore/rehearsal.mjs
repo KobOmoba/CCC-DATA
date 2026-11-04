@@ -101,7 +101,7 @@ async function claim(email, code) {
 }
 async function createParish(name, city, state, country, pl, cl, email) {
   await nav('parishes');
-  await page.fill('#np_name', name); await page.fill('#np_city', city); await page.fill('#np_state', state); await page.fill('#np_country', country);
+  await page.fill('#np_name', name); await page.evaluate(a => setLocationFields('np_', ...a), [country, state, city]);
   await page.fill('#np_pletters', pl); await page.fill('#np_cletters', cl); await page.fill('#np_email', email);
   await page.evaluate(() => { document.getElementById('inviteResult').innerHTML = ''; });
   await page.click('#createParishBtn'); await page.waitForSelector('#inviteCode');
@@ -138,7 +138,7 @@ try {
   if (!/^Halleluyah 🙌/.test(await page.textContent('#welcomeTitle'))) issues.push('super greeting: ' + await page.textContent('#welcomeTitle'));
   await step('super-dashboard');
   await nav('parishes');
-  await page.fill('#np_name', 'Ikeja Cathedral Parish'); await page.fill('#np_city', 'Ikeja'); await page.fill('#np_state', 'Lagos'); await page.fill('#np_country', 'Nigeria');
+  await page.fill('#np_name', 'Ikeja Cathedral Parish'); await page.selectOption('#np_country_sel', 'Nigeria'); await page.selectOption('#np_state_sel', 'Lagos'); await page.selectOption('#np_city_sel', 'Ikeja');
   await page.fill('#np_pletters', 'ICP'); await page.fill('#np_cletters', 'IKJ'); await page.fill('#np_email', 'ikeja.admin@test.local');
   await step('super-new-parish-form', true);
   await page.click('#createParishBtn'); await page.waitForSelector('#inviteCode');

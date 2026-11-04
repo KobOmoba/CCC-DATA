@@ -89,7 +89,7 @@ const modalClosed = (id) => page.waitForSelector(`#${id}.hidden`, { state: 'atta
 const noFail = (d0, re = /Not saved|not saved|failed|Not confirmed|Could not/) => assert.ok(!dialogs.slice(d0).some(m => re.test(m)), 'no failure dialog: ' + dialogs.slice(d0).join(' | '));
 async function createParish(name, city, country, continent, cur, pl, cl, email) {
   await nav('parishes');
-  await page.fill('#np_name', name); await page.fill('#np_city', city); await page.fill('#np_country', country);
+  await page.fill('#np_name', name); await page.evaluate(a => setLocationFields('np_', ...a), [country, '', city]);
   await page.selectOption('#np_continent', continent); await page.selectOption('#np_currency', cur);
   await page.fill('#np_pletters', pl); await page.fill('#np_cletters', cl); await page.fill('#np_email', email);
   await page.evaluate(() => { const r = document.getElementById('inviteResult'); r.innerHTML = ''; });

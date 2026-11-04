@@ -141,7 +141,18 @@ try {
   await page.fill('#np_name', 'TEST Cathedral Parish');
   await page.fill('#np_address', '1 Church Street');
   await page.fill('#np_maps', 'https://maps.app.goo.gl/test123');
-  await page.fill('#np_city', 'Ikeja'); await page.fill('#np_state', 'Lagos'); await page.fill('#np_country', 'Nigeria');
+  await page.fill('#np_country_q', 'nig');
+  { const opts = await page.$$eval('#np_country_sel option', os => os.map(o => o.value).filter(v => v && v !== '__other__'));
+    assert.deepEqual(opts.sort(), ['Niger', 'Nigeria'], 'search nig shows Niger + Nigeria'); }
+  await page.fill('#np_country_q', ''); await page.dispatchEvent('#np_country_q', 'input');
+  await page.selectOption('#np_region_sel', 'Europe');
+  assert.ok(!(await page.$$eval('#np_country_sel option', os => os.map(o => o.value))).includes('Nigeria'), 'Europe filter hides Nigeria');
+  assert.equal(await page.inputValue('#np_continent'), 'Europe', 'region feeds continent');
+  await page.selectOption('#np_region_sel', 'Africa');
+  await page.selectOption('#np_country_sel', 'Nigeria'); await page.selectOption('#np_state_sel', 'Ogun');
+  assert.ok((await page.$$eval('#np_city_sel option', os => os.map(o => o.value))).includes('Ijebu-Ode'), 'Ogun cities listed');
+  await page.selectOption('#np_country_sel', 'Nigeria'); await page.selectOption('#np_state_sel', 'Lagos'); await page.selectOption('#np_city_sel', 'Ikeja');
+  if (process.env.LOC_SHOT) { await page.locator('#np_region_sel').scrollIntoViewIfNeeded(); await page.screenshot({ path: process.env.LOC_SHOT }); }
   await page.selectOption('#np_continent', 'Africa');
   await page.fill('#np_pletters', 'tcp'); await page.fill('#np_cletters', 'ikj');
   await page.fill('#np_email', 'admin@test.local');
@@ -392,7 +403,7 @@ try {
 
   // ---------------- PHASE 2: member transfer between parishes ----------------
   await page.fill('#np_name', 'TEST London Parish');
-  await page.fill('#np_city', 'London'); await page.fill('#np_country', 'United Kingdom'); await page.selectOption('#np_continent', 'Europe');
+  await page.selectOption('#np_country_sel', 'United Kingdom'); await page.selectOption('#np_state_sel', 'England'); await page.selectOption('#np_city_sel', '__other__'); await page.fill('#np_city_other', 'London'); await page.selectOption('#np_continent', 'Europe');
   await page.fill('#np_pletters', 'TLP'); await page.fill('#np_cletters', 'LDN');
   await page.fill('#np_email', 'london@test.local');
   await page.click('#createParishBtn');
