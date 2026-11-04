@@ -251,6 +251,8 @@ function showSection(id) {
     if (id === "sermons") openSermons().catch(e => alert("Could not load sermons: " + e.message));
     if (id === "pcommittees") openPCommittees().catch(e => alert("Could not load committees: " + e.message)); // Batch 15
     if (id === "harvests") openHarvests().catch(e => alert("Could not load harvests: " + e.message));
+    if (id === "anointing") openAnointing().catch(e => alert("Could not load anointing: " + e.message)); // Batch 16
+    if (id === "anointingAll") openAnointingAll().catch(e => alert("Could not load anointing: " + e.message));
     if (id === "harvestsAll") openHarvestsAll().catch(e => alert("Could not load harvest dates: " + e.message));
     if (id === "calendar") openCalendar().catch(e => alert("Could not load the calendar: " + e.message));
     if (id === "messages") openMessages().catch(e => alert("Could not load messages: " + e.message));
@@ -378,6 +380,8 @@ async function loadCirculars() {
 // Name prefix, phone prefix, or exact number, across members AND clergy of this parish.
 let gTimer = null;
 function globalSearch() { clearTimeout(gTimer); gTimer = setTimeout(runGlobalSearch, 300); }
+// Only short forms with "/" or "." (M/C, Sup. Evang.) or a full rank name count as a rank search, so names still work.
+const rankTerm = t => /[/.]/.test(t) || [...RANKS, ...RANKS_F].some(r => r.toLowerCase() === t.toLowerCase()) ? rankFromText(t) : "";
 async function runGlobalSearch() {
     const term = $("globalSearch").value.trim();
     const box = $("globalResults");
@@ -389,6 +393,11 @@ async function runGlobalSearch() {
         const kind = noType(term) === "MBR" ? "members" : "clergy";
         const d = await parishRef().collection(kind).doc(numberMatch).get();
         if (d.exists) results.push([kind, d]);
+    } else if (rankTerm(term)) {   // Batch 16: a rank or its short form (M/C, Sup. Evang.) lists everyone with that rank
+        const r = rankTerm(term);
+        const snaps = await Promise.all(kinds.map(k => parishRef().collection(k).where("rank", "==", r).limit(20).get()));
+        snaps.forEach((s, i) => s.docs.forEach(d => results.push([kinds[i], d])));
+        box.innerHTML = `<p class="px-3 pt-2 text-gray-500">Rank: <b>${esc(r)}</b></p>`;
     } else {
         const digits = term.replace(/\D/g, "");
         const isPhone = digits && digits.length === term.replace(/[\s+()-]/g, "").length;
@@ -397,7 +406,7 @@ async function runGlobalSearch() {
         const snaps = await Promise.all(kinds.map(k => parishRef().collection(k).orderBy(field).startAt(t).endAt(t + "").limit(10).get()));
         snaps.forEach((s, i) => s.docs.forEach(d => results.push([kinds[i], d])));
     }
-    box.innerHTML = results.length ? results.map(([k, d]) => personCard(k, d)).join("") : `<p class="p-3 text-gray-400 italic">No match.</p>`;
+    box.innerHTML = (rankTerm(term) ? box.innerHTML : "") + (results.length ? results.map(([k, d]) => personCard(k, d)).join("") : `<p class="p-3 text-gray-400 italic">No match.</p>`);
     box.classList.remove("hidden");
 }
 document.addEventListener("click", e => { if (!e.target.closest("#globalSearchBox")) $("globalResults")?.classList.add("hidden"); });
@@ -446,7 +455,7 @@ function openPersonForm(kind, existing) {
     const p = existing || {};
     const set = (id, v) => $(id).value = v ?? "";
     set("p_name", p.fullName); set("p_gender", p.gender); set("p_marital", p.maritalStatus); set("p_address", p.address);
-    set("p_phone", p.phone); set("p_email", p.email); fillRanks(p.rank); set("p_occupation", p.occupation);
+    set("p_phone", p.phone); set("p_email", p.email); fillRanks(p.rank); set("p_rankShort", ""); $("p_rankShortHint").textContent = ""; set("p_occupation", p.occupation);
     set("p_dobDay", p.dobDay); set("p_dobMonth", p.dobMonth); set("p_dobYear", p.dobYear);
     set("p_wedDay", p.weddingDay); set("p_wedMonth", p.weddingMonth);
     set("p_anDay", p.anointDay); set("p_anMonth", p.anointMonth); set("p_anYear", p.anointYear);
@@ -593,6 +602,8 @@ async function openRecord(kind, id) {
     if (p.status === "Active") actions += btn("Edit", "editCurrent()", "bg-blue-600 text-white");
     if (kind === "members" && p.status === "Active") actions += btn("Ordain as clergy", "ordainCurrent()", "bg-amber-600 text-white");
     if (kind === "clergy" && p.status === "Active") actions += btn("Transfer / move to Former", "openTransfer()", "bg-amber-700 text-white");
+    if (kind === "members") actions += btn('<i class="fa-solid fa-oil-can"></i> Rank history', "openRankHistory()", "bg-amber-100 text-amber-900") // Batch 16
+        + btn('<i class="fa-solid fa-print"></i> Print profile', "printProfile()", "border");
     if (kind === "members" && p.status === "Active") actions += btn("Moved abroad", "openAbroad()", "bg-cyan-700 text-white");
     if (kind === "members" && p.status === "Diaspora") actions += btn("Returned home", "returnHome()", "bg-emerald-600 text-white");
     if (kind === "members" && ["Active", "Diaspora"].includes(p.status)) actions += btn('<i class="fa-solid fa-envelope-open-text"></i> Letter of introduction', "openLetterForm()", "bg-blue-900 text-white");
@@ -762,6 +773,7 @@ async function loadWorld() {
             return `<tr><td class="p-2 font-bold">${esc(p.name)}${p.status !== "Approved" ? " (" + esc(p.status) + ")" : ""}</td><td class="p-2">${esc([p.city, p.country].filter(Boolean).join(", "))}</td><td class="p-2">${s.clergyCount || 0}</td><td class="p-2">${s.memberCount || 0}</td><td class="p-2">${s.birthCount || 0}</td><td class="p-2">${s.childCount || 0}</td><td class="p-2">${s.teenCount || 0}</td><td class="p-2">${s.deathCount || 0}</td><td class="p-2">${s.attendanceTotal || 0}</td></tr>`; }).join("") + `</tbody></table>` + worldByType(stats.docs.map(d => d.data()));
     $("worldTable").classList.remove("hidden");
     if (localState.role !== "super_admin") return;
+    renderAnointDash().catch(e => console.error("anointing card", e.message)); // Batch 16
     $("parishList").innerHTML = parishes.docs.map(d => { const p = d.data();
         return `<div class="bg-white border rounded-xl p-3 text-xs"><p class="font-bold">${esc(p.name)} <span class="text-gray-400">${esc(p.status)}</span></p>
             <p>Parish code: ${p.code ? `<span class="font-mono font-bold">${esc(p.code)}</span>` : `<button onclick="giveParishCode('${esc(d.id)}')" class="underline text-blue-700">Give a parish code</button>`}</p><p>Lettering: ${p.parishLetters ? `<span class="font-mono font-bold">${esc(p.parishLetters)}-${esc(p.cityLetters)}</span>` : `<button onclick="setLettering('${esc(d.id)}')" class="underline text-blue-700">Set parish lettering</button>`}</p><p class="text-gray-500">${esc([p.address, p.city, p.state, p.country, p.continent].filter(Boolean).join(", "))}</p>
@@ -2092,6 +2104,7 @@ async function runAiExtract() {
             delete input.how;
             const people = await callAi(input);
             ai.people = people.map(d => ({ d, selected: true, photo: "", saved: "", error: "", dup: "", editing: false }));
+            ai.people.forEach(x => applyRankAbbr(x.d)); // Batch 16: M/C, L/S/S/E ...
             await Promise.all(ai.people.map(findDuplicate));
             $("aiStatus").textContent = `Found ${people.length} ${people.length === 1 ? "person" : "people"}. Check each card, fix anything wrong, then save.`;
             renderAiCards();

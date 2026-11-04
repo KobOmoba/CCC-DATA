@@ -1603,3 +1603,58 @@ test('b15 harvests: juvenile 1st Sunday of June, adult window (default June), un
   eq(all.size, 1);
   await assertFails(getDocs(collection(as.adminB(), 'parishes/A/celebrations')));
 });
+
+// ---------------- Batch 16: rank history, anointing events, HQ certificates
+const rEntry = (to, extra = {}) => ({ date: '2026-11-01', from: '', to, parish: 'A', pastor: 'Rev X', approvedBy: 'Shepherd', eventId: '', kind: 'start', by: 'uA', ...extra });
+const rHist = (entries) => ({ memberNo: 'CCC-MBR-001', fullName: 'Ade Bisi', gender: 'Female', entries });
+const anoint = (extra = {}) => ({ date: '2026-12-06', state: 'Lagos', parishName: 'A', pastor: 'Rev X', approvedBy: '', notes: '', status: 'Planned',
+  candidates: [{ memberNo: 'CCC-MBR-001', fullName: 'Ade Bisi', fromRank: 'Sister', toRank: 'Elder Sister', amount: 5000, flagged: false, anointed: false }],
+  createdAt: 'c', createdBy: 'uA', ...extra });
+test('b16 rank history: append-only, audited, gender rank line, never deleted', async () => {
+  const a = as.adminA(), p = 'parishes/A/rankHistory/CCC-MBR-001';
+  const e0 = rEntry('Sister'), e1 = rEntry('Elder Sister', { from: 'Sister', kind: 'anointment', eventId: 'E1', date: '2026-12-06' });
+  await assertFails(pAudited(a, A, p, rHist([e0]), 1, 'create', null));                     // no audit
+  await assertFails(pAudited(a, A, p, rHist([rEntry('Brother')]), 1));                      // male rank on a woman
+  await assertSucceeds(pAudited(a, A, p, rHist([e0]), 1));
+  await assertFails(pAudited(a, A, p, rHist([e1]), 2, 'anoint'));                           // rewrites history
+  await assertFails(pAudited(a, A, p, rHist([e0, e1, e1]), 2, 'anoint'));                   // two at once
+  await assertFails(pAudited(a, A, p, rHist([e0, rEntry('Mother Celestial', { by: 'uB' })]), 2, 'anoint')); // wrong "by"
+  await assertSucceeds(pAudited(a, A, p, rHist([e0, e1]), 2, 'anoint'));
+  await assertFails(pAudited(a, A, p, rHist([e0]), 3, 'update'));                           // cannot remove
+  await assertFails(deleteDoc(doc(a, p)));
+  await assertFails(getDoc(doc(as.adminB(), p)));
+});
+test('b16 anointing events: audited, never deleted, Done stays Done, super reads all', async () => {
+  const a = as.adminA(), p = 'parishes/A/anointings/E1';
+  await assertFails(pAudited(a, A, p, anoint(), 1, 'create', null));
+  await assertFails(pAudited(a, A, p, anoint({ status: 'Done' }), 1));
+  await assertFails(pAudited(a, A, p, anoint({ split: 0.5 }), 1));                           // no fee split fields
+  await assertSucceeds(pAudited(a, A, p, anoint(), 1));
+  await assertSucceeds(pAudited(a, A, p, anoint({ status: 'Done' }), 2, 'anoint'));
+  await assertFails(pAudited(a, A, p, anoint({ status: 'Planned' }), 3, 'update'));
+  await assertFails(deleteDoc(doc(a, p)));
+  await assertFails(getDoc(doc(as.adminB(), p)));
+  const all = await assertSucceeds(getDocs(collectionGroup(as.superA(), 'anointings')));
+  eq(all.size, 1);
+  await assertFails(getDocs(collectionGroup(as.adminA(), 'anointings')));
+});
+test('b16 certificates: parish requests, named Super Admin issues, audited', async () => {
+  const a = as.adminA();
+  await pAudited(a, A, 'parishes/A/anointings/E1', anoint(), 1);
+  const id = 'A_E1_CCC-MBR-001', t = 'certificates/' + id;
+  const cert = { parishId: 'A', parishName: 'A', eventId: 'E1', eventDate: '2026-12-06', memberNo: 'CCC-MBR-001', fullName: 'Ade Bisi', rank: 'Elder Sister', status: 'Requested' };
+  const write = (db, who, data, v, action, parishId = 'A') => { const b = writeBatch(db);
+    b.set(doc(db, t), { ...data, version: v, updatedAt: 'now', updatedBy: who.uid });
+    b.set(doc(db, 'auditLog/' + auditId(t, v)), { ...audit(t, v, action, who), parishId }); return b.commit(); };
+  await assertFails(write(a, A, { ...cert, status: 'Issued' }, 1, 'request'));
+  await assertFails(write(a, A, { ...cert, eventId: 'NOPE' }, 1, 'request'));
+  await assertFails(write(as.adminB(), { uid: 'uB', email: 'b@x.org', role: 'parish_admin' }, cert, 1, 'request'));
+  await assertSucceeds(write(a, A, cert, 1, 'request'));
+  await assertFails(write(a, A, { ...cert, status: 'Issued', certNo: 'X1', issuedDate: '2027-01-10' }, 2, 'issue'));   // parish cannot issue
+  await assertFails(write(as.named(), NAMED, { ...cert, status: 'Issued', issuedDate: '2027-01-10' }, 2, 'issue'));     // no number
+  await assertFails(write(as.named(), NAMED, { ...cert, fullName: 'Other', status: 'Issued', certNo: 'X1', issuedDate: '2027-01-10' }, 2, 'issue'));
+  await assertSucceeds(write(as.named(), NAMED, { ...cert, status: 'Issued', certNo: 'HQ/AN/2027/001', issuedDate: '2027-01-10' }, 2, 'issue'));
+  await assertFails(deleteDoc(doc(as.named(), t)));
+  await assertSucceeds(getDoc(doc(a, t)));
+  await assertFails(getDoc(doc(as.adminB(), t)));
+});
