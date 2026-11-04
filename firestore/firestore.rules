@@ -548,6 +548,27 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Batch 15: parish committees. Members (from this parish) live in the doc; nothing is deleted:
+      // a committee is Dissolved and a member becomes Former. Every write is versioned + audited.
+      match /pcommittees/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validPCommittee(request.resource.data) && request.resource.data.version == 1
+          && auditedAfter('parishes/' + parishId + '/pcommittees/' + id, 1);
+        allow update: if isParishAdminOf(parishId) && bumped() && validPCommittee(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt
+          && auditedAfter('parishes/' + parishId + '/pcommittees/' + id, request.resource.data.version);
+        allow delete: if false;
+      }
+      // Batch 15: harvests + unit anniversaries, id = {year}_{kind}: one per kind per year. Audited, never deleted.
+      match /celebrations/{id} {
+        allow read: if isParishAdminOf(parishId);
+        allow create: if isParishAdminOf(parishId) && validCeleb(request.resource.data, id) && request.resource.data.version == 1
+          && auditedAfter('parishes/' + parishId + '/celebrations/' + id, 1);
+        allow update: if isParishAdminOf(parishId) && bumped() && validCeleb(request.resource.data, id)
+          && auditedAfter('parishes/' + parishId + '/celebrations/' + id, request.resource.data.version);
+        allow delete: if false;
+      }
+
       // Letters of Introduction (Batch 14): issued on request to an Active/Diaspora member, numbered LOI-001 from meta/loi,
       // audited in the same write, never changed or deleted. 1-3 signatories, each with an editable title and name.
       match /letters/{id} {
@@ -892,6 +913,13 @@ service cloud.firestore {
         && request.resource.data.updatedBy == request.auth.uid
         && auditedAfter('hqSettings/' + id, request.resource.data.version);
       allow create, update: if isNamedSuper() && id == 'leadership' && leadershipOk();
+      // Batch 15: Adult Harvest start month (default June when the doc does not exist).
+      allow create, update: if isNamedSuper() && id == 'harvest'
+        && request.resource.data.keys().hasOnly(['startMonth', 'version', 'updatedAt', 'updatedBy'])
+        && request.resource.data.startMonth is int && request.resource.data.startMonth >= 1 && request.resource.data.startMonth <= 12
+        && request.resource.data.version == (resource == null ? 1 : resource.data.version + 1)
+        && request.resource.data.updatedBy == request.auth.uid
+        && auditedAfter('hqSettings/' + id, request.resource.data.version);
       allow create, update: if isNamedSuper() && id == 'returns'
         && request.resource.data.keys().hasOnly(['shares', 'version', 'updatedAt', 'updatedBy'])
         && validShares(request.resource.data.shares)
@@ -1158,6 +1186,43 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---- Batch 15: parish committees + celebrations ----
+    function validPCommittee(d) {
+      return d.keys().hasOnly(['name', 'nameLower', 'template', 'purpose', 'termStart', 'termEnd', 'status', 'members', 'version',
+          'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+        && str(d.name, 120) && d.nameLower == d.name.lower() && s(d.get('template', ''), 40) && s(d.get('purpose', ''), 1000)
+        && isDate(d.termStart) && isDate(d.termEnd) && d.termEnd >= d.termStart && d.status in ['Active', 'Dissolved']
+        && d.members is list && d.members.size() <= 60 && d.updatedBy == request.auth.uid;
+    }
+    function sundayOk(date) {
+      let p = date.split('-');
+      return timestamp.date(int(p[0]), int(p[1]), int(p[2])).dayOfWeek() == 7;
+    }
+    // Adult Harvest starts on the 2nd Sunday of the HQ start month (default June). For a Sunday, ">= the 8th" is the same test.
+    function harvestStartOk(d) {
+      let hs = docAt('hqSettings/harvest');
+      let m = exists(hs) ? get(hs).data.startMonth : 6;
+      return d.date >= string(d.year) + (m < 10 ? '-0' : '-') + string(m) + '-08';
+    }
+    function validCeleb(d, id) {
+      return d.keys().hasOnly(['year', 'kind', 'unitId', 'unitName', 'title', 'date', 'committeeId', 'attendance', 'income', 'notes',
+          'parishName', 'version', 'updatedAt', 'updatedBy'])
+        && d.year is int && d.year >= 2020 && d.year <= 2100 && d.kind is string && id == string(d.year) + '_' + d.kind
+        && isDate(d.date) && d.date.split('-')[0] == string(d.year)
+        && str(d.title, 100) && s(d.get('committeeId', ''), 40) && s(d.get('notes', ''), 1000)
+        && s(d.get('unitId', ''), 60) && s(d.get('unitName', ''), 80) && s(d.get('parishName', ''), 120)
+        && (d.get('attendance', null) == null || (d.attendance is int && d.attendance >= 0 && d.attendance <= 10000000))
+        && (d.get('income', null) == null || money(d.income))
+        && d.updatedBy == request.auth.uid
+        && ((d.kind == 'juvenile' && d.date.split('-')[1] == '06' && int(d.date.split('-')[2]) <= 7 && sundayOk(d.date))
+          || (d.kind == 'adult' && sundayOk(d.date) && d.date < string(d.year) + '-12-25' && harvestStartOk(d))
+          || (d.kind.matches('^unit-[A-Za-z0-9_]{1,40}$') && !(d.kind in ['unit-parochial', 'unit-sundayschool'])));
+    }
+    // Super Admin: every parish's Adult Harvest date (collection-group read).
+    match /{path=**}/celebrations/{id} {
+      allow read: if isSuper();
+    }
+
     // ---- Committees (Super Admin). Members are picked church-wide; clergy may join (by clergy number). ----
     function validCommittee(d) {
       return d.keys().hasOnly(['name', 'nameLower', 'purpose', 'duties', 'termStart', 'termEnd', 'status', 'version',
@@ -1335,6 +1400,8 @@ service cloud.firestore {
               && (isNamedSuper() || isParishAdminOf(d.parishId)))
         || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqLeave|committees|committeeMembers|leaders|adminHandovers)/.+') && isNamedSuper() && d.parishId == '')
         || (d.target.matches('^parishes/[A-Za-z0-9]+/letters/CCC-[A-Z0-9-]+$') && d.action == 'issue-letter'
+            && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
+        || (d.target.matches('^parishes/[A-Za-z0-9]+/(pcommittees|celebrations)/[A-Za-z0-9_-]+$')
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
         || (d.target.matches('^postings/.+') && d.parishId == '' && (role() == 'parish_admin'
             ? (isParishAdminOf(getAfter(docAt(d.target)).data.fromParishId) || isParishAdminOf(getAfter(docAt(d.target)).data.toParishId))

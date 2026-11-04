@@ -21,6 +21,7 @@
     <script src="p8.js" defer></script>
     <script src="vendor/qrcode.js" defer></script>
     <script src="p9.js" defer></script>
+    <script src="p15.js" defer></script>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
 
@@ -83,6 +84,8 @@
                 <button onclick="showSection('calendar')" id="nav-calendar" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-calendar-days text-rose-300 w-4"></i> Calendar</button>
                 <button onclick="showSection('sermons')" id="nav-sermons" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-book-bible text-sky-300 w-4"></i> Sermons</button>
                 <button onclick="showSection('messages')" id="nav-messages" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-brands fa-whatsapp text-emerald-400 w-4"></i> Messages</button>
+                <button onclick="showSection('pcommittees')" id="nav-pcommittees" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-group text-pink-300 w-4"></i> Committees</button>
+                <button onclick="showSection('harvests')" id="nav-harvests" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wheat-awn text-amber-400 w-4"></i> Harvests &amp; Anniversaries</button>
                 <button onclick="showSection('settings')" id="nav-settings" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-church text-sky-300 w-4"></i> Parish Settings</button>
                 <button onclick="showSection('ai')" id="nav-ai" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wand-magic-sparkles text-fuchsia-300 w-4"></i> AI Dashboard</button>
                 <button onclick="showSection('postings')" id="nav-postings" class="leader-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-route text-amber-300 w-4"></i> Clergy Postings</button>
@@ -90,6 +93,7 @@
                 <button onclick="showSection('hqreturns')" id="nav-hqreturns" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-scale-balanced text-emerald-300 w-4"></i> Monthly Returns (HQ)</button>
                 <button onclick="showSection('directory')" id="nav-directory" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-address-book text-sky-300 w-4"></i> Member Directory</button>
                 <button onclick="showSection('committees')" id="nav-committees" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-group text-pink-300 w-4"></i> Committees</button>
+                <button onclick="showSection('harvestsAll')" id="nav-harvestsAll" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-wheat-awn text-amber-400 w-4"></i> Adult Harvest dates</button>
                 <button onclick="showSection('staff')" id="nav-staff" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-id-badge text-amber-300 w-4"></i> HQ Staff</button>
                 <button onclick="showSection('sermons')" id="nav-sermonsAll" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-book-bible text-sky-300 w-4"></i> Sermons (church-wide)</button>
                 <button onclick="showSection('register')" id="nav-register" class="super-only hidden nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy Register</button>
@@ -143,6 +147,7 @@
                     </div>
                     <div class="grid grid-cols-4 gap-2 text-xs"><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Births</p><p id="metricBirths" class="text-lg font-bold text-rose-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Children</p><p id="metricChildren" class="text-lg font-bold text-amber-600">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Teens</p><p id="metricTeens" class="text-lg font-bold text-lime-700">0</p></div><div class="bg-white p-2 rounded-xl border shadow-sm text-center"><p class="text-gray-500 uppercase font-semibold text-[9px]">Deaths</p><p id="metricDeaths" class="text-lg font-bold text-gray-700">0</p></div></div>
                     <div class="parish-only"><div id="joinCard" class="hidden bg-white border border-emerald-300 rounded-xl p-3 text-xs space-y-2 shadow-sm"></div></div>
+                    <div class="parish-only"><div id="celebCard" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-1"></div></div>
                     <div class="parish-only"><div id="weekCard" class="hidden bg-white border rounded-xl p-3 text-xs space-y-2 shadow-sm"></div></div>
                     <div class="parish-only"><div id="parishPostings" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-2"></div></div>
                     <div id="pendingMoves" class="parish-only hidden bg-violet-50 border border-violet-300 rounded-xl p-3 text-xs space-y-2"></div>
@@ -496,6 +501,31 @@
                 </section>
 
                 <!-- PHASE 7: committees -->
+                <!-- BATCH 15: parish committees -->
+                <section id="section-pcommittees" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b flex justify-between items-center"><div><h2 class="text-lg font-bold">Parish Committees</h2><p class="text-gray-500">Current, upcoming and past committees. Nothing is deleted.</p></div>
+                    <button onclick="openPCommitteeForm()" id="newPcBtn" class="px-3 py-2 bg-blue-900 text-white rounded font-bold">+ New</button></div>
+                    <div id="pc_list" class="space-y-1"></div>
+                </section>
+                <!-- BATCH 15: harvests + unit anniversaries -->
+                <section id="section-harvests" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Harvests &amp; Anniversaries</h2><p class="text-gray-500">One date per year each. Record attendance and income afterwards.</p></div>
+                    <div class="flex items-center gap-2"><button onclick="hvYear(-1)" class="px-3 py-2 border rounded bg-white" aria-label="Previous year">‹</button>
+                        <p id="hv_year" class="font-bold text-sm flex-1 text-center"></p><button onclick="hvYear(1)" class="px-3 py-2 border rounded bg-white" aria-label="Next year">›</button></div>
+                    <p id="hv_window" class="bg-amber-50 border border-amber-200 rounded p-2"></p>
+                    <p class="text-[10px] uppercase font-semibold text-gray-500">Harvests</p><div id="hv_harvests" class="space-y-2"></div>
+                    <p class="text-[10px] uppercase font-semibold text-gray-500">Unit anniversaries</p><div id="hv_units" class="space-y-2"></div>
+                    <p class="text-[10px] uppercase font-semibold text-gray-500">Totals per year</p><div id="hv_totals" class="bg-white border rounded-xl p-2"></div>
+                </section>
+                <!-- BATCH 15: Super Admin view of Adult Harvest dates -->
+                <section id="section-harvestsAll" class="space-y-3 hidden text-xs">
+                    <div class="pb-2 border-b"><h2 class="text-lg font-bold">Adult Harvest dates</h2><p class="text-gray-500">Window: 2nd Sunday of the start month to the Sunday before Christmas.</p></div>
+                    <div id="ha_nameBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-2">Add your full name (Committees page) before changing the start month.</div>
+                    <div class="flex gap-2 items-center"><label class="font-semibold">Start month</label><select id="ha_month" class="border p-2 rounded flex-1"></select>
+                        <button id="saveHaBtn" onclick="saveHarvestMonth()" class="px-3 py-2 bg-blue-900 text-white rounded font-bold">Save</button></div>
+                    <div class="flex items-center gap-2"><button onclick="haYear(-1)" class="px-3 py-2 border rounded bg-white">‹</button><p id="ha_year" class="font-bold text-sm flex-1 text-center"></p><button onclick="haYear(1)" class="px-3 py-2 border rounded bg-white">›</button></div>
+                    <div id="ha_list" class="bg-white border rounded-xl p-2 overflow-x-auto"></div>
+                </section>
                 <section id="section-committees" class="space-y-3 hidden">
                     <div class="pb-2 border-b flex justify-between items-center"><div><h2 class="text-lg font-bold">Committees</h2><p class="text-xs text-gray-500">Members and clergy from any parish. Former members are kept.</p></div>
                     <button onclick="openCommitteeForm()" id="newCmtBtn" class="px-3 py-2 bg-blue-900 text-white rounded font-bold text-xs">+ New</button></div>

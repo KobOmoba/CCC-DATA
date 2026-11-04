@@ -249,6 +249,9 @@ function showSection(id) {
     if (id === "postings") openPostings().catch(e => alert("Could not load postings: " + e.message));
     if (id === "committees") openCommittees().catch(e => alert("Could not load committees: " + e.message));
     if (id === "sermons") openSermons().catch(e => alert("Could not load sermons: " + e.message));
+    if (id === "pcommittees") openPCommittees().catch(e => alert("Could not load committees: " + e.message)); // Batch 15
+    if (id === "harvests") openHarvests().catch(e => alert("Could not load harvests: " + e.message));
+    if (id === "harvestsAll") openHarvestsAll().catch(e => alert("Could not load harvest dates: " + e.message));
     if (id === "calendar") openCalendar().catch(e => alert("Could not load the calendar: " + e.message));
     if (id === "messages") openMessages().catch(e => alert("Could not load messages: " + e.message));
     if (id === "parishes" && localState.role === "super_admin") completeClaimedHandovers().catch(e => console.error("handovers", e.message));
@@ -283,6 +286,7 @@ async function loadParishData() {
     setTimetable(tt && tt.exists ? tt.data().services : null);
     await Promise.all([loadMembers(true), loadClergy(true), loadFormer(true), loadAttendance(true), loadFinances(true), loadDepartments()]);
     renderWeekCard().catch(e => console.error("week card", e.message)); // Phase 9
+    renderCelebCard().catch(e => console.error("celebrations card", e.message)); // Batch 15
     renderJoinCard().catch(e => console.error("join card", e.message)); // Phase 9b
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
     // Phase 8: record activity for the "no activity for 30 days" alert, and apply any clergy posting now due.
