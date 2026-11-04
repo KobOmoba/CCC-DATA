@@ -16,7 +16,7 @@ const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/doc
 const PASS = 'Passw0rd!';
 
 // Tiny static server for index.html / app.js / styles.css.
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp', '.png': 'image/png' };
 const server = createServer((req, res) => {
   let path = new URL(req.url, 'http://x').pathname.replace(/^\/$/, '/index.html');
   // Mirror vercel.json: /join -> /join/index.html
@@ -321,7 +321,7 @@ try {
   // Approve: the admin reviews, edits, saves -> a real numbered member; the request is marked Approved.
   await login('ikeja@test.local');
   await page.waitForSelector('#joinCard .pend-row');
-  await page.click('#joinCard .pend-row button:has-text("Review")');
+  await page.click('#joinCard .pend-row button:has-text("Approve as member")');
   await page.waitForSelector('#personModal:not(.hidden)');
   assert.equal(await page.inputValue('#p_name'), 'Ngozi Selfreg');
   await page.fill('#p_occupation', 'Nurse (checked by admin)');
@@ -331,7 +331,35 @@ try {
   assert.equal(pend.length, 1); assert.equal(pend[0].status, 'Approved'); assert.match(pend[0].memberNo, /^CCC-TIP-IKJ-MBR-\d{3}$/);
   const mem = await page.evaluate(async (no) => (await parishRef().collection('members').doc(no).get()).data(), pend[0].memberNo);
   assert.equal(mem.fullName, 'Ngozi Selfreg'); assert.equal(mem.occupation, 'Nurse (checked by admin)'); assert.match(mem.photo, /^data:image\/jpeg/);
+  // Batch 13: two more sign-ups -> one saved as a visitor, one asked to clarify (stays pending, one-tap WhatsApp).
   await logout();
+  for (const nm of ['Tunde Friend', 'Kemi Unsure']) {
+    await page.goto(joinLink + '&emulator=1'); await page.waitForSelector('#joinForm:not([hidden])');
+    await fillJoin(); await page.fill('[name=fullName]', nm);
+    await page.click('#joinSend'); await page.waitForSelector('#joinDone:not([hidden])');
+  }
+  await login('ikeja@test.local');
+  await page.waitForFunction(() => document.querySelectorAll('#joinCard .pend-row').length === 2);
+  await page.locator('#joinCard').screenshot({ path: join(SHOTS, 'p11-01-pending-four-actions.png') });
+  d0 = dialogs.length;
+  await page.click('#joinCard .pend-row:has-text("Tunde Friend") button:has-text("Save as visitor")');
+  await page.waitForFunction(() => document.querySelectorAll('#joinCard .pend-row').length === 1); noFail(d0);
+  promptAnswer = 'Which parish did you attend before?';
+  await page.click('#joinCard .pend-row:has-text("Kemi Unsure") button:has-text("Ask to clarify")');
+  await page.waitForSelector('#joinCard .pend-row .pend-note'); noFail(d0); promptAnswer = '';
+  assert.match(await page.textContent('#joinCard .pend-row'), /Clarify[\s\S]*Which parish did you attend before\?/);
+  const wa = await page.getAttribute('#joinCard .pend-wa', 'href');
+  assert.match(wa, /^https:\/\/wa\.me\/2348035550000\?text=.*Which%20parish/);
+  await page.locator('#joinCard').screenshot({ path: join(SHOTS, 'p11-02-clarify-whatsapp.png') });
+  const reqs = await page.evaluate(async () => Object.fromEntries((await parishRef().collection('pendingMembers').get()).docs.map(d => [d.data().fullName, d.data()])));
+  assert.equal(reqs['Tunde Friend'].status, 'Visitor'); assert.equal(reqs['Kemi Unsure'].status, 'Clarify');
+  const vis = await page.evaluate(async (id) => (await parishRef().collection('visitors').doc(id).get()).data(), reqs['Tunde Friend'].visitorId);
+  assert.equal(vis.name, 'Tunde Friend'); assert.equal(vis.consentGiven, true); assert.equal(vis.status, 'New');
+  await shot('p11-03-dashboard-palette');
+  await logout();
+  await shot('p11-04-sign-in-logo');
+  await page.goto(joinLink + '&emulator=1'); await page.waitForSelector('#joinForm:not([hidden])');
+  await shot('p11-05-join-page-logo');
 
   // ---- Parish B sees the shared sermon only (not A's private one).
   await claimFresh('london@test.local', codeB);

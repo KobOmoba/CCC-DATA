@@ -16,7 +16,7 @@ const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/doc
 const PASS = 'Passw0rd!';
 
 // Tiny static server for index.html / app.js / styles.css.
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webp': 'image/webp', '.png': 'image/png' };
 const server = createServer((req, res) => {
   const path = new URL(req.url, 'http://x').pathname.replace(/^\/$/, '/index.html');
   let body;
@@ -178,7 +178,7 @@ try {
   await page.fill('#s_name', 'TEST Grace Cathedral Parish');
   await page.click('#saveParishBtn');
   await page.waitForFunction(() => document.getElementById('dashParishName').textContent === 'TEST Grace Cathedral Parish');
-  assert.ok(await page.evaluate(() => { const i = document.getElementById('appLogo'); return i.complete && i.naturalWidth > 0 && /ccc-logo\.webp$/.test(i.src); }), 'official logo shown');
+  assert.ok(await page.evaluate(() => { const i = document.getElementById('appLogo'); return i.complete && i.naturalWidth > 0 && /ccc-logo\.png$/.test(i.src); }), 'official logo shown');
   await fullShot('04-parish-name-logo');
 
   // 6. Five church members with photos (member 1 flagged important).

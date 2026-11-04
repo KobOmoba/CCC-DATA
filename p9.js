@@ -447,7 +447,7 @@ async function renderJoinCard() {
     if (localState.role !== "parish_admin") return;
     const card = $("joinCard");
     if (!myCode()) { card.innerHTML = `<p class="font-bold text-sm">Member sign-up link</p><p class="text-gray-500">Needs a parish code. Ask the Super Admin.</p>`; card.classList.remove("hidden"); return; }
-    const [j, pend] = await Promise.all([db.collection("joinLinks").doc(myCode()).get(), parishRef().collection("pendingMembers").where("status", "==", "Pending").get()]);
+    const [j, pend] = await Promise.all([db.collection("joinLinks").doc(myCode()).get(), parishRef().collection("pendingMembers").where("status", "in", ["Pending", "Clarify"]).get()]);
     const open = j.exists && j.data().open, link = joinBase() + myCode();
     let qr = "";
     try { const q = qrcode(0, "M"); q.addData(link); q.make(); qr = q.createSvgTag(4, 8, "QR code for the sign-up link"); } catch (e) { console.error("qr", e); }
@@ -460,8 +460,9 @@ async function renderJoinCard() {
             <a id="joinShare" href="https://wa.me/?text=${encodeURIComponent("Register as a member of " + (localState.parish.name || "our parish") + ": " + link)}" target="_blank" rel="noopener" class="inline-block px-2 py-1 bg-emerald-600 text-white rounded"><i class="fa-brands fa-whatsapp"></i> Share</a></div></div>` : ""}
         <button id="joinToggle" onclick="toggleJoin(${!open})" class="px-3 py-2 rounded ${open ? "border" : "bg-emerald-700 text-white"} font-bold">${open ? "Close the link" : "Open the sign-up link"}</button>
         <p class="font-bold pt-1">Pending registrations (${pendState.list.length})</p>
-        ${pendState.list.map(p => `<div class="pend-row flex items-center justify-between gap-2 border rounded p-2"><span>${esc(p.fullName)} <span class="text-gray-500">${esc(p.phone)}</span></span>
-            <span class="flex gap-1"><button onclick="reviewPending('${p.id}')" class="px-2 py-1 bg-blue-700 text-white rounded">Review</button><button onclick="rejectPending('${p.id}')" class="px-2 py-1 border rounded text-red-600">Reject</button></span></div>`).join("") || `<p class="text-gray-400">None.</p>`}`;
+        ${pendState.list.map(p => `<div class="pend-row border rounded p-2 space-y-1"><p>${esc(p.fullName)} <span class="text-gray-500">${esc(p.phone)}</span>${p.status === "Clarify" ? ' <span class="pend-clarify text-[10px] font-bold px-1 rounded bg-amber-100 text-amber-900">Clarify</span>' : ""}</p>
+            ${p.status === "Clarify" ? `<p class="pend-note text-gray-600 italic">Asked: ${esc(p.clarifyNote)}</p>${contactLinks(p)}` : ""}
+            <span class="flex flex-wrap gap-1"><button onclick="reviewPending('${p.id}')" class="px-2 py-1 bg-blue-900 text-white rounded">Approve as member</button><button onclick="visitorPending('${p.id}')" class="px-2 py-1 border rounded">Save as visitor</button><button onclick="clarifyPending('${p.id}')" class="px-2 py-1 border rounded">Ask to clarify</button><button onclick="rejectPending('${p.id}')" class="px-2 py-1 border rounded text-red-700">Reject</button></span></div>`).join("") || `<p class="text-gray-400">None.</p>`}`;
     card.classList.remove("hidden");
 }
 let pendState = { list: [] };
@@ -489,6 +490,33 @@ async function rejectPending(id) {
     if (!reason) return;
     await parishRef().collection("pendingMembers").doc(id).update({ status: "Rejected", reason: reason.slice(0, 300), decidedAt: nowIso(), decidedBy: localState.user.uid })
         .catch(e => alert("Not saved: " + e.message));
+    await renderJoinCard();
+}
+
+// One-tap contact with the clarification note prefilled.
+function contactLinks(p) {
+    const d = String(p.phone || "").replace(/\D/g, ""), wa = d.startsWith("0") ? "234" + d.slice(1) : d;
+    const msg = "Halleluyah " + p.fullName + ", about your registration with " + (localState.parish.name || "our parish") + ": " + p.clarifyNote;
+    return `<span class="flex gap-1"><a class="pend-wa px-2 py-1 bg-emerald-700 text-white rounded" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a><a class="pend-sms px-2 py-1 border rounded" href="sms:${esc(p.phone)}?body=${encodeURIComponent(msg)}"><i class="fa-solid fa-message"></i> SMS</a><a class="px-2 py-1 border rounded" href="tel:${esc(p.phone)}"><i class="fa-solid fa-phone"></i> Call</a></span>`;
+}
+async function clarifyPending(id) {
+    const note = prompt("What do you need them to clarify? (short note)");
+    if (!note) return;
+    await parishRef().collection("pendingMembers").doc(id).update({ status: "Clarify", clarifyNote: note.slice(0, 300), decidedAt: nowIso(), decidedBy: localState.user.uid })
+        .catch(e => alert("Not saved: " + e.message));
+    await renderJoinCard();
+}
+// Friend of the house: a visitor-log entry (consent carried over) + the request marked Visitor, atomically.
+async function visitorPending(id) {
+    const p = pendState.list.find(x => x.id === id);
+    if (!confirm("Save " + p.fullName + " as a visitor (not a member)?")) return;
+    const batch = db.batch(), vref = parishRef().collection("visitors").doc(), phone = p.phone || "";
+    batch.set(vref, { name: p.fullName, nameLower: p.fullName.toLowerCase(), phone, phoneDigits: phone.replace(/\D/g, ""), invitedBy: "",
+        firstVisit: localToday(), serviceType: "", status: "New", notes: "Signed up via join link", consentGiven: p.consentGiven === true,
+        createdAt: nowIso(), updatedAt: nowIso() });
+    batch.set(statsRef(), { visitorCount: inc(1) }, { merge: true });
+    batch.update(parishRef().collection("pendingMembers").doc(id), { status: "Visitor", visitorId: vref.id, decidedAt: nowIso(), decidedBy: localState.user.uid });
+    await batch.commit().catch(e => alert("Not saved: " + e.message));
     await renderJoinCard();
 }
 

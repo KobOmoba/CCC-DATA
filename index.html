@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CELESTIAL CHURCH OF CHRIST</title>
-    <link rel="icon" href="assets/ccc-logo.webp" type="image/webp">
+    <link rel="icon" href="assets/ccc-logo.png" type="image/png">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome CDN -->
@@ -26,12 +26,14 @@
 
     <!-- GET STARTED: parish sign-in (no self-registration; Super Admin sends invites) -->
     <div id="landingPage" class="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 text-white p-4 overflow-y-auto">
-        <div class="max-w-md mx-auto my-auto w-full bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 shadow-2xl">
-            <div class="text-center mb-6">
-                <img id="landingLogo" src="assets/ccc-logo.webp" alt="Celestial Church of Christ logo" class="w-20 h-20 mx-auto mb-4 bg-white rounded-full object-contain shadow-lg p-1">
-                <h1 class="text-lg font-black uppercase tracking-wider text-yellow-400">CELESTIAL CHURCH OF CHRIST</h1>
-                <p class="text-xs tracking-widest text-gray-300 font-semibold uppercase">Get Started &middot; Parish Sign-in</p>
+        <div class="max-w-md mx-auto my-auto w-full">
+            <div class="text-center mb-4">
+                <img id="landingLogo" src="assets/ccc-logo.png" alt="Celestial Church of Christ logo" class="ccc-logo h-28 w-auto mx-auto mb-3 object-contain">
+                <h1 class="text-lg font-black uppercase tracking-wider text-[color:var(--navy)]">CELESTIAL CHURCH OF CHRIST</h1>
+                <p class="text-xs tracking-widest text-gray-600 font-semibold uppercase">Get Started &middot; Parish Sign-in</p>
             </div>
+            <div class="rainbow-stripe rounded mb-4"></div>
+        <div class="landing-card bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 shadow-2xl">
             <div class="space-y-4">
                 <div>
                     <label for="loginEmail" class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-300">Admin Email</label>
@@ -53,7 +55,8 @@
                 </div>
             </div>
         </div>
-        <div class="text-center text-[10px] text-gray-400 mt-4 leading-relaxed">
+        </div>
+        <div class="text-center text-[10px] text-gray-600 mt-4 leading-relaxed">
             <p>CELESTIAL CHURCH OF CHRIST WORLD-WIDE &middot; Parish Portal</p>
             <p class="text-gray-500 font-semibold">&copy; 2026 Celestial Church of Christ. Powered by Aarinat Company Limited</p>
         </div>
@@ -99,9 +102,9 @@
 
         <main class="flex-1 flex flex-col min-w-0">
             <!-- Branding bar: official CCC logo + church title (fixed), parish name, global search -->
-            <header class="bg-white border-b shadow-sm p-3 space-y-2 sticky top-0 z-30">
+            <header class="app-header bg-white shadow-sm p-3 space-y-2 sticky top-0 z-30">
                 <div class="flex items-center gap-3">
-                    <img id="appLogo" src="assets/ccc-logo.webp" alt="Celestial Church of Christ logo" class="w-12 h-12 rounded-full object-contain bg-white border shrink-0">
+                    <img id="appLogo" src="assets/ccc-logo.png" alt="Celestial Church of Christ logo" class="ccc-logo h-12 w-auto object-contain shrink-0">
                     <div class="min-w-0">
                         <h1 class="text-sm font-black text-blue-950 uppercase tracking-wide leading-tight">CELESTIAL CHURCH OF CHRIST</h1>
                         <p id="dashParishName" class="text-xs text-gray-500 truncate">Parish</p>

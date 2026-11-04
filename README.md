@@ -101,7 +101,7 @@ the browser. Then replace `MessagingAdapter.whatsapp.send` with a call to that r
 - **Phase 10** (Batch 12):
   - Church name is fixed: **CELESTIAL CHURCH OF CHRIST** on the header, login, certificates and messages. Parish setup asks only parish name,
     city, state, country; address, map link, continent and currency sit under "More (optional)". Lettering stays a Super Admin field.
-  - Official logo `assets/ccc-logo.webp` everywhere (header, login, certificates, favicon, `/join`). Per-parish logo upload removed;
+  - Official logo `assets/ccc-logo.png` everywhere (header, login, certificates, favicon, `/join`). Per-parish logo upload removed;
     old `logo` data is kept but not shown.
   - The per-parish website (`/site`, `website/`, `publicSites`) is removed: the parish website is a separate project. `publicSites` now
     falls to the default deny. Greetings use "Halleluyah 🙌" (never paired with good morning/afternoon/evening).

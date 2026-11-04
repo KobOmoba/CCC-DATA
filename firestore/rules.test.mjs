@@ -1387,6 +1387,22 @@ test('p9b join link + pendingMembers: anonymous create only, strict, honeypot, a
   await assertSucceeds(updateDoc(doc(a, 'parishes/A/pendingMembers/p1'), { status: 'Rejected', reason: 'Duplicate', decidedAt: 'x', decidedBy: 'uA' }));
   await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p2'), { status: 'Approved', memberNo: 'CCC-MBR-999' })); // no such member
   await assertSucceeds(updateDoc(doc(a, 'parishes/A/pendingMembers/p2'), { status: 'Approved', memberNo: 'CCC-MBR-001', decidedAt: 'x', decidedBy: 'uA' }));
+  // Batch 13: clarify (note required, stays open) and save as visitor (visitor doc must exist).
+  await assertSucceeds(setDoc(doc(anon, 'parishes/A/pendingMembers/p6'), pending()));
+  await assertSucceeds(setDoc(doc(anon, 'parishes/A/pendingMembers/p7'), pending()));
+  await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p6'), { status: 'Clarify' }));               // note required
+  await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p6'), { status: 'Clarify', clarifyNote: 'x'.repeat(301) }));
+  await assertFails(updateDoc(doc(as.adminB(), 'parishes/A/pendingMembers/p6'), { status: 'Clarify', clarifyNote: 'Which parish?' }));
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/pendingMembers/p6'), { status: 'Clarify', clarifyNote: 'Which parish?', decidedAt: 'x', decidedBy: 'uA' }));
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/pendingMembers/p6'), { status: 'Rejected', reason: 'No reply' }));  // Clarify can still be decided
+  await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p6'), { status: 'Clarify', clarifyNote: 'again' }));   // closed now
+  await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p7'), { status: 'Visitor', visitorId: 'nope' }));      // no such visitor
+  await assertFails(updateDoc(doc(a, 'parishes/A/pendingMembers/p7'), { status: 'Bogus' }));
+  const vb = writeBatch(a);
+  vb.set(doc(a, 'parishes/A/visitors/v77'), { name: 'Self Reg', nameLower: 'self reg', phone: '0803', phoneDigits: '0803', invitedBy: '',
+    firstVisit: '2026-11-04', serviceType: '', status: 'New', notes: '', consentGiven: true, createdAt: 'x', updatedAt: 'x' });
+  vb.update(doc(a, 'parishes/A/pendingMembers/p7'), { status: 'Visitor', visitorId: 'v77', decidedAt: 'x', decidedBy: 'uA' });
+  await assertSucceeds(vb.commit());
   await assertSucceeds(updateDoc(doc(a, 'joinLinks/AAA111'), { open: false }));
   await assertFails(setDoc(doc(anon, 'parishes/A/pendingMembers/p5'), pending()));         // link closed
 });
