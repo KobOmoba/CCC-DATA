@@ -2,7 +2,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc, deleteDoc, collection, collectionGroup, getDocs, query, where, orderBy, limit, writeBatch, increment, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc, deleteDoc, collection, collectionGroup, getDocs, query, where, orderBy, limit, writeBatch, increment, runTransaction, Bytes } from 'firebase/firestore';
 
 let env;
 const ctx = (uid, email) => env.authenticatedContext(uid, email ? { email } : {}).firestore();
@@ -1809,6 +1809,54 @@ test('b18 archive: parish admin adds to own parish, Super Admin to HQ; never del
   await assertSucceeds(getDoc(doc(as.hq(), 'archive/h1')));
   await assertFails(arcWrite(as.adminB(), B, 'x1', arc('A', { hidden: false, hiddenReason: 'x' }), 4, 'archive-show'));
   await assertSucceeds(arcWrite(as.named(), N, 'x1', arc('A', { hidden: false, hiddenReason: 'Restored' }), 4, 'archive-show')); // Super Admin may hide/show
+});
+// ---------------- Batch 18b: archive DEMO storage in Firestore (no R2) ----------------
+const fsArc = (pid, extra = {}) => arc(pid, { fileKey: '', storage: 'firestore', chunks: 2, pages: 1, size: 900000, ...extra });
+const bytes = (n) => Bytes.fromUint8Array(new Uint8Array(n).fill(7));
+async function fsArcAdd(db, who, id, data, chunks = [[0, 700000], [0, 200000]], { audit: withAudit = true } = {}) {
+  const b = writeBatch(db), path = 'archive/' + id;
+  b.set(doc(db, path), { version: 1, updatedAt: 'now', updatedBy: who.uid, ...data });
+  chunks.forEach(([page, n], i) => b.set(doc(db, path + '/chunks/' + i), { page, data: bytes(n) }));
+  if (withAudit) b.set(doc(db, 'auditLog/archive_' + id + '_v1'), { ...audit(path, 1, 'archive-add', who), parishId: data.parishId });
+  return b.commit();
+}
+test('b18b archive demo storage: chunks only on create by the creator, never changed or deleted; same reads as the parent', async () => {
+  const a = as.adminA(), N = { ...NAMED };
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A'), [[0, 700000]]));                               // last chunk missing
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A'), [[0, 716801], [0, 10]]));                       // chunk over 700 KB
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A', { size: 6 * 1024 * 1024 })));                   // over 5 MB demo cap
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A', { fileKey: KEY('A') })));                        // no R2 key in demo mode
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A', { mime: 'image/png' })));                        // JPEG pictures only
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A', { pages: 11, chunks: 12 }), Array.from({ length: 12 }, (_, i) => [Math.min(i, 10), 10])));
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A'), [[0, 10], [1, 10]]));                           // page beyond pages
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A', { storage: 'dropbox' })));
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A', { createdBy: 'uB' })));
+  await assertFails(fsArcAdd(as.adminB(), B, 'f1', fsArc('A', { createdBy: 'uB' })));
+  await assertFails(fsArcAdd(a, A, 'f1', fsArc('A'), undefined, { audit: false }));
+  await assertFails(arcWrite(a, A, 'r9', arc('A', { chunks: 2 }), 1));                               // r2 items carry no chunks
+  await assertSucceeds(arcWrite(a, A, 'r1', arc('A', { storage: 'r2' }), 1));                        // explicit r2 still fine
+  await assertSucceeds(fsArcAdd(a, A, 'f1', fsArc('A')));
+  await assertSucceeds(fsArcAdd(a, A, 'p1', fsArc('A', { mime: 'application/pdf', pages: 3, chunks: 3, size: 30 }), [[0, 10], [1, 10], [2, 10]]));
+  await assertSucceeds(fsArcAdd(as.named(), N, 'fh', fsArc('HQ', { createdBy: 'uNamed' })));
+  // Chunks: no later adds, no changes, no deletes (not even by the creator or Super Admin).
+  await assertFails(setDoc(doc(a, 'archive/f1/chunks/2'), { page: 0, data: bytes(5) }));
+  await assertFails(setDoc(doc(a, 'archive/f1/chunks/1'), { page: 0, data: bytes(5) }));
+  await assertFails(deleteDoc(doc(a, 'archive/f1/chunks/0')));
+  await assertFails(deleteDoc(doc(as.named(), 'archive/f1/chunks/0')));
+  await assertFails(setDoc(doc(a, 'archive/r1/chunks/0'), { page: 0, data: bytes(5) }));            // not onto an R2 item
+  // Edit / hide keep storage, chunks and pages fixed.
+  await assertSucceeds(arcWrite(a, A, 'f1', fsArc('A', { title: 'Minutes v2', titleLower: 'minutes v2' }), 2, 'archive-edit'));
+  await assertFails(arcWrite(a, A, 'f1', fsArc('A', { chunks: 1 }), 3, 'archive-edit'));
+  await assertFails(arcWrite(a, A, 'f1', fsArc('A', { storage: 'r2', fileKey: KEY('A') }), 3, 'archive-edit')); // only the migration (admin) moves it
+  await assertSucceeds(arcWrite(a, A, 'f1', fsArc('A', { hidden: true, hiddenReason: 'Duplicate' }), 3, 'archive-hide'));
+  await assertFails(deleteDoc(doc(a, 'archive/f1')));
+  // Reads follow the parent.
+  await assertSucceeds(getDocs(collection(a, 'archive/f1/chunks')));
+  await assertSucceeds(getDoc(doc(as.superA(), 'archive/f1/chunks/0')));
+  await assertSucceeds(getDoc(doc(as.hq(), 'archive/fh/chunks/0')));
+  await assertFails(getDocs(collection(as.adminB(), 'archive/f1/chunks')));
+  await assertFails(getDoc(doc(a, 'archive/fh/chunks/0')));
+  await assertFails(getDoc(doc(as.stranger(), 'archive/f1/chunks/0')));
 });
 test('b18 intake: import log accepts source intake, also for new clergy; other sources unchanged', async () => {
   const a = as.adminA();

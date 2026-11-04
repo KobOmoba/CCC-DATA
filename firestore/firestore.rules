@@ -1564,30 +1564,63 @@ service cloud.firestore {
     function archiveCats() { return ['History', 'Minutes', 'Registers', 'Certificates', 'Photos', 'Letters', 'Other']; }
     function validArchive(d, id) {
       return d.keys().hasOnly(['title', 'titleLower', 'category', 'date', 'year', 'parishId', 'parishName', 'tags', 'description',
-          'fileKey', 'fileName', 'mime', 'size', 'hidden', 'hiddenReason', 'version', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+          'fileKey', 'fileName', 'mime', 'size', 'hidden', 'hiddenReason', 'version', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy',
+          'storage', 'chunks', 'pages'])
         && str(d.title, 160) && d.titleLower == d.title.lower() && d.category in archiveCats()
         && d.date is string && (d.date == '' || d.date.matches('^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$'))
         && (d.year == null || (d.year is int && d.year >= 1900 && d.year <= 2100))
         && d.parishId is string && (d.parishId == 'HQ' || d.parishId.matches('^[A-Za-z0-9]{1,40}$')) && s(d.get('parishName', ''), 120)
         && d.tags is list && d.tags.size() <= 12 && s(d.get('description', ''), 2000)
-        && d.fileKey is string && d.fileKey.size() <= 200 && d.fileKey.matches('^' + d.parishId + '/[0-9]{4}/[0-9a-f-]{36}[.](jpg|png|webp|pdf)$')
+        && archiveStorageOk(d)
         && s(d.get('fileName', ''), 120) && d.mime in ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
-        && d.size is int && d.size > 0 && d.size <= 15728640
+        && d.size is int && d.size > 0
         && d.hidden is bool && s(d.get('hiddenReason', ''), 300) && d.updatedBy == request.auth.uid;
     }
+    // storage 'r2' (default when the field is missing): the file is in R2 under fileKey, max 15 MB.
+    // storage 'firestore' (free DEMO mode, no R2): JPEG bytes in archive/{id}/chunks/{n} (<= 700 KB each), max 5 MB,
+    // PDFs kept as up to 10 page pictures. fileKey stays '' until scripts/archive-migrate-r2.mjs moves it to R2.
+    function archiveStorageOk(d) {
+      return (d.get('storage', 'r2') == 'r2' && !d.keys().hasAny(['chunks', 'pages'])
+          && d.fileKey is string && d.fileKey.size() <= 200 && d.fileKey.matches('^' + d.parishId + '/[0-9]{4}/[0-9a-f-]{36}[.](jpg|png|webp|pdf)$')
+          && d.size is int && d.size <= 15728640)
+        || (d.get('storage', '') == 'firestore' && d.fileKey == '' && d.mime in ['image/jpeg', 'application/pdf']
+          && d.size is int && d.size <= 5242880
+          && d.chunks is int && d.chunks >= 1 && d.chunks <= 16 && d.pages is int && d.pages >= 1 && d.pages <= 10 && d.pages <= d.chunks);
+    }
+    function archiveReader(a) { return isSuper() || isHQ() || isChurchHead() || (a.parishId != 'HQ' && isParishAdminOf(a.parishId)); }
     function archiveWriter(pid) { return (pid != 'HQ' && isParishAdminOf(pid)) || isNamedSuper(); }
     match /archive/{id} {
-      allow read: if isSuper() || isHQ() || isChurchHead() || (resource.data.parishId != 'HQ' && isParishAdminOf(resource.data.parishId));
+      allow read: if archiveReader(resource.data);
       allow create: if archiveWriter(request.resource.data.parishId) && validArchive(request.resource.data, id)
         && request.resource.data.version == 1 && request.resource.data.hidden == false
         && request.resource.data.createdBy == request.auth.uid
-        && auditedAfter('archive/' + id, 1);
+        && auditedAfter('archive/' + id, 1)
+        // demo mode: the last chunk must be written in the same batch
+        && (request.resource.data.get('storage', 'r2') == 'r2'
+          || existsAfter(docAt('archive/' + id + '/chunks/' + string(request.resource.data.chunks - 1))));
       // File, parish and creator never change; only the description fields and hidden / shown.
       allow update: if archiveWriter(resource.data.parishId) && bumped() && validArchive(request.resource.data, id)
         && request.resource.data.diff(resource.data).unchangedKeys().hasAll(['parishId', 'fileKey', 'fileName', 'mime', 'size', 'createdAt', 'createdBy'])
+        && request.resource.data.get('storage', 'r2') == resource.data.get('storage', 'r2')
+        && request.resource.data.get('chunks', 0) == resource.data.get('chunks', 0) && request.resource.data.get('pages', 0) == resource.data.get('pages', 0)
         && (request.resource.data.hidden == resource.data.hidden || str(request.resource.data.get('hiddenReason', ''), 300))
         && auditedAfter('archive/' + id, request.resource.data.version);
       allow delete: if false;
+      // Demo-mode file bytes. Read = whoever reads the parent. Written once, in the parent's own create batch, by
+      // its creator; never changed, never deleted.
+      match /chunks/{n} {
+        allow read: if archiveReader(get(docAt('archive/' + id)).data);
+        allow create: if n.matches('^[0-9]{1,2}$')
+          && !exists(docAt('archive/' + id))
+          && getAfter(docAt('archive/' + id)).data.get('storage', '') == 'firestore'
+          && getAfter(docAt('archive/' + id)).data.createdBy == request.auth.uid
+          && int(n) < getAfter(docAt('archive/' + id)).data.chunks
+          && request.resource.data.keys().hasOnly(['page', 'data'])
+          && request.resource.data.page is int && request.resource.data.page >= 0
+          && request.resource.data.page < getAfter(docAt('archive/' + id)).data.pages
+          && request.resource.data.data is bytes && request.resource.data.data.size() > 0 && request.resource.data.data.size() <= 716800;
+        allow update, delete: if false;
+      }
     }
     match /auditLog/{id} {
       allow read: if isSuper() || (role() == 'parish_admin' && resource.data.parishId == profile().parishId);

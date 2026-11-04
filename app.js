@@ -2027,8 +2027,9 @@ async function moveAllPending() {
 // admin ticks people + consent and taps "Save selected", which uses the normal createRecord path (rules apply).
 const AI_URL = "https://ccc-ai.aarinat-company-limited.workers.dev/extract";
 const LIBS = {
-    pdf: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
-    pdfWorker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
+    // Batch 18b: pdf.js 3.11.174 (Apache-2.0) vendored too, so the Archive demo storage works without a CDN.
+    pdf: "vendor/pdfjs-3.11.174/pdf.min.js",
+    pdfWorker: "vendor/pdfjs-3.11.174/pdf.worker.min.js",
     // Batch 18: vendored (pinned copies served with the app, no CDN at runtime). mammoth 1.8.0 (BSD-2), SheetJS 0.18.5 (Apache-2.0).
     mammoth: "vendor/mammoth-1.8.0.browser.min.js",
     xlsx: "vendor/xlsx-0.18.5.full.min.js"

@@ -7,6 +7,10 @@
 //     its department places (same transaction) and then the committee places (one audited write per committee).
 //  2. Archive: archive/{id} in Firestore is the index; the file itself is in Cloudflare R2 behind the ccc-ai worker
 //     (POST /archive/upload, GET /archive/file?id=). Never deleted: hidden / shown again with a reason, audited.
+//     Batch 18b DEMO storage: while R2 is not switched on (worker answers 503, or ARCHIVE_STORAGE = "firestore"),
+//     files go into Firestore instead (free plan): JPEGs (long side ~1600 px) split into <= 700 KB chunks in
+//     archive/{id}/chunks/{n}; a PDF becomes up to 10 page pictures (vendored pdf.js). Max 5 MB per item.
+//     The doc says storage: "r2" | "firestore" so scripts/archive-migrate-r2.mjs can move demo items to R2 later.
 
 const AI_BASE = AI_URL.replace(/\/extract$/, "");
 const CLASSIFY_URL = AI_BASE + "/classify";
@@ -201,7 +205,19 @@ function intakeCsv() {
 // ================================================================= 2. ARCHIVE
 const AR_CATS = ["History", "Minutes", "Registers", "Certificates", "Photos", "Letters", "Other"];
 const AR_MAX = 15 * 1024 * 1024;
-let arch = { list: [], urls: {} };
+let arch = { list: [], urls: {}, mode: "" };
+// "auto" = ask the worker once (503 means R2 is not set up yet -> demo storage); "firestore" or "r2" forces a mode.
+const ARCHIVE_STORAGE = window.CCC_ARCHIVE_STORAGE || "auto";
+const AR_DEMO_MAX = 5 * 1024 * 1024, AR_CHUNK = 700 * 1024, AR_PAGES = 10, AR_DIM = 1600;
+async function archiveMode() {
+    if (arch.mode) return arch.mode;
+    if (ARCHIVE_STORAGE !== "auto") return (arch.mode = ARCHIVE_STORAGE);
+    try {
+        const token = await auth.currentUser.getIdToken();
+        const r = await fetch(`${AI_BASE}/archive/file?id=_probe`, { headers: { Authorization: "Bearer " + token } });
+        return (arch.mode = r.status === 503 ? "firestore" : "r2");
+    } catch { return "firestore"; } // worker unreachable: demo storage still works (not remembered, asked again next time)
+}
 const archWriter = () => localState.role === "parish_admin" || (inIsSuper() && (localState.name || "").length >= 3);
 const archParishName = pid => pid === "HQ" ? "Headquarters" : pid === localState.currentParishId ? (localState.parish.name || "") : ((localState.parishNames || {})[pid] || pid);
 
@@ -215,6 +231,7 @@ async function openArchive() {
             Object.entries(localState.parishNames || {}).sort((a, b) => String(a[1]).localeCompare(b[1])).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join("");
     $("ar_addBtn").classList.toggle("hidden", !archWriter());
     $("ar_hiddenBox").classList.toggle("hidden", !archWriter());
+    $("ar_demoNote").classList.toggle("hidden", !archWriter() || (await archiveMode()) !== "firestore");
     let q = db.collection("archive");
     if (!wide) q = q.where("parishId", "==", localState.currentParishId);
     else if ($("ar_parish").value) q = q.where("parishId", "==", $("ar_parish").value);
@@ -240,11 +257,20 @@ function renderArchive() {
 // Fetches the file through the worker (the token proves who is asking; Firestore rules decide).
 async function archiveBlob(id) {
     if (arch.urls[id]) return arch.urls[id];
+    if ((arch.list.find(x => x.id === id) || {}).storage === "firestore") return archivePagesBlob(id);
     const token = await auth.currentUser.getIdToken();
     const r = await fetch(`${AI_BASE}/archive/file?id=${encodeURIComponent(id)}`, { headers: { Authorization: "Bearer " + token } });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Could not open the file (" + r.status + ")");
     const blob = await r.blob();
     return (arch.urls[id] = { blob, url: URL.createObjectURL(blob) });
+}
+// Demo storage: read the chunks, join the parts of each page back into one JPEG per page.
+async function archivePagesBlob(id) {
+    const s = await db.collection("archive").doc(id).collection("chunks").get();
+    const parts = s.docs.map(d => ({ n: +d.id, ...d.data() })).sort((a, b) => a.n - b.n), pages = [];
+    for (const c of parts) (pages[c.page] ||= []).push(c.data.toUint8Array());
+    const blobs = pages.filter(Boolean).map(p => new Blob(p, { type: "image/jpeg" }));
+    return (arch.urls[id] = { blob: blobs[0], blobs, url: URL.createObjectURL(blobs[0]), urls: blobs.map(b => URL.createObjectURL(b)) });
 }
 async function archiveView(id) {
     const a = arch.list.find(x => x.id === id);
@@ -259,8 +285,11 @@ async function archiveView(id) {
            <button id="ar_hideBtn" onclick="archiveHide('${esc(id)}')" class="px-3 py-2 border rounded ${a.hidden ? "text-emerald-700" : "text-rose-700"}">${a.hidden ? "Show again" : "Hide"}</button>` : ""}
          ${archWriter() ? `<button id="ar_extractBtn" onclick="archiveExtract('${esc(id)}')" class="px-3 py-2 bg-violet-700 text-white rounded font-bold"><i class="fa-solid fa-wand-magic-sparkles"></i> Extract people</button>` : ""}`);
     try {
-        const { url } = await archiveBlob(id);
-        $("ar_viewer").innerHTML = a.mime === "application/pdf"
+        const { url, urls } = await archiveBlob(id);
+        $("ar_viewer").innerHTML = urls
+            ? `<div class="w-full space-y-2 p-2">${urls.map((u, i) => `<img src="${u}" alt="${esc(a.title)} page ${i + 1}" class="ar-page w-full rounded bg-white">`).join("")}
+               <p class="text-center text-gray-500">${a.mime === "application/pdf" ? `PDF kept as ${urls.length} page picture${urls.length === 1 ? "" : "s"} · ` : ""}demo storage</p></div>`
+            : a.mime === "application/pdf"
             ? `<div class="w-full space-y-2 p-2"><iframe src="${url}" title="${esc(a.title)}" class="w-full h-[60vh] bg-white rounded"></iframe><a href="${url}" target="_blank" rel="noopener" class="block text-center py-2 border rounded bg-white font-semibold">Open the PDF full screen</a></div>`
             : `<img id="ar_img" src="${url}" alt="${esc(a.title)}" class="max-w-full max-h-[60vh] rounded">`;
     } catch (e) { $("ar_viewer").textContent = e.message; }
@@ -268,9 +297,11 @@ async function archiveView(id) {
 async function archiveExtract(id) {
     const a = arch.list.find(x => x.id === id);
     try {
-        const { blob } = await archiveBlob(id);
+        const { blob, blobs } = await archiveBlob(id);
         closeModal("p9Modal"); showSection("intake");
-        await intakeRun([new File([blob], a.fileName || a.title, { type: a.mime })]);
+        const base = (a.fileName || a.title).replace(/\.[a-z0-9]+$/i, "");
+        await intakeRun(blobs ? blobs.map((b, i) => new File([b], `${base}${blobs.length > 1 ? "-p" + (i + 1) : ""}.jpg`, { type: "image/jpeg" }))
+            : [new File([blob], a.fileName || a.title, { type: a.mime })]);
     } catch (e) { alert("Could not read it: " + e.message); }
 }
 
@@ -280,7 +311,7 @@ function archiveForm(id) {
     const parishPick = inIsSuper() && !id ? `<label class="block text-xs font-semibold">Archive of</label><select id="af_parish" class="w-full border p-2 rounded">
         <option value="HQ">Headquarters (HQ)</option>${Object.entries(localState.parishNames || {}).map(([pid, n]) => `<option value="${esc(pid)}">${esc(n)}</option>`).join("")}</select>` : "";
     p9Modal(id ? "Edit archive item" : "Add to the archive", `<div class="space-y-2 text-xs">
-        ${id ? "" : `<label class="block font-semibold">File * (photo, scan or PDF, max 15 MB)</label><input type="file" id="af_file" accept="image/*,.heic,.pdf,application/pdf" class="w-full border p-2 rounded bg-gray-50">`}
+        ${id ? "" : `<label class="block font-semibold">File * (photo, scan or PDF, max ${arch.mode === "firestore" ? "5 MB, PDF up to 10 pages" : "15 MB"})</label><input type="file" id="af_file" accept="image/*,.heic,.pdf,application/pdf" class="w-full border p-2 rounded bg-gray-50">`}
         ${parishPick}
         <label class="block font-semibold">Title *</label><input id="af_title" maxlength="160" class="w-full border p-2.5 rounded" value="${esc(a.title || "")}" placeholder="e.g. Parochial Committee minutes, May 1990">
         <label class="block font-semibold">Category *</label><select id="af_cat" class="w-full border p-2 rounded">${AR_CATS.map(c => `<option ${a.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>
@@ -302,6 +333,37 @@ async function archivePrepare(file) {
     const bin = atob(dataUrl.split(",")[1]), bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return { body: new Blob([bytes], { type: "image/jpeg" }), mime: "image/jpeg" };
+}
+// Demo storage: one JPEG per page (photo = 1 page, PDF = up to 10 pages rendered by pdf.js), each made to fit the
+// 5 MB item cap, then split into <= 700 KB chunks.
+const dataUrlBytes = u => { const bin = atob(u.split(",")[1]), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return b; };
+async function archiveDemoPages(file) {
+    const ext = file.name.toLowerCase().split(".").pop();
+    if (file.type === "application/pdf" || ext === "pdf") {
+        await loadLib(LIBS.pdf);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
+        const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+        if (pdf.numPages > AR_PAGES) throw new Error(`This PDF has ${pdf.numPages} pages. Demo storage keeps up to ${AR_PAGES}: split it and add the parts.`);
+        const budget = Math.min(1500000, Math.floor((AR_DEMO_MAX - 50000) / pdf.numPages)), pages = [];
+        for (let p = 1; p <= pdf.numPages; p++) {
+            const page = await pdf.getPage(p), v0 = page.getViewport({ scale: 1 });
+            const vp = page.getViewport({ scale: AR_DIM / Math.max(v0.width, v0.height) });
+            const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+            const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+            await page.render({ canvasContext: x, viewport: vp }).promise;
+            const png = await new Promise(r => c.toBlob(r, "image/png"));
+            pages.push(dataUrlBytes(await compressImage(png, budget, AR_DIM)));
+        }
+        return { pages, mime: "application/pdf" };
+    }
+    let dataUrl;
+    try { dataUrl = await compressImage(file, 2500000, AR_DIM); } catch { throw new Error("This photo type cannot be read on this phone. Share it as JPG and try again."); }
+    return { pages: [dataUrlBytes(dataUrl)], mime: "image/jpeg" };
+}
+function archiveChunks(pages) {
+    const out = [];
+    pages.forEach((b, page) => { for (let i = 0; i < b.length; i += AR_CHUNK) out.push({ page, data: firebase.firestore.Blob.fromUint8Array(b.subarray(i, i + AR_CHUNK)) }); });
+    return out;
 }
 function archiveFields() {
     const title = val("af_title"), date = val("af_date");
@@ -329,6 +391,7 @@ async function archiveSave(id) {
                 if (!file) throw new Error("Choose the file first.");
                 const parishId = inIsSuper() ? $("af_parish").value : localState.currentParishId;
                 $("af_status").textContent = "Preparing the file...";
+                if ((await archiveMode()) === "firestore") { await archiveSaveDemo(f, file, parishId); closeModal("p9Modal"); return openArchive(); }
                 const { body, mime } = await archivePrepare(file);
                 if (body.size > AR_MAX) throw new Error("File over 15 MB.");
                 $("af_status").textContent = "Uploading...";
@@ -336,9 +399,10 @@ async function archiveSave(id) {
                 const r = await fetch(`${AI_BASE}/archive/upload`, { method: "POST", body, headers: { Authorization: "Bearer " + token, "Content-Type": mime,
                     "X-Parish-Id": parishId, "X-File-Name": file.name.replace(/[^\w .()-]/g, "_").slice(0, 120) } });
                 const up = await r.json().catch(() => ({}));
+                if (r.status === 503 && ARCHIVE_STORAGE === "auto") { arch.mode = "firestore"; await archiveSaveDemo(f, file, parishId); closeModal("p9Modal"); return openArchive(); }
                 if (!r.ok) throw new Error(up.error || "Upload failed (" + r.status + ")");
                 const ref = db.collection("archive").doc(), b = db.batch();
-                b.set(ref, { ...f, parishId, parishName: archParishName(parishId), fileKey: up.key, fileName: file.name.slice(0, 120), mime: up.mime, size: up.size,
+                b.set(ref, { ...f, parishId, parishName: archParishName(parishId), storage: "r2", fileKey: up.key, fileName: file.name.slice(0, 120), mime: up.mime, size: up.size,
                     hidden: false, hiddenReason: "", version: 1, createdAt: nowIso(), createdBy: localState.user.uid, updatedAt: nowIso(), updatedBy: localState.user.uid });
                 archiveAudit(b, ref.id, 1, "archive-add", parishId, { title: f.title, category: f.category, fileKey: up.key });
                 await b.commit();
@@ -346,6 +410,22 @@ async function archiveSave(id) {
             closeModal("p9Modal"); await openArchive();
         } catch (e) { $("af_status") ? $("af_status").textContent = "Not saved: " + e.message : alert("Not saved: " + e.message); }
     });
+}
+// One batch: the index doc, every chunk and the audit entry (rules accept chunks only in the parent's create batch).
+async function archiveSaveDemo(f, file, parishId) {
+    $("af_status").textContent = "Demo storage: making the pictures smaller...";
+    const { pages, mime } = await archiveDemoPages(file);
+    const size = pages.reduce((n, p) => n + p.length, 0);
+    if (size > AR_DEMO_MAX) throw new Error("Still over 5 MB after shrinking. Use fewer pages.");
+    const chunks = archiveChunks(pages);
+    $("af_status").textContent = `Saving ${pages.length} picture${pages.length === 1 ? "" : "s"} (${(size / 1024 / 1024).toFixed(1)} MB)...`;
+    const ref = db.collection("archive").doc(), b = db.batch();
+    b.set(ref, { ...f, parishId, parishName: archParishName(parishId), storage: "firestore", fileKey: "", fileName: file.name.slice(0, 120), mime, size,
+        chunks: chunks.length, pages: pages.length, hidden: false, hiddenReason: "", version: 1, createdAt: nowIso(), createdBy: localState.user.uid,
+        updatedAt: nowIso(), updatedBy: localState.user.uid });
+    chunks.forEach((c, i) => b.set(ref.collection("chunks").doc(String(i)), c));
+    archiveAudit(b, ref.id, 1, "archive-add", parishId, { title: f.title, category: f.category, storage: "firestore", pages: pages.length });
+    await b.commit();
 }
 async function archiveHide(id) {
     const a = arch.list.find(x => x.id === id), hide = !a.hidden;
