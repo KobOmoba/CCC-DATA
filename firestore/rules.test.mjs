@@ -1658,3 +1658,13 @@ test('b16 certificates: parish requests, named Super Admin issues, audited', asy
   await assertSucceeds(getDoc(doc(a, t)));
   await assertFails(getDoc(doc(as.adminB(), t)));
 });
+
+// ---- Prophet / Prophetess designation + tracks (women are never clergy) ----
+test('tracks: a woman cannot be created as clergy; prophet is a yes/no on members', async () => {
+  const a = as.adminA();
+  await assertFails(addRecord(a, 'A', 'clergy', clergy('x', 'sister.clergy@x.org', { gender: 'Female', fullName: 'Ada Olu', nameLower: 'ada olu',
+    rank: 'Mother Celestial', serviceRecord: [{ rank: 'Mother Celestial', from: '2020-01-01' }] })));
+  await assertSucceeds(addRecord(a, 'A', 'clergy', clergy('x', 'brother.clergy@x.org')));
+  await assertSucceeds(addRecord(a, 'A', 'members', person('x', { rank: 'Lace Superior Senior Elder Sister', prophet: true })));
+  await assertFails(addRecord(a, 'A', 'members', person('x', { prophet: 'yes' })));
+});

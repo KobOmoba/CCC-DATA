@@ -28,8 +28,7 @@ const RANK_SHORT = {
     Female: [["Sis.", "Sister", "SR"], ["E/S", "Elder Sister"], ["C/E/S", "Cape Elder Sister"], ["S/E/S", "Senior Elder Sister"],
         ["L/E/S", "Lace Elder Sister / Lace Senior Elder Sister", "L/S/E/S", "Lace Elder Sister", "Lace Senior Elder Sister"],
         ["S/S/E/S", "Superior Senior Elder Sister", "S/S/E"],
-        // L/S/S/E/P (with Prophetess) is the same rank; the prophetess gift is not a separate rank on the list.
-        ["L/S/S/E", "Lace Superior Senior Elder Sister", "L/S/S/E/S", "L/S/S/E/P", "L/S/S/E/S/P"],
+        ["L/S/S/E", "Lace Superior Senior Elder Sister", "L/S/S/E/S"],
         ["A/M/C", "Assistant Mother Celestial", "Asst. M/C"], ["M/C", "Mother Celestial"]]
 };
 const abbrKey = t => String(t || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -38,8 +37,28 @@ const RANK_ABBR = Object.fromEntries(Object.entries(RANK_SHORT).map(([g, rows]) 
     rows.forEach(([short, full, ...more]) => [short, full, ...more].forEach(x => m[abbrKey(x)] = full));
     return [g, m];
 }));
+// Prophet / Prophetess (P) is a yes/no designation added to the rank, not a rank of its own.
+// A short form ending in "/P" (e.g. L/S/S/E/P) = the base rank + the designation.
+const PROPHET_RE = /\s*\/\s*P\.?\s*$/i;
+const hasProphet = t => PROPHET_RE.test(String(t || ""));
+const prophetWord = g => g === "Female" ? "Prophetess" : "Prophet";
+// Rank as shown everywhere: "Lace Superior Senior Elder Sister Prophetess".
+// With P the word Sister / Brother becomes Prophetess / Prophet: "Lace Superior Senior Elder Prophetess".
+// A rank without Sister / Brother keeps its name with the word added after it.
+const rankText = (p, fallback = "") => {
+    const r = p?.rank || fallback;
+    if (!r || !p?.prophet) return r;
+    const w = prophetWord(p.gender), re = p.gender === "Female" ? /\bSister\b/g : /\bBrother\b/g;
+    return re.test(r) ? r.replace(re, w) : `${r} ${w}`;
+};
+// Tracks: men = clergy, prophet or ordinary member; women = prophetess or ordinary member. Women are never clergy.
+const FEMALE_CLERGY_MSG = "Women cannot be clergy in CCC. Add her as a member (tick Prophetess if she is one).";
 // Full rank name for a short form or full name. Without a gender, only an answer both lines agree on is returned.
 function rankFromText(t, g) {
+    const own = rankFromText1(t, g);
+    return own || (hasProphet(t) ? rankFromText1(String(t).replace(PROPHET_RE, ""), g) : "");
+}
+function rankFromText1(t, g) {
     const k = abbrKey(t);
     if (!k) return "";
     if (g === "Male" || g === "Female") return RANK_ABBR[g][k] || "";
@@ -51,22 +70,29 @@ const shortOf = r => { for (const rows of Object.values(RANK_SHORT)) { const x =
 // Member form: the short-form box picks the rank (and the gender, when it is still empty).
 function rankShortInput() {
     const t = val("p_rankShort"), g = $("p_gender").value, r = rankFromText(t, g);
-    $("p_rankShortHint").textContent = !t ? "" : r ? "= " + r : g ? `Not a ${g.toLowerCase()} rank short form` : "Choose gender first, or type a fuller short form";
+    const p = !!r && hasProphet(t);
+    $("p_rankShortHint").textContent = !t ? "" : r ? "= " + (p ? rankText({ rank: r, gender: g || genderOfRank(r), prophet: true }) : r) : g ? `Not a ${g.toLowerCase()} rank short form` : "Choose gender first, or type a fuller short form";
     if (!r) return;
     if (!g) $("p_gender").value = genderOfRank(r);
     fillRanks(r);
+    if (p) $("p_prophet").checked = true;
+    prophetLabel();
 }
 // AI data entry: a rank the reader could not match is tried against the short forms.
 function applyRankAbbr(d) {
     if (!d || !d.rankAsWritten) return;
     const r = rankFromText(d.rankAsWritten, d.gender);
     if (!r) return;
+    if (hasProphet(d.rankAsWritten)) d.prophet = true;
     d.rank = r; d.rankAsWritten = "";
     if (!d.gender) d.gender = genderOfRank(r);
 }
+// Member form: the tick box reads "Prophetess" for women, "Prophet" for men.
+function prophetLabel() { const el = $("p_prophetWord"); if (el) el.textContent = $("p_gender").value === "Female" ? "Prophetess" : $("p_gender").value === "Male" ? "Prophet" : "Prophet / Prophetess"; }
 function rankShortHelp() {
     p9Modal("Rank short forms", Object.entries(RANK_SHORT).map(([g, rows]) => `<p class="font-bold mt-1">${g === "Male" ? "Men" : "Women"}</p>
-        <table class="w-full">${rows.map(([s, f]) => `<tr class="border-t"><td class="p-1 font-mono">${esc(s)}</td><td class="p-1">${esc(f)}</td></tr>`).join("")}</table>`).join(""));
+        <table class="w-full">${rows.map(([s, f]) => `<tr class="border-t"><td class="p-1 font-mono">${esc(s)}</td><td class="p-1">${esc(f)}</td></tr>`).join("")}</table>`).join("") +
+        `<p class="mt-2">Add <b>/P</b> at the end for a Prophet (men) or Prophetess (women), e.g. <span class="font-mono">L/S/S/E/P</span>.</p>`);
 }
 
 // ================================================================= 2. RANK HISTORY
@@ -410,7 +436,7 @@ async function printProfile() {
     const entries = h ? h.entries : startEntries(p);
     showPrintSheet(`${sheetHead("Member Profile")}
         <div class="ps-top"><div class="ps-photo">${p.photo ? `<img src="${esc(p.photo)}" alt="Photo">` : "Photo"}</div><div class="ps-grow">
-            <p class="ps-name">${esc(p.fullName)}</p><p class="ps-no">${esc(displayNo(p))}</p><p class="ps-rank">${esc(p.rank || baseRank(p.gender))}</p></div></div>
+            <p class="ps-name">${esc(p.fullName)}</p><p class="ps-no">${esc(displayNo(p))}</p><p class="ps-rank">${esc(rankText(p, baseRank(p.gender)))}</p></div></div>
         ${line("Man or woman", p.gender)}${line("Married?", p.maritalStatus)}${line("Home address", p.address)}${line("Phone number", p.phone)}
         ${line("Email", p.email)}${line("Work / occupation", p.occupation)}${line("Birthday", fmtDate(p.dobDay, p.dobMonth, p.dobYear))}
         ${line("Wedding anniversary", p.weddingDay ? fmtDate(p.weddingDay, p.weddingMonth) : "")}${line("Last anointment", fmtDate(p.anointDay, p.anointMonth, p.anointYear))}
