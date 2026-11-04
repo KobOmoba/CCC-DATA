@@ -20,3 +20,46 @@ table th, table td {
     body.cert-mode #certPrint { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ---- Batch 13 palette, sampled from the official logo (assets/ccc-logo.png). ---- */
+:root {
+    --rb-1: #aa1f1b; /* red band */
+    --rb-2: #b6940b; /* yellow band */
+    --rb-3: #0a4923; /* green band */
+    --rb-4: #045c6b; /* teal-blue band */
+    --rb-5: #773246; /* purple/violet band */
+    --navy: #031d48; /* cross */
+    --navy-2: #0b2c63;
+    --gold: #b6940b; /* cross outline */
+    --gold-light: #e9c94a;
+    --page: #ffffff;
+    --rainbow: linear-gradient(90deg, var(--rb-1) 0 20%, var(--rb-2) 20% 40%, var(--rb-3) 40% 60%, var(--rb-4) 60% 80%, var(--rb-5) 80%);
+}
+body { background-color: var(--page); }
+.ccc-logo { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.rainbow-stripe { height: 4px; background: var(--rainbow); }
+.app-header { border-bottom: 0; }
+.app-header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 4px; background: var(--rainbow); }
+/* Landing: white page, navy sign-in card. */
+#landingPage { background: var(--page); color: var(--navy); }
+#landingPage .landing-card { background: linear-gradient(160deg, var(--navy), var(--navy-2)); color: #fff; border-color: transparent; }
+#accessBtn { background: var(--gold-light); color: var(--navy); }
+/* Buttons and headings stay navy (white text on navy = 16:1). */
+.bg-blue-600, .bg-blue-700, .bg-blue-900, .hover\:bg-blue-700:hover, .hover\:bg-blue-800:hover { background-color: var(--navy); }
+.text-blue-700, .text-blue-800, .text-blue-900, .text-blue-950 { color: var(--navy); }
+.att-tab.active { background: var(--navy); border-color: var(--navy); }
+aside.bg-slate-900 { background-color: var(--navy); }
+/* Section colour coding: a rainbow accent bar beside each section title. */
+main section > div:first-child h2, main section > h2 { border-left: 4px solid var(--sec, var(--navy)); padding-left: 8px; }
+main section:nth-of-type(5n+1) { --sec: var(--rb-1); }
+main section:nth-of-type(5n+2) { --sec: var(--rb-2); }
+main section:nth-of-type(5n+3) { --sec: var(--rb-3); }
+main section:nth-of-type(5n+4) { --sec: var(--rb-4); }
+main section:nth-of-type(5n+5) { --sec: var(--rb-5); }
+/* Department cards: one band colour each, cycling. */
+[id^="dept-card-"] { border-top: 4px solid var(--dc, var(--navy)); }
+[id^="dept-card-"]:nth-child(5n+1) { --dc: var(--rb-1); }
+[id^="dept-card-"]:nth-child(5n+2) { --dc: var(--rb-2); }
+[id^="dept-card-"]:nth-child(5n+3) { --dc: var(--rb-3); }
+[id^="dept-card-"]:nth-child(5n+4) { --dc: var(--rb-4); }
+[id^="dept-card-"]:nth-child(5n+5) { --dc: var(--rb-5); }

@@ -256,7 +256,7 @@ const statsRef = () => db.collection("parishStats").doc(localState.currentParish
 const counterRef = () => parishRef().collection("meta").doc("counters");
 
 // ---------------------------------------------------------------- branding
-// Church name and logo are fixed app-wide (CELESTIAL CHURCH OF CHRIST, assets/ccc-logo.webp). Old parish logo data is ignored.
+// Church name and logo are fixed app-wide (CELESTIAL CHURCH OF CHRIST, assets/ccc-logo.png). Old parish logo data is ignored.
 function showBranding(p) {
     $("dashParishName").textContent = p.name || "";
 }
@@ -1223,7 +1223,7 @@ function renderReports() {
     const max = Math.max(1, ...bs.map(b => b.total)), W = 340, H = 150, bw = W / bs.length;
     $("rpChart").innerHTML = `<svg viewBox="0 -12 ${W} ${H + 42}" class="w-full" role="img" aria-label="Attendance trend">
         ${bs.map((b, i) => { const h = Math.round((b.total / max) * H);
-            return `<rect x="${i * bw + 3}" y="${H - h}" width="${bw - 6}" height="${h}" rx="2" fill="#1e3a8a"><title>${esc(b.label)}: ${b.total}</title></rect>
+            return `<rect x="${i * bw + 3}" y="${H - h}" width="${bw - 6}" height="${h}" rx="2" style="fill:var(--rb-${i % 5 + 1})"><title>${esc(b.label)}: ${b.total}</title></rect>
             ${b.total ? `<text x="${i * bw + bw / 2}" y="${H - h - 3}" font-size="8" text-anchor="middle" fill="#374151">${b.total}</text>` : ""}
             <text x="${i * bw + bw / 2}" y="${H + 12}" font-size="7.5" text-anchor="middle" fill="#6b7280">${esc(b.label)}</text>`; }).join("")}
         <line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="#d1d5db"/></svg>`;
@@ -1812,7 +1812,7 @@ async function showCertificate(kind, id) {
     const p = d.data(), parish = localState.parish || {};
     const certNo = certNoOf(p.no);
     if (!certNo) return alert("Certificates need the parish lettering (e.g. IJY-ABK). Ask the Super Admin to set it for your parish.");
-    const logo = `<img src="assets/ccc-logo.webp" alt="Celestial Church of Christ logo" class="w-20 h-20 rounded-full object-contain mx-auto bg-white">`;
+    const logo = `<img src="assets/ccc-logo.png" alt="Celestial Church of Christ logo" class="ccc-logo h-20 w-auto object-contain mx-auto">`;
     const line = (k, v) => `<tr><td class="py-1 pr-2 text-gray-600 align-top w-2/5">${esc(k)}</td><td class="py-1 font-semibold border-b border-dotted border-gray-400">${esc(v || "-")}</td></tr>`;
     const isBirth = kind === "births";
     const rows = isBirth

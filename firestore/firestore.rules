@@ -640,9 +640,13 @@ service cloud.firestore {
       match /pendingMembers/{id} {
         allow read: if isParishAdminOf(parishId);
         allow create: if request.auth == null && validPending(parishId, request.resource.data);
-        allow update: if isParishAdminOf(parishId) && resource.data.status == 'Pending'
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reason', 'memberNo', 'decidedAt', 'decidedBy'])
+        // Batch 13: admin may also ask to clarify (stays open, note shown) or save as a visitor (friend of the house).
+        allow update: if isParishAdminOf(parishId) && resource.data.status in ['Pending', 'Clarify']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reason', 'memberNo', 'clarifyNote', 'visitorId', 'decidedAt', 'decidedBy'])
           && ((request.resource.data.status == 'Rejected' && str(request.resource.data.get('reason', ''), 300))
+            || (request.resource.data.status == 'Clarify' && str(request.resource.data.get('clarifyNote', ''), 300))
+            || (request.resource.data.status == 'Visitor' && request.resource.data.get('visitorId', '') is string
+              && existsAfter(docAt('parishes/' + parishId + '/visitors/' + request.resource.data.get('visitorId', 'x'))))
             || (request.resource.data.status == 'Approved' && existsAfter(docAt('parishes/' + parishId + '/members/' + request.resource.data.get('memberNo', 'x')))));
         allow delete: if isParishAdminOf(parishId); // NDPA: erase on request
       }
