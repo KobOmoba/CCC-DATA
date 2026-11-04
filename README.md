@@ -155,6 +155,15 @@ Open the app with `?emulator=1` to point it at local emulators instead of the li
   optional photo per card, consent required, **Save selected** uses the normal numbered `createRecord` path, so the rules apply.
 - Accuracy test: `firestore/ai-test/` (3 files + truth.json; `payloads.mjs`, `send.mjs`, `score.mjs`).
 
+## Get started + Import members (Batch 18, `p18.js`)
+- New parish dashboard shows a **Get started** checklist (public info, clergy, members, departments, this month's roster,
+  website logins), ticked automatically when the data exists. Hide it; Parish Settings > "Show Get started" brings it back.
+- **Import members**: paste many WhatsApp forms ("Name: ... Church Rank: M/C ... Date of birth: 15 April ...") or upload a CSV
+  (template download). Parsed in the browser (AI worker optional), editable preview with problems in red, duplicates by
+  name/phone flagged, then **Save all** one by one through the normal member path (resumable). Each saved member gets
+  `parishes/{p}/importLog/{no}` + an `auditLog` entry in the same transaction; passport photos can be added afterwards.
+- Test: `npm run test:e2e:b18`.
+
 ## Monthly Returns (Phase 6)
 - Parish: **Monthly Returns** tab. Income per month in 6 categories (tithes, offerings, thanksgiving, harvest, building fund, other)
   in the parish **currency** (set in Parish Settings; each return keeps the currency it was filed in). Optional receipt photo.

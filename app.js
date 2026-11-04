@@ -295,6 +295,7 @@ async function loadParishData() {
     renderReadingsCard().catch(e => console.error("readings card", e.message)); // Batch 17
     renderCelebCard().catch(e => console.error("celebrations card", e.message)); // Batch 15
     renderJoinCard().catch(e => console.error("join card", e.message)); // Phase 9b
+    renderOnboarding().catch(e => console.error("onboarding", e.message)); // Batch 18
     await checkPendingMoves().catch(e => console.error("pending moves", e.message));
     // Phase 8: record activity for the "no activity for 30 days" alert, and apply any clergy posting now due.
     await markParishActive().catch(e => console.error("activity", e.message));

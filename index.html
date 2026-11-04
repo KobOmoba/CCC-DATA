@@ -25,6 +25,7 @@
     <script src="p15.js" defer></script>
     <script src="p16.js" defer></script>
     <script src="p17.js" defer></script>
+    <script src="p18.js" defer></script>
     <style id="pageSize"></style>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
@@ -131,6 +132,7 @@
             <div class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
 
                 <section id="section-dashboard" class="space-y-4">
+                    <div class="parish-only"><div id="onboardCard" class="hidden bg-blue-50 border-2 border-blue-400 rounded-xl p-3 text-xs space-y-3 shadow-sm"></div></div>
                     <div class="bg-gradient-to-r from-blue-900 to-indigo-800 text-white p-5 rounded-xl shadow-md">
                         <h2 id="welcomeTitle" class="text-lg font-bold">Halleluyah 🙌</h2>
                         <p id="welcomeSub" class="text-xs text-blue-200 mt-1">Your parish at a glance.</p>
@@ -178,6 +180,7 @@
                         <button id="addMemberBtn" onclick="openPersonForm('members')" class="bg-blue-600 text-white px-3 py-2 rounded text-xs font-semibold shadow whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Add Member</button>
                     </div>
                     <button id="printFormBtn" onclick="printBlankForm()" class="w-full bg-white border px-3 py-2.5 rounded text-sm font-semibold"><i class="fa-solid fa-print mr-1"></i> Print blank member form</button>
+                    <button id="importBtn" onclick="openImport()" class="w-full bg-emerald-600 text-white px-3 py-3 rounded text-sm font-semibold shadow"><i class="fa-solid fa-file-import mr-1"></i> Import members (WhatsApp / CSV)</button>
                     <button id="aiEntryBtn" onclick="openAiEntry()" class="w-full bg-violet-600 text-white px-3 py-2.5 rounded text-sm font-semibold shadow"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> AI-Assisted Data Entry</button>
                     <input type="search" id="memberSearch" oninput="searchMembers()" class="w-full border p-2.5 rounded text-sm" placeholder="Filter members by name or phone">
                     <div id="membersTable" class="space-y-2"></div>
@@ -396,6 +399,7 @@
                 <!-- PARISH SETTINGS -->
                 <section id="section-settings" class="space-y-3 hidden">
                     <div class="pb-2 border-b"><h2 class="text-lg font-bold">Parish Settings</h2><p class="text-xs text-gray-500">Your parish of CELESTIAL CHURCH OF CHRIST: name and location.</p></div>
+                    <button id="showOnboardBtn" onclick="showOnboarding()" class="w-full bg-white border border-blue-300 text-blue-800 px-3 py-2.5 rounded text-sm font-semibold"><i class="fa-solid fa-rocket mr-1"></i> Show "Get started" checklist</button>
                     <div class="bg-white border rounded-xl p-4 space-y-3 text-xs">
                         <p class="font-black text-blue-950 tracking-wide">CELESTIAL CHURCH OF CHRIST</p>
                         <label class="block">Parish name *<input id="s_name" class="w-full border p-2.5 rounded mt-1"></label>
@@ -843,6 +847,49 @@
 
 
     <!-- AI-ASSISTED DATA ENTRY (Phase 5): upload a list, review each person, save selected as real members -->
+    <!-- Batch 18: bulk member import -->
+    <div id="importModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-1 overflow-y-auto">
+        <div class="bg-white w-full max-w-3xl rounded-lg shadow-xl my-1 text-sm">
+            <div class="bg-emerald-700 text-white px-4 py-3 rounded-t-lg flex justify-between items-center font-bold">
+                <span><i class="fa-solid fa-file-import mr-1"></i> IMPORT MEMBERS</span>
+                <button onclick="closeModal('importModal')" class="text-white text-lg px-2" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-3 space-y-3">
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="imp_tab_whatsapp" onclick="impTab('whatsapp')" class="py-2.5 border rounded font-semibold"><i class="fa-brands fa-whatsapp mr-1"></i> Paste WhatsApp</button>
+                    <button id="imp_tab_csv" onclick="impTab('csv')" class="py-2.5 border rounded font-semibold"><i class="fa-solid fa-table mr-1"></i> CSV / Excel</button>
+                </div>
+                <div id="imp_pane_whatsapp" class="space-y-2">
+                    <p class="text-xs text-gray-600">Copy the forms from WhatsApp (long-press, Copy) and paste them all here. Each person starts with <b>Name:</b>. Nothing is saved until you tap Save all.</p>
+                    <textarea id="imp_text" rows="7" class="w-full border p-2 rounded text-xs" placeholder="Name: ...&#10;Gender: ...&#10;Marital Status: ...&#10;Phone number: ...&#10;Church Rank: M/C&#10;Date of birth: 15 April&#10;Next of kin name: ..."></textarea>
+                    <button id="imp_parseBtn" onclick="impParsePaste()" class="w-full bg-blue-600 text-white py-3 rounded font-semibold">Read the messages</button>
+                </div>
+                <div id="imp_pane_csv" class="hidden space-y-2">
+                    <p class="text-xs text-gray-600">In Excel or Google Sheets use the template columns, then Save as / Download as <b>CSV</b>.</p>
+                    <button onclick="downloadImportTemplate()" class="w-full bg-white border py-2.5 rounded font-semibold"><i class="fa-solid fa-download mr-1"></i> Download template</button>
+                    <input type="file" id="imp_file" accept=".csv,text/csv" class="w-full border p-2 rounded bg-gray-50 text-xs">
+                    <button id="imp_csvBtn" onclick="impParseCsv()" class="w-full bg-blue-600 text-white py-3 rounded font-semibold">Read the file</button>
+                </div>
+                <p id="imp_status" class="text-xs text-gray-700"></p>
+                <div id="imp_preview" class="hidden space-y-2">
+                    <div class="flex justify-between items-center gap-2"><p id="imp_summary" class="text-xs"></p><button onclick="impReset()" class="text-xs underline text-gray-500 whitespace-nowrap">Start over</button></div>
+                    <p class="text-[11px] text-gray-500">Swipe sideways to see every column. Red = needs fixing.</p>
+                    <div class="overflow-x-auto border rounded"><table class="text-xs min-w-max"><thead class="bg-gray-100"><tr><th class="p-1 sticky left-0 bg-gray-100 text-left">#</th>
+                        <th class="p-1 text-left">Name *</th><th class="p-1 text-left">Gender *</th><th class="p-1 text-left">Marital *</th><th class="p-1 text-left">Phone</th><th class="p-1 text-left">Rank</th><th class="p-1 text-left">Birthday *</th>
+                        <th class="p-1 text-left">Address</th><th class="p-1 text-left">Occupation</th><th class="p-1 text-left">Last anointment</th><th class="p-1 text-left">Email</th><th class="p-1 text-left">Next of kin</th><th class="p-1 text-left">Kin address</th><th class="p-1 text-left">Kin phone</th></tr></thead>
+                        <tbody id="imp_rows"></tbody></table></div>
+                    <button id="imp_aiBtn" onclick="impAskAi()" class="hidden w-full bg-violet-100 text-violet-800 border border-violet-300 py-2 rounded text-xs font-semibold"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Unsure? Ask the AI to help with red rows (optional)</button>
+                    <label class="flex items-start gap-2 bg-amber-50 border border-amber-200 p-2 rounded text-xs"><input type="checkbox" id="imp_consent" class="mt-0.5 w-5 h-5"><span>Every person here has given consent for the parish to store these details (NDPA 2023). *</span></label>
+                    <button id="imp_saveBtn" onclick="impSaveAll()" class="w-full bg-green-600 text-white py-3 rounded font-bold">Save all</button>
+                </div>
+                <div id="imp_photos" class="hidden space-y-2 border-t pt-3">
+                    <p class="font-bold"><i class="fa-solid fa-camera mr-1"></i> Passport photos (optional)</p>
+                    <p class="text-xs text-gray-500">Tap a member to take a photo or pick one from the gallery.</p>
+                    <div id="imp_photoList" class="space-y-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
     <div id="aiModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-2 overflow-y-auto">
         <div class="bg-white w-full max-w-lg rounded-lg shadow-xl my-2 text-sm">
             <div class="bg-violet-700 text-white px-4 py-3 rounded-t-lg flex justify-between items-center font-bold">
