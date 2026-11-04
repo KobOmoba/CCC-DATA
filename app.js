@@ -324,7 +324,7 @@ function personCard(kind, d) {
         ${photo}
         <div class="min-w-0 flex-1"><p class="font-bold truncate">${esc(p.fullName)}${p.important ? ' <i class="fa-solid fa-star text-amber-400"></i>' : ""}</p>
         <p class="text-[11px] text-gray-500 font-mono">${esc(displayNo(p))}</p>${p.lifeNo ? `<p class="text-[11px] text-indigo-700 font-mono font-bold">${esc(lifeText(p))}</p>` : ""}
-        <p class="text-[11px] text-gray-500 truncate">${esc([p.rank, p.phone].filter(Boolean).join(" · "))}</p></div></button>`;
+        <p class="text-[11px] text-gray-500 truncate">${esc([rankText(p), p.phone].filter(Boolean).join(" · "))}</p></div></button>`;
 }
 
 async function loadPage(key, q, listId, rowFn, reset) {
@@ -455,7 +455,7 @@ function openPersonForm(kind, existing) {
     const p = existing || {};
     const set = (id, v) => $(id).value = v ?? "";
     set("p_name", p.fullName); set("p_gender", p.gender); set("p_marital", p.maritalStatus); set("p_address", p.address);
-    set("p_phone", p.phone); set("p_email", p.email); fillRanks(p.rank); set("p_rankShort", ""); $("p_rankShortHint").textContent = ""; set("p_occupation", p.occupation);
+    set("p_phone", p.phone); set("p_email", p.email); fillRanks(p.rank); $("p_prophet").checked = !!p.prophet; prophetLabel(); set("p_rankShort", ""); $("p_rankShortHint").textContent = ""; set("p_occupation", p.occupation);
     set("p_dobDay", p.dobDay); set("p_dobMonth", p.dobMonth); set("p_dobYear", p.dobYear);
     set("p_wedDay", p.weddingDay); set("p_wedMonth", p.weddingMonth);
     set("p_anDay", p.anointDay); set("p_anMonth", p.anointMonth); set("p_anYear", p.anointYear);
@@ -476,7 +476,7 @@ function openPersonForm(kind, existing) {
 function readPersonForm() {
     const p = {
         fullName: val("p_name"), gender: val("p_gender"), maritalStatus: val("p_marital"), address: val("p_address"),
-        phone: val("p_phone"), email: val("p_email").toLowerCase(), rank: val("p_rank"), occupation: val("p_occupation"),
+        phone: val("p_phone"), email: val("p_email").toLowerCase(), rank: val("p_rank"), prophet: $("p_prophet").checked, occupation: val("p_occupation"),
         dobDay: intOrNull("p_dobDay"), dobMonth: intOrNull("p_dobMonth"), dobYear: intOrNull("p_dobYear"),
         weddingDay: intOrNull("p_wedDay"), weddingMonth: intOrNull("p_wedMonth"),
         anointDay: intOrNull("p_anDay"), anointMonth: intOrNull("p_anMonth"), anointYear: intOrNull("p_anYear"),
@@ -519,6 +519,7 @@ async function createRecord(kind, p, extraWrites) {
 async function savePerson() {
     if (!requireFirebase()) return;
     const p = readPersonForm();
+    if (form.kind === "clergy" && !form.editingId && p.gender === "Female") return alert(FEMALE_CLERGY_MSG);
     const problem = checkPerson(p, form.kind);
     if (problem) return alert(problem);
     await busy("savePersonBtn", async () => {
@@ -589,7 +590,7 @@ async function openRecord(kind, id) {
     }
     $("recordBody").innerHTML = `
         <div class="flex gap-3 items-center">${p.photo ? `<img src="${esc(p.photo)}" alt="Photo" class="w-24 h-28 object-cover rounded border">` : ""}
-        <div><p class="text-base font-bold">${esc(p.fullName)}</p><p class="font-mono text-gray-500">${esc(displayNo(p))}</p><p>${esc(p.rank || "")}</p></div></div>
+        <div><p class="text-base font-bold">${esc(p.fullName)}</p><p class="font-mono text-gray-500">${esc(displayNo(p))}</p><p>${esc(rankText(p))}</p></div></div>
         <div>${row("Gender", esc(p.gender))}${row("Marital status", esc(p.maritalStatus))}${row("Phone", esc(p.phone))}${row("Email", esc(p.email))}
         ${row("Address", esc(p.address))}${row("Occupation", esc(p.occupation))}${row("Date of birth", esc(fmtDate(p.dobDay, p.dobMonth, p.dobYear)))}
         ${row("Last anointment", esc(fmtDate(p.anointDay, p.anointMonth, p.anointYear)))}
@@ -600,7 +601,7 @@ async function openRecord(kind, id) {
     const btn = (label, fn, cls) => `<button onclick="${fn}" class="px-3 py-2 rounded font-semibold ${cls}">${label}</button>`;
     let actions = "";
     if (p.status === "Active") actions += btn("Edit", "editCurrent()", "bg-blue-600 text-white");
-    if (kind === "members" && p.status === "Active") actions += btn("Ordain as clergy", "ordainCurrent()", "bg-amber-600 text-white");
+    if (kind === "members" && p.status === "Active" && p.gender !== "Female") actions += btn("Ordain as clergy", "ordainCurrent()", "bg-amber-600 text-white");
     if (kind === "clergy" && p.status === "Active") actions += btn("Transfer / move to Former", "openTransfer()", "bg-amber-700 text-white");
     if (kind === "members") actions += btn('<i class="fa-solid fa-oil-can"></i> Rank history', "openRankHistory()", "bg-amber-100 text-amber-900") // Batch 16
         + btn('<i class="fa-solid fa-print"></i> Print profile', "printProfile()", "border");
@@ -622,6 +623,7 @@ async function showLetter(id) {
 // Ordination: new CCC-CLG number; the CCC-MBR number is retired (never reused) and linked both ways.
 async function ordainCurrent() {
     const m = current.rec;
+    if (m.gender === "Female") return alert(FEMALE_CLERGY_MSG);
     const email = (prompt("Clergy need an email (it keeps clergy out of app admin). Email for " + m.fullName + ":", m.email || "") || "").trim().toLowerCase();
     if (!email) return;
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return alert("That email does not look right.");
@@ -797,7 +799,7 @@ function worldByType(all) {
 }
 function worldCard(p) {
     return `<div class="world-row bg-white border rounded-xl p-2 flex items-center gap-3 text-xs">${p.photo ? `<img src="${esc(p.photo)}" alt="" class="w-10 h-12 object-cover rounded">` : ""}
-        <div><p class="font-bold">${esc(p.fullName)}</p><p class="font-mono text-gray-500">${esc(displayNo(p))}</p><p class="text-gray-500">${esc(p.rank || "")} · ${esc(p.parish || "")}</p></div></div>`;
+        <div><p class="font-bold">${esc(p.fullName)}</p><p class="font-mono text-gray-500">${esc(displayNo(p))}</p><p class="text-gray-500">${esc(rankText(p))} · ${esc(p.parish || "")}</p></div></div>`;
 }
 function renderRegister() {
     const t = $("registerFilter").value.trim().toLowerCase();
@@ -2168,7 +2170,7 @@ function renderAiCards() {
               <input type="checkbox" class="ai-pick mt-1 w-5 h-5" ${x.selected ? "checked" : ""} ${x.saved ? "disabled" : ""} onchange="ai.people[${i}].selected=this.checked" aria-label="Select ${esc(d.fullName)}">
               ${x.photo ? `<img src="${x.photo}" class="w-12 h-12 rounded object-cover" alt="">` : ""}
               <div class="flex-1 min-w-0"><div class="font-bold text-base">${esc(d.fullName || "(no name)")}</div>
-                <div class="text-xs text-gray-500">${esc([d.gender, d.maritalStatus, d.rank].filter(Boolean).join(" · "))}</div></div>
+                <div class="text-xs text-gray-500">${esc([d.gender, d.maritalStatus, rankText(d)].filter(Boolean).join(" · "))}</div></div>
               ${x.saved ? "" : `<button onclick="aiEdit(${i}, ${!x.editing})" class="ai-edit px-3 py-1.5 border rounded text-xs font-semibold bg-white"><i class="fa-solid fa-pen mr-1"></i>${x.editing ? "Close" : "Edit"}</button>`}
             </div>
             ${x.dup ? `<div class="ai-dup mt-2 text-xs text-amber-800 bg-amber-100 rounded p-2"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Possible duplicate: already have ${esc(x.dup)}. Unticked; tick only if this is a different person.</div>` : ""}
@@ -2200,7 +2202,7 @@ async function saveAiSelected() {
         for (const x of picked) {
             const d = x.d;
             const p = { fullName: d.fullName.trim(), gender: d.gender, maritalStatus: d.maritalStatus, address: d.address || "",
-                phone: d.phone || "", email: (d.email || "").toLowerCase(), rank: ranksFor(d.gender).includes(d.rank) ? d.rank : "",
+                phone: d.phone || "", email: (d.email || "").toLowerCase(), rank: ranksFor(d.gender).includes(d.rank) ? d.rank : "", prophet: !!d.prophet,
                 occupation: d.occupation || "", dobDay: d.dobDay || null, dobMonth: d.dobMonth || null, dobYear: d.dobYear || null,
                 anointDay: d.anointDay || null, anointMonth: d.anointMonth || null, anointYear: d.anointYear || null,
                 nokName: d.nokName || "", nokAddress: d.nokAddress || "", nokPhone: d.nokPhone || "",

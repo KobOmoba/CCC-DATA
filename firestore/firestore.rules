@@ -81,7 +81,7 @@ service cloud.firestore {
       return ['memberNo', 'fullName', 'nameLower', 'gender', 'maritalStatus', 'address', 'phone', 'phoneDigits',
         'email', 'rank', 'occupation', 'dobDay', 'dobMonth', 'dobYear', 'anointDay', 'anointMonth', 'anointYear',
         'nokName', 'nokAddress', 'nokPhone', 'photo', 'important', 'status', 'consentGiven', 'consentDate',
-        'createdAt', 'updatedAt', 'weddingDay', 'weddingMonth'];
+        'createdAt', 'updatedAt', 'weddingDay', 'weddingMonth', 'prophet'];
     }
     // Compact helpers: Firestore caps a request at 1000 evaluated expressions, so these stay small.
     function s(v, max) { return v is string && v.size() <= max; }
@@ -94,7 +94,7 @@ service cloud.firestore {
         && s(d.get('occupation', ''), 80) && s(d.get('nokName', ''), 120) && s(d.get('nokAddress', ''), 200)
         && s(d.get('nokPhone', ''), 20)
         && (d.get('email', '') == '' || (isEmail(d.email) && d.email == d.email.lower()))
-        && (d.get('rank', '') == '' || isRank(d.rank, d.gender))
+        && (d.get('rank', '') == '' || isRank(d.rank, d.gender)) && d.get('prophet', false) is bool
         && n(d.dobDay, 1, 31) && d.dobDay != null && n(d.dobMonth, 1, 12) && d.dobMonth != null
         && n(d.get('dobYear', null), 1900, 2100) && n(d.get('anointDay', null), 1, 31)
         && n(d.get('anointMonth', null), 1, 12) && n(d.get('anointYear', null), 1900, 2100)
@@ -618,7 +618,7 @@ service cloud.firestore {
       match /clergy/{clergyId} {
         allow read: if isParishAdminOf(parishId) || isSuper();
         allow create: if (isParishAdminOf(parishId) || (isNamedSuper() && 'postingId' in request.resource.data))
-          && validClergy(request.resource.data, clergyId)
+          && validClergy(request.resource.data, clergyId) && request.resource.data.gender == 'Male'
           && request.resource.data.status == 'Active'
           && takesNextNumber(parishId, 'clg', 'CLG-', clergyId)
           && (!('postingId' in request.resource.data) || postingArrives(parishId, request.resource.data, clergyId));
@@ -1181,7 +1181,7 @@ service cloud.firestore {
     // writes alongside the member record. No address, next of kin, birth year or family (hasOnly enforces it).
     // Super Admin reads all; a parish reads only its own; only the Super Admin changes `committees`.
     function dirKeys() {
-      return ['parishId', 'memberNo', 'fullName', 'nameLower', 'photo', 'gender', 'rank', 'occupation', 'occLower', 'phone',
+      return ['parishId', 'memberNo', 'fullName', 'nameLower', 'photo', 'gender', 'rank', 'prophet', 'occupation', 'occLower', 'phone',
         'parishName', 'city', 'cityLower', 'country', 'status', 'departments', 'attendance', 'rankHistory', 'anointed',
         'giving', 'committees', 'updatedAt'];
     }
@@ -1190,7 +1190,7 @@ service cloud.firestore {
         && getAfter(docAt('parishes/' + d.parishId + '/members/' + d.memberNo)).data.fullName == d.fullName
         && d.nameLower == d.fullName.lower()
         && (d.get('photo', '') == '' || (s(d.photo, 110000) && d.photo.matches('^data:image/(jpeg|png|webp);base64,.*')))
-        && s(d.get('rank', ''), 60) && s(d.get('occupation', ''), 80) && d.get('occLower', '') == d.get('occupation', '').lower()
+        && s(d.get('rank', ''), 60) && d.get('prophet', false) is bool && s(d.get('occupation', ''), 80) && d.get('occLower', '') == d.get('occupation', '').lower()
         && s(d.get('phone', ''), 20) && s(d.get('city', ''), 80) && d.get('cityLower', '') == d.get('city', '').lower()
         && d.get('departments', []) is list && d.get('departments', []).size() <= 60
         && d.get('rankHistory', []) is list && d.get('rankHistory', []).size() <= 40

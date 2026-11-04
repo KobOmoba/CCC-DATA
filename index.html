@@ -834,7 +834,7 @@
                 </div>
                 <label class="block">Full name *<input id="p_name" class="w-full border p-2.5 rounded mt-1"></label>
                 <div class="grid grid-cols-2 gap-2">
-                    <label>Gender *<select id="p_gender" onchange="fillRanks($('p_rank').value)" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Male</option><option>Female</option></select></label>
+                    <label>Gender *<select id="p_gender" onchange="fillRanks($('p_rank').value); prophetLabel()" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Male</option><option>Female</option></select></label>
                     <label>Marital status *<select id="p_marital" class="w-full border p-2.5 rounded mt-1 bg-white"><option value="">Select</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option><option>Separated</option></select></label>
                 </div>
                 <label class="block">Address<input id="p_address" class="w-full border p-2.5 rounded mt-1"></label>
@@ -845,6 +845,7 @@
                 <div class="grid grid-cols-3 gap-2"><label class="col-span-2">Church rank<select id="p_rank" class="rank-select w-full border p-2.5 rounded mt-1 bg-white"></select></label>
                     <label>Short form<input id="p_rankShort" oninput="rankShortInput()" class="w-full border p-2.5 rounded mt-1" placeholder="e.g. M/C"></label></div>
                 <p id="p_rankShortHint" class="text-[11px] text-gray-500"></p>
+                <label class="flex items-center gap-2"><input id="p_prophet" type="checkbox"> <span><span id="p_prophetWord">Prophet / Prophetess</span> (P), shown after the rank</span></label>
                 <label class="block">Occupation<input id="p_occupation" class="w-full border p-2.5 rounded mt-1"></label>
                 <fieldset><legend>Date of birth * (year optional)</legend>
                     <div class="grid grid-cols-3 gap-2 mt-1"><select id="p_dobDay" class="day-select border p-2.5 rounded bg-white"></select><select id="p_dobMonth" class="month-select border p-2.5 rounded bg-white"></select><select id="p_dobYear" class="year-select border p-2.5 rounded bg-white"></select></div>

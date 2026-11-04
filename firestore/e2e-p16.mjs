@@ -142,7 +142,26 @@ try {
   await addPerson('members', { name: 'Adebayo Kolawole', gender: 'Male', phone: '08030000002', dob: T40, short: 'S/E/B' });
   await addPerson('members', { name: 'Funke Bello', gender: 'Female', phone: '08030000003', dob: T40, anYear: Y - 1, short: 'E/S' });
   await addPerson('members', { name: 'Grace Eze', gender: 'Female', phone: '08030000004', dob: T40, short: 'M/C' });
+  await addPerson('members', { name: 'Bisi Lawal', gender: 'Female', phone: '08030000005', dob: T40, short: 'L/S/S/E/P' });
   noFail(d0);
+  // Prophet / Prophetess (P): a yes/no add-on to the rank, shown after the rank name.
+  const pp = await page.evaluate(async () => { const m = (await parishRef().collection('members').where('fullName', '==', 'Bisi Lawal').get()).docs[0].data();
+    const dir = (await db.collection('directory').doc(localState.currentParishId + '_' + m.memberNo).get()).data();
+    return [m.rank, m.prophet, dir.prophet, rankText(m), rankText({ rank: 'Senior Evangelist', gender: 'Male', prophet: true }), rankText({ rank: 'Mother Celestial', gender: 'Female' }),
+      rankFromText('S/E/P', 'Male'), hasProphet('L/S/S/E'), hasProphet('L/S/S/E/P')]; });
+  assert.deepEqual(pp, ['Lace Superior Senior Elder Sister', true, true, 'Lace Superior Senior Elder Prophetess', 'Senior Evangelist Prophet',
+    'Mother Celestial', 'Senior Evangelist', false, true]);
+  assert.equal(await page.evaluate(() => rankText({ rank: 'Senior Elder Brother', gender: 'Male', prophet: true })), 'Senior Elder Prophet');
+  // Women are never clergy: the clergy form refuses her, and a female member has no "Ordain" button.
+  d0 = dialogs.length;
+  await page.evaluate(async () => { openPersonForm('clergy'); $('p_name').value = 'Sade Clergy'; $('p_gender').value = 'Female'; fillRanks('');
+    $('p_marital').value = 'Married'; $('p_phone').value = '08030000009'; $('p_email').value = 'sade@x.org'; $('p_dobDay').value = '1'; $('p_dobMonth').value = '1';
+    $('p_consent').checked = true; await savePerson(); closeModal('personModal'); });
+  assert.ok(dialogs.slice(d0).some(m => /cannot be clergy/.test(m)), 'female clergy refused');
+  assert.equal(await page.evaluate(async () => (await parishRef().collection('clergy').where('fullName', '==', 'Sade Clergy').get()).size), 0);
+  await page.evaluate(async () => { const no = (await parishRef().collection('members').where('fullName', '==', 'Bisi Lawal').get()).docs[0].id; await openRecord('members', no); });
+  assert.equal(await page.locator('#recordActions button:has-text("Ordain")').count(), 0);
+  await page.evaluate(() => closeModal('recordModal'));
   const ranks = await page.evaluate(async () => Object.fromEntries((await parishRef().collection('members').get()).docs.map(d => [d.data().fullName, d.data().rank])));
   assert.equal(ranks['Adebayo Kolawole'], 'Senior Elder Brother');
   assert.equal(ranks['Grace Eze'], 'Mother Celestial');

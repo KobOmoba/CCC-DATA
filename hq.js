@@ -20,7 +20,7 @@ const dirRef = (pid, no) => db.collection("directory").doc(`${pid}_${no}`);
 function dirProfile(m) {
     const par = localState.parish || {};
     return { parishId: localState.currentParishId, memberNo: m.memberNo, fullName: m.fullName, nameLower: m.fullName.toLowerCase(),
-        photo: m.photo || "", gender: m.gender || "", rank: m.rank || "", occupation: m.occupation || "",
+        photo: m.photo || "", gender: m.gender || "", rank: m.rank || "", prophet: !!m.prophet, occupation: m.occupation || "",
         occLower: (m.occupation || "").toLowerCase(), phone: m.phone || "", parishName: par.name || "", city: par.city || "",
         cityLower: (par.city || "").toLowerCase(), country: par.country || "", status: m.status || "Active",
         anointed: m.anointYear || m.anointDay ? { day: m.anointDay || null, month: m.anointMonth || null, year: m.anointYear || null } : {} };
@@ -104,7 +104,7 @@ const dirCard = d => { const x = d.data();
     return `<button onclick="openDirEntry('${esc(d.id)}')" class="dir-row w-full bg-white border rounded-xl p-2 flex items-center gap-3 text-left text-xs">
         ${x.photo ? `<img src="${esc(x.photo)}" alt="" class="w-10 h-12 object-cover rounded">` : `<span class="w-10 h-12 rounded bg-gray-100 flex items-center justify-center text-gray-400"><i class="fa-solid fa-user"></i></span>`}
         <span class="flex-1 min-w-0"><b>${esc(x.fullName)}</b> <span class="font-mono text-gray-500">${esc(x.memberNo)}</span><br>
-        <span class="text-gray-600">${esc([x.rank, x.occupation].filter(Boolean).join(" · "))}</span><br><span class="text-gray-500">${esc(x.parishName)}, ${esc(x.city)}</span></span></button>`; };
+        <span class="text-gray-600">${esc([rankText(x), x.occupation].filter(Boolean).join(" · "))}</span><br><span class="text-gray-500">${esc(x.parishName)}, ${esc(x.city)}</span></span></button>`; };
 function loadDirectory(more) {
     return pagedList("dir", dirQuery(), "dir_list", dirCard, more, "No members found. Parishes fill the directory when their admin opens the app.");
 }
@@ -118,7 +118,7 @@ async function openDirEntry(id) {
     const list = (arr, f) => (arr || []).length ? arr.map(f).join("") : `<p class="text-gray-400 italic">None recorded.</p>`;
     $("dirTitle").textContent = x.memberNo;
     $("dirBody").innerHTML = `<div class="flex gap-3">${x.photo ? `<img src="${esc(x.photo)}" alt="" class="w-20 h-24 object-cover rounded">` : ""}
-        <div><p class="text-base font-bold">${esc(x.fullName)}</p><p>${esc(x.rank || "No rank")} · ${esc(x.gender)}</p><p>${esc(x.occupation || "")}</p>
+        <div><p class="text-base font-bold">${esc(x.fullName)}</p><p>${esc(rankText(x) || "No rank")} · ${esc(x.gender)}</p><p>${esc(x.occupation || "")}</p>
         <p>${esc(x.parishName)}, ${esc(x.city)}, ${esc(x.country)}</p><p>${x.phone ? `<a class="text-blue-700 underline" href="tel:${esc(x.phone)}">${esc(x.phone)}</a>` : ""}</p><p class="text-gray-500">${esc(x.status)}</p></div></div>
         <p class="font-bold mt-2">Physical</p>
         <p>Attendance: best run ${x.attendance?.streak || 0} sessions · ${x.attendance?.sessions12w || 0} in the last 12 weeks · last seen ${esc(x.attendance?.lastSeen || "—")}</p>
