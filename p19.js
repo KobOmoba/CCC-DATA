@@ -24,6 +24,7 @@ const inIsSuper = () => localState.role === "super_admin";
 function openIntake() {
     $("in_superNote").classList.toggle("hidden", !inIsSuper());
     $("in_previewBtn").classList.toggle("hidden", inIsSuper());
+    $("in_hqBtn").classList.toggle("hidden", !inIsSuper());
     renderIntake();
 }
 const intakeUnits = () => (inIsSuper() ? DEPTS.map(d => [d.id, d.name]) : allUnits()).map(([id, name]) => ({ id, name }));
@@ -31,9 +32,8 @@ const intakeCommittees = () => inIsSuper() ? [] : pcAll.filter(c => c.status ===
 
 // One file -> list of inputs for the worker: [{text}] or [{file, mime}].
 async function intakeInputs(file) {
-    const name = file.name.toLowerCase(), ext = name.split(".").pop();
-    const isHeic = /hei[cf]$/.test(ext) || /hei[cf]/.test(file.type);
-    if (file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext)) {
+    const kind = await sniffKind(file), isHeic = /hei[cf]/.test((file.name || "").toLowerCase() + file.type);
+    if (kind === "image") {
         try { // HEIC -> JPEG where the phone can decode it; otherwise send the HEIC itself (the AI reads it).
             const dataUrl = await compressImage(file, 1500000, 2000);
             return [{ file: dataUrl.split(",")[1], mime: "image/jpeg" }];
@@ -43,12 +43,12 @@ async function intakeInputs(file) {
             return [{ file: await fileToBase64(file), mime: "image/heic" }];
         }
     }
-    if (ext === "pdf" || file.type === "application/pdf") {
+    if (kind === "pdf") {
         if (file.size > MAX_AI_FILE) throw new Error("PDF over 6 MB. Split it or take photos of the pages.");
         return [{ file: await fileToBase64(file), mime: "application/pdf" }];
     }
-    if (["txt", "csv", "xlsx", "xls", "docx"].includes(ext)) return textChunks((await readListFile(file)).text);
-    throw new Error("Not supported. Use photos, PDF, DOCX, XLSX, CSV or TXT.");
+    if (["txt", "csv", "xlsx", "xls", "docx", "doc", "rtf"].includes(kind)) return textChunks((await readListFile(file)).text);
+    throw new Error("Not supported. Use Word (DOC/DOCX), PDF, Excel (XLSX/XLS), CSV, TXT or photos.");
 }
 // Long text goes in pieces, cut at blank lines, so nobody is lost at the AI's size limit.
 function textChunks(text) {
@@ -157,7 +157,9 @@ function resolvePlacement(r) {
 }
 function intakePreview() {
     if (!intake.people.length) return;
-    imp = { rows: intake.people.map(intakeRow), source: "intake" };
+    // Super Admin: into HQ's own records (hqMembers) as plain members; never into a parish.
+    imp = { rows: intake.people.map(intakeRow), source: "intake", hq: inIsSuper() };
+    if (imp.hq) imp.rows.forEach(r => { r.track = "Member"; r.deptIds = []; r.cmts = []; delete r.problems.track; delete r.problems.deptText; delete r.problems.cmtText; delete r.problems.email; });
     $("imp_text").value = ""; $("imp_file").value = ""; $("imp_consent").checked = false;
     impTab("intake");
     impCheckDuplicates().then(() => { saveImpState(); renderImport(); });

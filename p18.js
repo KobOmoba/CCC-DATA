@@ -216,11 +216,12 @@ function downloadImportTemplate() {
 
 // ================================================================= 3. IMPORT UI
 let imp = { rows: [], source: "whatsapp" };
-const IMP_STORE = () => "ccc-import-" + localState.currentParishId;
-const saveImpState = () => lsSet(IMP_STORE(), JSON.stringify({ rows: imp.rows.map(({ photoBusy, ...r }) => r), source: imp.source }));
+const impHq = () => localState.role === "super_admin"; // Super Admin imports into HQ's own records only
+const IMP_STORE = () => "ccc-import-" + (impHq() ? "HQ" : localState.currentParishId);
+const saveImpState = () => lsSet(IMP_STORE(), JSON.stringify({ rows: imp.rows.map(({ photoBusy, ...r }) => r), source: imp.source, hq: !!imp.hq }));
 function openImport() {
-    imp = { rows: [], source: "whatsapp" };
-    try { const s = JSON.parse(lsGet(IMP_STORE()) || "null"); if (s && s.rows && s.rows.some(r => !r.saved)) imp = s; } catch { /* ignore */ }
+    imp = { rows: [], source: "whatsapp", hq: impHq() };
+    try { const s = JSON.parse(lsGet(IMP_STORE()) || "null"); if (s && s.rows && s.rows.some(r => !r.saved)) imp = { ...s, hq: impHq() }; } catch { /* ignore */ }
     $("imp_text").value = ""; $("imp_file").value = ""; $("imp_consent").checked = false;
     $("imp_status").textContent = imp.rows.length ? `You have an unfinished import (${imp.rows.filter(r => !r.saved).length} not saved yet). Fix and tap Save all to continue, or Start over.` : "";
     impTab(["csv", "intake"].includes(imp.source) ? imp.source : "whatsapp");
@@ -240,14 +241,49 @@ async function impParsePaste() {
     await impCheckDuplicates(); saveImpState(); renderImport();
     $("imp_status").textContent = `Found ${rows.length} ${rows.length === 1 ? "person" : "people"}. Check the red cells, then tap Save all.`;
 }
+async function impReadWithIntake(files) {
+    $("imp_status").textContent = `Reading ${files.length} file${files.length === 1 ? "" : "s"} with the AI... this can take a minute.`;
+    await busy("imp_csvBtn", () => intakeRun(files));
+    const failed = intake.files.filter(x => x.status === "Failed");
+    if (!intake.people.length) {
+        $("imp_status").textContent = "No people found. " + failed.map(x => `${x.name}: ${x.error}`).join(" ");
+        return;
+    }
+    intakePreview();
+    if (failed.length) $("imp_status").textContent += " Not read: " + failed.map(x => `${x.name} (${x.error})`).join("; ");
+}
 async function impParseCsv() {
-    const f = $("imp_file").files[0];
-    if (!f) return alert("Choose a CSV file first.");
-    try { imp.rows = parseCsv(await f.text()); } catch (e) { return alert(e.message); }
+    const files = [...$("imp_file").files], f = files[0];
+    if (!f) return alert("Choose a file first.");
+    // Word / Excel / PDF / photos (and CSVs that are not the template) go through the Data Intake reader (p19.js).
+    let rows = null;
+    if (files.length === 1 && ["csv", "txt"].includes(await sniffKind(f))) { try { rows = parseCsv(await f.text()); } catch { rows = null; } }
+    if (!rows || !rows.length) return impReadWithIntake(files);
+    imp.rows = rows;
     if (!imp.rows.length) return alert("The file has no member rows.");
     imp.source = "csv";
     await impCheckDuplicates(); saveImpState(); renderImport();
     $("imp_status").textContent = `Read ${imp.rows.length} rows. Check the red cells, then tap Save all.`;
+}
+async function findHqDuplicate(x) {
+    const hits = new Set(), name = x.d.fullName.trim().toLowerCase(), phone = (x.d.phone || "").replace(/\D/g, "");
+    const qs = [db.collection("hqMembers").where("nameLower", "==", name).limit(3)];
+    if (phone.length >= 7) qs.push(db.collection("hqMembers").where("phoneDigits", "==", phone).limit(3));
+    for (const q of qs) (await q.get().catch(() => ({ docs: [] }))).docs.forEach(d => hits.add(`${d.id} (${d.data().fullName})`));
+    x.dup = [...hits].join(", ");
+}
+// HQ's own member record: CCC-HQ-MBR-001.., counter hqMeta/members, audited (see firestore.rules hqMembers).
+function createHqMember(p, source) {
+    const cRef = db.collection("hqMeta").doc("members");
+    return db.runTransaction(async t => {
+        const c = await t.get(cRef);
+        const n = (c.exists ? c.data().n : 0) + 1, id = "CCC-HQ-MBR-" + pad3(n);
+        const rec = { ...p, memberNo: id, source, version: 1, createdBy: localState.user.uid };
+        t.set(cRef, { n });
+        t.set(db.collection("hqMembers").doc(id), rec);
+        writeAudit(t, "hqMembers/" + id, 1, "import-hq-member", null, { memberNo: id, fullName: p.fullName, source });
+        return id;
+    });
 }
 // Duplicates by phone or name: against members/clergy already saved, and inside this import.
 async function impCheckDuplicates() {
@@ -255,7 +291,7 @@ async function impCheckDuplicates() {
     for (const [i, r] of imp.rows.entries()) {
         if (r.saved) continue;
         const x = { d: { fullName: r.fullName || "", phone: r.phone } };
-        await findDuplicate(x);
+        if (imp.hq) await findHqDuplicate(x); else await findDuplicate(x);
         const n = r.fullName.toLowerCase(), p = r.phone.replace(/\D/g, ""), inside = [];
         if (n && seenN[n] != null) inside.push(`row ${seenN[n] + 1} (same name)`);
         if (p.length >= 7 && seenP[p] != null) inside.push(`row ${seenP[p] + 1} (same phone)`);
@@ -270,8 +306,9 @@ const IMP_COLS = [["fullName", "Name *", "w-40"], ["gender", "Gender *", "w-24"]
 // Batch 18: rows from the Data Intake agent carry placement columns too (see p19.js).
 const IMP_X_COLS = [["track", "Member / Clergy", "w-28"], ["prophetFlag", "Prophet(ess)?", "w-24"], ["deptText", "Departments (Choir, Sidemen)", "w-44"],
     ["deptRole", "Role in unit", "w-28"], ["cmtText", "Committees (name: role; ...)", "w-56"]];
-const impCols = () => imp.source !== "intake" ? IMP_COLS : [IMP_COLS[0], IMP_COLS[1], ...IMP_X_COLS, ...IMP_COLS.slice(2)];
+const impCols = () => imp.source !== "intake" || imp.hq ? IMP_COLS : [IMP_COLS[0], IMP_COLS[1], ...IMP_X_COLS, ...IMP_COLS.slice(2)];
 function renderImport() {
+    $("imp_title").textContent = imp.hq ? "IMPORT INTO HQ RECORDS" : "IMPORT MEMBERS";
     $("imp_head").innerHTML = `<th class="p-1 sticky left-0 bg-gray-100 text-left">#</th>` + impCols().map(([, l]) => `<th class="p-1 text-left">${esc(l)}</th>`).join("");
     const rows = imp.rows, saved = rows.filter(r => r.saved).length, bad = rows.filter(r => !r.saved && Object.keys(r.problems).length).length;
     $("imp_preview").classList.toggle("hidden", !rows.length);
@@ -348,11 +385,16 @@ async function impSaveAll() {
                 anointDay: r.anointDay, anointMonth: r.anointMonth, anointYear: r.anointYear, nokName: (r.nokName || "").slice(0, 120), nokAddress: (r.nokAddress || "").slice(0, 200),
                 nokPhone: r.nokPhone, photo: "", important: false, consentGiven: true, updatedAt: nowIso() };
             p.nameLower = p.fullName.toLowerCase(); p.phoneDigits = p.phone.replace(/\D/g, "");
-            const kind = r.intake && r.track === "Clergy" ? "clergy" : "members", source = ["csv", "intake"].includes(imp.source) ? imp.source : "whatsapp";
+            const kind = r.intake && r.track === "Clergy" && !imp.hq ? "clergy" : "members", source = ["csv", "intake"].includes(imp.source) ? imp.source : "whatsapp";
             const problem = checkPerson(p, kind);
             if (problem) { r.error = problem; continue; }
             p.status = "Active"; p.consentDate = today(); p.createdAt = nowIso();
             if (kind === "clergy") p.serviceRecord = p.rank ? [{ rank: p.rank, from: today() }] : [];
+            if (imp.hq) {
+                try { r.saved = await createHqMember(p, source); r.error = ""; ok++; }
+                catch (e) { console.error("hq import save", e.code, e.message); r.error = "Not saved: " + e.message; }
+                saveImpState(); renderImport(); continue;
+            }
             try {
                 r.saved = await createRecord(kind, p, (t, id) => {
                     const target = `parishes/${localState.currentParishId}/importLog/${id}`;
@@ -366,20 +408,20 @@ async function impSaveAll() {
             } catch (e) { console.error("import save", e.code, e.message); r.error = "Not saved: " + e.message; }
             saveImpState(); renderImport();
         }
-        if (ok && imp.source === "intake" && typeof intakeSaveCommittees === "function") await intakeSaveCommittees(todo.filter(x => x.saved)); // Batch 18
+        if (ok && imp.source === "intake" && !imp.hq && typeof intakeSaveCommittees === "function") await intakeSaveCommittees(todo.filter(x => x.saved)); // Batch 18
         saveImpState(); renderImport();
         const left = imp.rows.filter(x => !x.saved && !x.skip).length;
         $("imp_status").textContent = `Saved ${ok} member${ok === 1 ? "" : "s"}.` + (left ? ` ${left} still to fix - see the notes on the left, then tap Save all again.` : " All done. Add passport photos below.")
             + (imp.cmtNote ? " " + imp.cmtNote : "");
         if (!left) lsSet(IMP_STORE(), JSON.stringify({ rows: [], source: imp.source }));
-        if (ok) { await Promise.all([loadMembers(true), refreshTotals()]).catch(() => {}); renderOnboarding().catch(() => {}); }
+        if (ok && !imp.hq) { await Promise.all([loadMembers(true), refreshTotals()]).catch(() => {}); renderOnboarding().catch(() => {}); }
     });
 }
 
 // ================================================================= 4. PASSPORT PHOTOS AFTERWARDS
 function renderImportPhotos() {
     const saved = imp.rows.map((r, i) => ({ r, i })).filter(x => x.r.saved);
-    $("imp_photos").classList.toggle("hidden", !saved.length);
+    $("imp_photos").classList.toggle("hidden", !saved.length || !!imp.hq);
     $("imp_photoList").innerHTML = saved.map(({ r, i }) => `<label class="imp-photo flex items-center gap-3 border rounded-lg p-2 bg-white active:bg-blue-50 cursor-pointer" data-no="${esc(r.saved)}">
         ${r.hasPhoto ? `<span class="w-12 h-12 rounded bg-emerald-100 flex items-center justify-center text-emerald-700"><i class="fa-solid fa-check"></i></span>` : `<span class="w-12 h-12 rounded bg-gray-100 flex items-center justify-center text-gray-500"><i class="fa-solid fa-camera"></i></span>`}
         <span class="flex-1 min-w-0"><span class="block font-semibold truncate">${esc(r.fullName)}</span><span class="block text-[11px] text-gray-500">${esc(r.saved)} · ${r.hasPhoto ? "Photo added (tap to change)" : "Tap to add passport photo"}</span></span>

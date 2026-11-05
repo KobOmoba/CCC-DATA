@@ -1175,11 +1175,28 @@ service cloud.firestore {
     function staffNoFor(n) { return 'CCC-HQ-STF-' + pad3(n); }
     match /hqMeta/{k} {
       allow read: if isNamedSuper();
-      allow create, update: if isNamedSuper() && k == 'staff' && request.resource.data.keys().hasOnly(['n'])
-        && request.resource.data.n == staffCount() + 1
-        && existsAfter(docAt('hqStaff/' + staffNoFor(request.resource.data.n)))
-        && !exists(docAt('hqStaff/' + staffNoFor(request.resource.data.n)));
+      allow create, update: if isNamedSuper() && request.resource.data.keys().hasOnly(['n'])
+        && ((k == 'staff' && request.resource.data.n == staffCount() + 1
+              && existsAfter(docAt('hqStaff/' + staffNoFor(request.resource.data.n)))
+              && !exists(docAt('hqStaff/' + staffNoFor(request.resource.data.n))))
+          || (k == 'members' && request.resource.data.n == hqMbrCount() + 1
+              && existsAfter(docAt('hqMembers/' + hqMbrNoFor(request.resource.data.n)))
+              && !exists(docAt('hqMembers/' + hqMbrNoFor(request.resource.data.n)))));
       allow delete: if false;
+    }
+    // ---- HQ's OWN member records: hqMembers/CCC-HQ-MBR-001. Super Admin imports into HQ's space only
+    // (never into a parish: parish member rules stay parish-admin only). Same person checks as parish members. ----
+    function hqMbrCount() { return exists(docAt('hqMeta/members')) ? get(docAt('hqMeta/members')).data.n : 0; }
+    function hqMbrNoFor(n) { return 'CCC-HQ-MBR-' + pad3(n); }
+    match /hqMembers/{id} {
+      allow read: if isNamedSuper();
+      allow create: if isNamedSuper() && request.resource.data.keys().hasOnly(personKeys().concat(['source', 'createdBy', 'version']))
+        && validPerson(request.resource.data, id) && request.resource.data.status == 'Active' && request.resource.data.version == 1
+        && request.resource.data.get('source', '') in ['whatsapp', 'csv', 'intake']
+        && request.resource.data.createdBy == request.auth.uid
+        && getAfter(docAt('hqMeta/members')).data.n == hqMbrCount() + 1 && id == hqMbrNoFor(hqMbrCount() + 1)
+        && auditedAfter('hqMembers/' + id, 1);
+      allow update, delete: if false; // imported records are kept as they came; numbers are never reused
     }
     match /hqStaff/{id} {
       allow read: if isNamedSuper();
@@ -1545,7 +1562,7 @@ service cloud.firestore {
     function auditTargetOk(d) {
       return (d.target.matches('^returns/[A-Za-z0-9]+_20[0-9]{2}-[0-9]{2}$') && d.parishId == d.target.split('/')[1].split('_')[0]
               && (isNamedSuper() || isParishAdminOf(d.parishId)))
-        || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqLeave|committees|committeeMembers|leaders|adminHandovers|bibleReadings)/.+') && isNamedSuper() && d.parishId == '')
+        || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqMembers|hqLeave|committees|committeeMembers|leaders|adminHandovers|bibleReadings)/.+') && isNamedSuper() && d.parishId == '')
         || (d.target.matches('^parishes/[A-Za-z0-9]+/letters/CCC-[A-Z0-9-]+$') && d.action == 'issue-letter'
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
         || (d.target.matches('^parishes/[A-Za-z0-9]+/(pcommittees|celebrations|anointings|rankHistory|rosters|rosterConfig|importLog)/[A-Za-z0-9_-]+$')

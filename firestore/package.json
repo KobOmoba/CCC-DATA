@@ -17,6 +17,7 @@
     "test:e2e:b17": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-b17.mjs\"",
     "test:e2e:b18": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-b18.mjs\"",
     "test:e2e:p19": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p19.mjs\"",
+    "test:e2e:p20": "firebase emulators:exec --only firestore,auth --project demo-ccc \"node e2e-p20.mjs\"",
     "test:worker": "node --test ../ai-worker/worker.test.mjs"
   },
   "devDependencies": {

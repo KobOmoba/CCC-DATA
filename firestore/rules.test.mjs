@@ -1870,3 +1870,42 @@ test('b18 intake: import log accepts source intake, also for new clergy; other s
   await assertFails(log('CCC-MBR-002', 'robot'));
   await assertFails(log('CCC-MBR-404', 'intake'));             // record must exist
 });
+
+// HQ's own member records: Super Admin imports into HQ (hqMembers), never into a parish.
+async function addHqMember(db, data = {}, uid = 'uNamed') {
+  return runTransaction(db, async (t) => {
+    const c = await t.get(doc(db, 'hqMeta/members'));
+    const n = (c.exists() ? c.data().n : 0) + 1;
+    const id = 'CCC-HQ-MBR-' + String(n).padStart(3, '0');
+    t.set(doc(db, 'hqMeta/members'), { n });
+    t.set(doc(db, 'hqMembers/' + id), { ...person(id), version: 1, source: 'intake', createdBy: uid, ...data });
+    const a = audit7(db, 'hqMembers/' + id, 1, 'import-hq-member'); t.set(a.ref, { ...a.data, by: uid });
+    return id;
+  });
+}
+test('HQ members: named super imports CCC-HQ-MBR-001.. into HQ; cannot import into a parish; others locked out', async () => {
+  nodeAssert.equal(await assertSucceeds(addHqMember(as.named())), 'CCC-HQ-MBR-001');
+  nodeAssert.equal(await assertSucceeds(addHqMember(as.named())), 'CCC-HQ-MBR-002');
+  // Staff numbering is untouched by the member counter.
+  nodeAssert.equal(await assertSucceeds(addStaff(as.named())), 'CCC-HQ-STF-001');
+  await assertFails(addHqMember(as.named(), { gender: 'Robot' }));            // same person checks as parishes
+  await assertFails(addHqMember(as.named(), { createdBy: 'uOther' }));
+  await assertFails(addHqMember(as.named(), { parishId: 'A' }));              // unknown key
+  await assertFails(addHqMember(as.superA(), {}, 'uSuper'));                  // unnamed super
+  for (const who of [as.hq(), as.adminA(), as.stranger()]) {
+    await assertFails(getDoc(doc(who, 'hqMembers/CCC-HQ-MBR-001')));
+    await assertFails(addHqMember(who));
+  }
+  await assertFails(updateDoc(doc(as.named(), 'hqMembers/CCC-HQ-MBR-001'), { fullName: 'X', nameLower: 'x' }));
+  await assertFails(deleteDoc(doc(as.named(), 'hqMembers/CCC-HQ-MBR-001')));
+  // Skipping a number fails.
+  const nb = as.named();
+  await assertFails(runTransaction(nb, async (t) => {
+    t.set(doc(nb, 'hqMeta/members'), { n: 5 });
+    t.set(doc(nb, 'hqMembers/CCC-HQ-MBR-005'), { ...person('CCC-HQ-MBR-005'), version: 1, source: 'csv', createdBy: 'uNamed' });
+    const a = audit7(nb, 'hqMembers/CCC-HQ-MBR-005', 1, 'import-hq-member'); t.set(a.ref, a.data);
+  }));
+
+  // Super Admin still cannot create a member inside a parish.
+  await assertFails(addRecord(as.named(), 'A', 'members', person('x')));
+});
