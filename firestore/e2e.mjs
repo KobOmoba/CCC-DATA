@@ -244,7 +244,7 @@ try {
   await page.waitForSelector('#recordModal:not(.hidden)');
   await page.waitForSelector('#recordTitle:has-text("CCC-TCP-IKJ-CLG-001 · Former")');
   await page.click('text=View transfer letter');
-  await page.waitForSelector('#letterImg:not(.hidden)');
+  await page.waitForSelector('#letterView:not(.hidden) img.letter-page');
   await fullShot('10-former-service-record');
   await page.evaluate(() => closeModal('recordModal'));
   await nav('former');

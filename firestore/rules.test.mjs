@@ -1909,3 +1909,76 @@ test('HQ members: named super imports CCC-HQ-MBR-001.. into HQ; cannot import in
   // Super Admin still cannot create a member inside a parish.
   await assertFails(addRecord(as.named(), 'A', 'members', person('x')));
 });
+
+// ---- Batch 21: returning clergy (same number, new period), transfer letter chunks ----
+async function makeFormer(db, reason = 'Transfer', extra = {}) {
+  await updateDoc(doc(db, 'parishes/A/clergy/CCC-CLG-001'), { status: 'Former', leftDate: '2026-01-10', leaveReason: reason, transferredTo: 'Parish B', ...extra });
+}
+function restoreBatch(db, { n = 1, from = '2026-06-01', clergyExtra = {}, audit = true, prev = [] } = {}) {
+  const b = writeBatch(db), target = 'parishes/A/clergy/CCC-CLG-001';
+  b.set(doc(db, target), clergy('CCC-CLG-001', 'olu@x.org', { restoreCount: n, version: n, restoredDate: from, leftDate: '', leaveReason: '', transferredTo: '',
+    servicePeriods: [...prev, { from: '2020-01-01', to: '2026-01-10', reason: 'Transfer', transferredTo: 'Parish B', letterId: '' }], ...clergyExtra }));
+  if (audit) b.set(doc(db, 'auditLog/' + target.replace(/\//g, '_') + '_v' + n), { action: 'clergy-restore', target, targetVersion: n, parishId: 'A', reason: '', before: null, after: null,
+    by: 'uA', byEmail: 'a@x.org', byName: '', role: 'parish_admin', at: serverTimestamp() });
+  return b.commit();
+}
+test('returning clergy: restored with the same number, audited, periods kept, never deleted', async () => {
+  const a = as.adminA();
+  await makeFormer(a);
+  await assertFails(updateDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { status: 'Active', leftDate: '', leaveReason: '' })); // no silent reactivation
+  await assertFails(restoreBatch(a, { audit: false }));                                         // must be audited
+  await assertFails(restoreBatch(a, { from: '2025-01-01' }));                                   // cannot start before leaving
+  await assertFails(restoreBatch(a, { n: 2 }));                                                 // counter steps by one
+  await assertFails(restoreBatch(a, { clergyExtra: { memberNo: 'CCC-CLG-001', gender: 'Female', rank: '' } })); // women cannot be clergy
+  await assertSucceeds(restoreBatch(a));
+  const c = (await getDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'))).data();
+  same(c.status, "Active"); same(c.memberNo, "CCC-CLG-001"); same(c.servicePeriods.length, 1);
+  await assertFails(deleteDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001')));
+  await assertFails(deleteDoc(doc(a, 'auditLog/parishes_A_clergy_CCC-CLG-001_v1')));
+  await assertSucceeds(getDoc(doc(a, 'auditLog/parishes_A_clergy_CCC-CLG-001_v1')));
+  await assertFails(getDoc(doc(as.adminB(), 'auditLog/parishes_A_clergy_CCC-CLG-001_v1')));
+  // Earlier periods cannot be rewritten or dropped afterwards.
+  await assertFails(updateDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { servicePeriods: [] }));
+  await assertFails(updateDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { restoreCount: 0 }));
+  await assertFails(updateDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { version: 2 }));
+  // A second return later: same number again, both earlier periods kept, audited as v2.
+  await updateDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { status: 'Former', leftDate: '2026-09-01', leaveReason: 'Retired' });
+  const b2 = writeBatch(a), t2 = 'parishes/A/clergy/CCC-CLG-001';
+  b2.set(doc(a, t2), { ...c, phone: '0809', status: 'Active', restoreCount: 2, version: 2, restoredDate: '2026-10-01', leftDate: '', leaveReason: '',
+    servicePeriods: [...c.servicePeriods, { from: '2026-06-01', to: '2026-09-01', reason: 'Retired', transferredTo: '', letterId: '' }] });
+  b2.set(doc(a, 'auditLog/parishes_A_clergy_CCC-CLG-001_v2'), { action: 'clergy-restore', target: t2, targetVersion: 2, parishId: 'A', reason: '', before: null, after: null,
+    by: 'uA', byEmail: 'a@x.org', byName: '', role: 'parish_admin', at: serverTimestamp() });
+  await assertSucceeds(b2.commit());
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { phone: '0809' }));
+});
+test('returning clergy: called to glory, posted out or another parish cannot restore', async () => {
+  await makeFormer(as.adminA(), 'Called to glory');
+  await assertFails(restoreBatch(as.adminA()));
+  await env.withSecurityRulesDisabled(async c => { await updateDoc(doc(c.firestore(), 'parishes/A/clergy/CCC-CLG-001'), { leaveReason: 'Posting' }); });
+  await assertFails(restoreBatch(as.adminA()));
+  await env.withSecurityRulesDisabled(async c => { await updateDoc(doc(c.firestore(), 'parishes/A/clergy/CCC-CLG-001'), { leaveReason: 'Retired' }); });
+  await assertFails(restoreBatch(as.adminB()));
+  // The email now belongs to a clergy record elsewhere: no takeover.
+  await env.withSecurityRulesDisabled(async c => { await setDoc(doc(c.firestore(), 'clergyIndex/olu@x.org'), { parishId: 'B', clergyId: 'CCC-BBB-LAG-CLG-002' }); });
+  await assertFails(restoreBatch(as.adminA()));
+  await env.withSecurityRulesDisabled(async c => { await setDoc(doc(c.firestore(), 'clergyIndex/olu@x.org'), { parishId: 'A', clergyId: 'CCC-CLG-001' }); });
+  await assertSucceeds(restoreBatch(as.adminA()));
+});
+test('transfer letter: photo or PDF pages in chunks, written once with the letter, parish-private', async () => {
+  const a = as.adminA(), bytes = Bytes.fromUint8Array(new Uint8Array(1000).fill(7));
+  const letter = (extra = {}) => ({ clergyId: 'CCC-CLG-001', storage: 'firestore', mime: 'application/pdf', fileName: 'letter.pdf', size: 2000, pages: 2, chunks: 2,
+    createdAt: 'now', createdBy: 'uA', ...extra });
+  const put = (id, data, chunks) => { const b = writeBatch(a); b.set(doc(a, `parishes/A/letters/${id}`), data); chunks.forEach((c, i) => b.set(doc(a, `parishes/A/letters/${id}/chunks/${i}`), c)); return b.commit(); };
+  await assertFails(put('T0', letter(), [{ page: 0, data: bytes }]));                          // chunk count must match
+  await assertFails(put('T1', letter(), [{ page: 0, data: bytes }, { page: 2, data: bytes }])); // page out of range
+  await assertFails(put('T2', letter({ clergyId: 'CCC-CLG-009' }), [{ page: 0, data: bytes }, { page: 1, data: bytes }])); // unknown clergy
+  await assertFails(put('T3', letter({ mime: 'text/html' }), [{ page: 0, data: bytes }, { page: 1, data: bytes }]));
+  await assertSucceeds(put('T4', letter(), [{ page: 0, data: bytes }, { page: 1, data: bytes }]));
+  await assertSucceeds(getDoc(doc(a, 'parishes/A/letters/T4/chunks/1')));
+  await assertFails(getDoc(doc(as.adminB(), 'parishes/A/letters/T4/chunks/1')));
+  await assertFails(setDoc(doc(a, 'parishes/A/letters/T4/chunks/2'), { page: 0, data: bytes }));  // nothing added later
+  await assertFails(deleteDoc(doc(a, 'parishes/A/letters/T4/chunks/0')));
+  await assertFails(deleteDoc(doc(a, 'parishes/A/letters/T4')));
+  await makeFormer(a);
+  await assertSucceeds(updateDoc(doc(a, 'parishes/A/clergy/CCC-CLG-001'), { letterId: 'T4' }));
+});

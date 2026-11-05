@@ -27,6 +27,7 @@
     <script src="p17.js" defer></script>
     <script src="p18.js" defer></script>
     <script src="p19.js" defer></script>
+    <script src="p21.js" defer></script>
     <style id="pageSize"></style>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
@@ -77,6 +78,7 @@
                 <button onclick="showSection('members')" id="nav-members" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-users text-emerald-400 w-4"></i> Church Members</button>
                 <button onclick="showSection('clergy')" id="nav-clergy" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-cross text-yellow-300 w-4"></i> Clergy</button>
                 <button onclick="showSection('former')" id="nav-former" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-slate-300 w-4"></i> Former Clergy</button>
+                <button onclick="showSection('clergyhistory')" id="nav-clergyhistory" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-timeline text-amber-300 w-4"></i> Clergy history</button>
                 <button onclick="showSection('families')" id="nav-families" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-people-roof text-pink-300 w-4"></i> Families</button>
                 <button onclick="showSection('births')" id="nav-births" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-baby text-rose-300 w-4"></i> Births</button>
                 <button onclick="showSection('children')" id="nav-children" class="parish-only nav-btn px-3 py-2.5 rounded hover:bg-slate-800 flex items-center gap-2"><i class="fa-solid fa-child-reaching text-amber-300 w-4"></i> Sunday School Children</button>
@@ -205,6 +207,17 @@
                     <div class="pb-2 border-b"><h2 class="text-lg font-bold">Former Clergy</h2><p class="text-xs text-gray-500">Transferred, retired or called to glory. Numbers are kept, never reused.</p></div>
                     <div id="formerTable" class="space-y-2"></div>
                     <button id="more-former" onclick="loadFormer(false)" class="hidden w-full py-2 border rounded text-xs font-semibold bg-white">Load more</button>
+                </section>
+
+                <!-- CLERGY HISTORY (Batch 21): everyone who has ever served in this parish, newest first -->
+                <section id="section-clergyhistory" class="space-y-3 hidden">
+                    <div class="flex justify-between items-center pb-2 border-b gap-2">
+                        <div><h2 class="text-lg font-bold">Clergy history</h2><p class="text-xs text-gray-500">Everyone who has served in this parish, current and former, newest first.</p></div>
+                        <button onclick="printClergyHistory()" class="border px-3 py-2 rounded text-xs font-semibold bg-white whitespace-nowrap"><i class="fa-solid fa-print mr-1"></i> Print</button>
+                    </div>
+                    <input id="ch_search" oninput="renderClergyHistory()" placeholder="Search name or number" class="w-full border p-2.5 rounded text-xs">
+                    <p id="ch_count" class="text-xs text-gray-500"></p>
+                    <div id="clergyHistoryList" class="space-y-2"></div>
                 </section>
 
                 <!-- FAMILIES -->
@@ -828,6 +841,10 @@
                             <button onclick="exportCsv('depts')" class="py-2.5 border rounded bg-white font-bold"><i class="fa-solid fa-file-csv"></i> Depts CSV</button>
                             <button onclick="window.print()" class="py-2.5 border rounded bg-white font-bold"><i class="fa-solid fa-print"></i> Print / PDF</button>
                         </div>
+                        <div class="no-print grid grid-cols-2 gap-2">
+                            <button id="rp_xlsxBtn" onclick="exportXlsx()" class="py-2.5 border rounded bg-emerald-50 text-emerald-900 font-bold"><i class="fa-solid fa-file-excel"></i> Download Excel</button>
+                            <button id="rp_pdfBtn" onclick="exportPdf()" class="py-2.5 border rounded bg-rose-50 text-rose-900 font-bold"><i class="fa-solid fa-file-pdf"></i> Download PDF</button>
+                        </div>
                         <div id="reportPrint" class="bg-white border rounded-xl p-3 space-y-3">
                             <div><p id="rpTitle" class="font-bold text-sm"></p><p id="rpSub" class="text-gray-500"></p></div>
                             <div id="rpChart"></div>
@@ -1246,10 +1263,10 @@
                 <button onclick="closeModal('transferModal')" class="text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
             </header>
             <div class="p-4 space-y-3">
-                <label class="block">Reason *<select id="t_reason" class="w-full border p-2.5 rounded mt-1 bg-white"><option>Transfer</option><option>Retired</option><option>Called to glory</option><option>Other</option></select></label>
+                <label class="block">Reason *<select id="t_reason" onchange="transferReasonChanged()" class="w-full border p-2.5 rounded mt-1 bg-white"><option>Transfer</option><option>Retired</option><option>Called to glory</option><option>Other</option></select></label>
                 <label class="block">Date left *<input id="t_date" type="date" class="w-full border p-2.5 rounded mt-1"></label>
                 <label class="block">Transferred to (parish)<input id="t_to" class="w-full border p-2.5 rounded mt-1"></label>
-                <label class="block">Transfer letter (photo)<input id="t_letter" type="file" accept="image/*" class="block w-full mt-1"></label>
+                <label id="t_letterBox" class="block">Transfer letter (photo or PDF, up to 10 pages)<input id="t_letter" type="file" accept="image/*,.pdf,application/pdf" class="block w-full mt-1"></label>
             </div>
             <footer class="bg-gray-50 p-3 border-t flex justify-end gap-2 rounded-b-xl">
                 <button onclick="closeModal('transferModal')" class="px-4 py-2 border rounded">Cancel</button>
