@@ -887,7 +887,7 @@ async function logout() {
 // The standard timetable is the DEFAULT; each parish may edit its own (parishes/{p}/settings/timetable, Phase 9b).
 const DEFAULT_SCHEDULE = [
     { key: "sunday", name: "Sunday Service", dow: 0, time: "10:00" },
-    { key: "bible", name: "Bible Class", dow: 1, time: "17:00" },
+    { key: "bible", name: "Bible Class / Bible Study", dow: 1, time: "17:00" },
     { key: "vigil_sidemen", name: "Sidemen/Sidewomen Night Vigil", dow: 1, time: "23:59" },
     { key: "wakati", name: "Wakati Adura", dow: 2, time: "09:00" },
     { key: "seekers", name: "Seekers Service", dow: 3, time: "09:00" },
@@ -895,7 +895,7 @@ const DEFAULT_SCHEDULE = [
     { key: "new_moon", name: "New Moon Service", dow: 4, time: "22:00", week: "first" },
     { key: "vigil_prophets", name: "Prophets/Prophetesses Night Vigil", dow: 4, time: "23:59", week: "other" },
     { key: "fri_evening", name: "Friday Evening Service", dow: 5, time: "18:00" }];
-const DEFAULT_ACTIVITIES = [{ key: "a_cleaning", name: "Church cleaning", dow: 6, time: "08:00", kind: "activity" }];
+const DEFAULT_ACTIVITIES = [{ key: "a_cleaning", name: "Church cleaning (no service)", dow: 6, time: "08:00", kind: "activity" }];
 let SCHEDULE = DEFAULT_SCHEDULE, ACTIVITIES = DEFAULT_ACTIVITIES, TIMETABLE_CUSTOM = false;
 // Names of every service type ever used (standard + this parish's own), so old records keep their names.
 let TYPE_NAMES = { ...Object.fromEntries(DEFAULT_SCHEDULE.map(s => [s.key, s.name])), special: "Special service", other: "Other service" };
@@ -929,6 +929,27 @@ function weekServices(sun, specials = []) {
     }
     for (const sp of specials) list.push({ id: `${sp.date}_special_${sp.id}`, key: "special", specialId: sp.id, name: sp.name, date: sp.date, time: sp.time });
     return list.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+}
+// Timetable services held on one date (1st-Thursday rule applied), in time order.
+function servicesOn(date) {
+    const d = parseYmd(date), first = d.getDate() <= 7;
+    return SCHEDULE.filter(s => s.dow === d.getDay() && !(s.week === "first" && !first) && !(s.week === "other" && first))
+        .sort((a, b) => a.time.localeCompare(b.time));
+}
+// The service to preselect for a date: the next one still to start today (by now + 2h grace), else the last one.
+function serviceFor(date, now = new Date()) {
+    const list = servicesOn(date);
+    if (!list.length) return null;
+    if (date !== ymd(now)) return list[0];
+    const t = new Date(now.getTime() - 2 * 3600000), hm = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+    return list.find(s => s.time >= hm) || list[list.length - 1];
+}
+// Website lines for publicInfo.services, e.g. "Thursday 22:00 New Moon Service (1st Thursday of the month)".
+const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function timetableLines() {
+    const note = s => s.week === "first" ? ` (1st ${WEEKDAY[s.dow]} of the month)` : s.week === "other" ? ` (2nd-5th ${WEEKDAY[s.dow]})` : "";
+    return SCHEDULE.slice().sort((a, b) => (a.dow - b.dow) || a.time.localeCompare(b.time)).map(s => `${WEEKDAY[s.dow]} ${s.time} ${s.name}${note(s)}`)
+        .concat(ACTIVITIES.map(a => `${WEEKDAY[a.dow]}: ${a.name}`)).slice(0, 20);
 }
 // Old free-text records are put into a type by name, for the reports.
 function keyOf(a) {
@@ -1010,6 +1031,7 @@ function openServiceModal(id) {
     $("svc_key").disabled = !!s;
     $("svc_date").value = s ? s.date : localToday(); $("svc_date").disabled = !!s;
     $("svc_time").value = s ? s.time : "10:00";
+    if (!s) svcPreselect();
     for (const k of ["men", "women", "children", "visitors"]) $("svc_" + k).value = r[k] ?? "";
     $("svc_led").innerHTML = `<option value="">Not recorded</option>` + att.clergy.map(c => `<option value="${esc(c.memberNo)}">${esc([c.rank, c.fullName].filter(Boolean).join(" "))}</option>`).join("");
     $("svc_led").value = r.ledBy || "";
@@ -1017,6 +1039,12 @@ function openServiceModal(id) {
     $("svcTitle").textContent = s ? `${s.name.toUpperCase()} · ${fmtDay(s.date)}` : "RECORD A SERVICE";
     svcTotal();
     openModal("serviceModal");
+}
+// Free "Record a service": pick today's (or the chosen date's) service from the timetable; still changeable.
+function svcPreselect() {
+    const x = serviceFor($("svc_date").value || localToday());
+    $("svc_key").value = x ? x.key : "other";
+    if (x) $("svc_time").value = x.time;
 }
 const num = id => Math.max(0, parseInt($(id).value, 10) || 0);
 function svcTotal() { $("svc_total").textContent = ["men", "women", "children", "visitors"].reduce((t, k) => t + num("svc_" + k), 0); }
@@ -2058,19 +2086,75 @@ function openAiEntry() {
     openModal("aiModal");
 }
 
+// Android Chrome often hands over files with no extension (WhatsApp / Drive / Downloads content links) or an
+// empty / generic MIME type, so the kind is decided from the first bytes, then the MIME type, then the name.
+// Returns one of: image, pdf, docx, doc, xlsx, xls, rtf, csv, txt, or "" when unknown.
+// The file inputs (index.html) accept MIME types + extensions + */* so Android never greys a Word file out.
+async function sniffKind(file) {
+    const ext = (file.name || "").toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1] || "", t = (file.type || "").toLowerCase();
+    const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    const is = (...b) => b.every((x, i) => head[i] === x);
+    if (is(0x25, 0x50, 0x44, 0x46)) return "pdf";
+    if (is(0x50, 0x4b, 0x03, 0x04)) { // ZIP: Word or Excel (also Google Docs / WPS exports)
+        const body = new TextDecoder("latin1").decode(new Uint8Array(await file.arrayBuffer()));
+        if (body.includes("word/")) return "docx";
+        if (body.includes("xl/")) return "xlsx";
+        return ext === "xlsx" ? "xlsx" : "docx";
+    }
+    if (is(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)) { // old Office 97-2003 (OLE): .doc or .xls
+        if (ext === "xls" || t.includes("excel")) return "xls";
+        if (ext === "doc" || t.includes("msword")) return "doc";
+        const body = new TextDecoder("utf-16le").decode(new Uint8Array(await file.arrayBuffer()).slice(0, 4096 * 64));
+        return /Workbook|Book/.test(body) && !/WordDocument/.test(body) ? "xls" : "doc";
+    }
+    if (is(0x7b, 0x5c, 0x72, 0x74, 0x66)) return "rtf";
+    if (t.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"].includes(ext) || is(0xff, 0xd8, 0xff) || is(0x89, 0x50, 0x4e, 0x47)
+        || String.fromCharCode(...head.slice(4, 8)) === "ftyp") return "image";
+    if (t.includes("wordprocessingml")) return "docx";
+    if (t.includes("spreadsheetml")) return "xlsx";
+    if (t === "text/csv" || ext === "csv") return "csv";
+    if (["txt", "text"].includes(ext) || t === "text/plain") return "txt";
+    if (["pdf", "docx", "doc", "xlsx", "xls", "rtf"].includes(ext)) return ext;
+    return "";
+}
+// Old Word 97-2003 .doc: mammoth only reads .docx, so pull the text runs straight out of the file (8-bit and
+// UTF-16 text). Cell marks become " | " and paragraph marks new lines; the AI ignores leftover style names.
+async function docText(file) {
+    const b = new Uint8Array(await file.arrayBuffer()), ok = c => (c >= 0x20 && c < 0x7f) || c === 13 || c === 7 || c === 9 || (c >= 0xa0 && c <= 0xff);
+    const runs = (step, read) => {
+        const out = []; let cur = "";
+        for (let i = 0; i + step - 1 < b.length; i += step) {
+            const c = read(i);
+            if (c >= 0 && ok(c)) cur += String.fromCharCode(c);
+            else { if (cur.replace(/[\r\x07\s]/g, "").length >= 4) out.push(cur); cur = ""; }
+        }
+        if (cur.replace(/[\r\x07\s]/g, "").length >= 4) out.push(cur);
+        return out;
+    };
+    const junk = /^(Root Entry|WordDocument|SummaryInformation|DocumentSummaryInformation|CompObj|1Table|0Table|Data|Microsoft (Office )?Word.*|MSWordDoc|Word\.Document\.\d+|Normal(\.dotm?)?|Times New Roman|Arial|Calibri|Symbol|Courier New|Default Paragraph Font|Table Normal|No List|Title|Heading \d)$/i;
+    const pick = rs => rs.map(r => r.replace(/\x07\x07/g, "\n").replace(/\x07/g, " | ").replace(/\r/g, "\n").trim())
+        .filter(r => r && !junk.test(r) && /[a-z]{2}/i.test(r)).join("\n");
+    const a = pick(runs(1, i => b[i])), w = pick(runs(2, i => b[i + 1] === 0 ? b[i] : -1));
+    const text = (w.length > a.length ? w : a).trim();
+    if (text.replace(/\s/g, "").length < 20) throw new Error("This old Word file (.doc) could not be read. Open it in Word or WPS and Save as .docx or PDF, then upload again.");
+    return text;
+}
+
 // Returns { text } when the browser can read it, or { file, mime } for the vision AI.
 async function readListFile(file) {
-    const name = file.name.toLowerCase(), ext = name.split(".").pop();
-    if (file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "heic"].includes(ext)) {
+    const ext = await sniffKind(file);
+    if (ext === "image") {
         const dataUrl = await compressImage(file, 1500000, 2000); // keeps handwriting readable, under the worker limit
         return { file: dataUrl.split(",")[1], mime: "image/jpeg", how: "photo (vision AI)" };
     }
     if (["txt", "csv"].includes(ext)) return { text: await file.text(), how: ext.toUpperCase() + " text" };
+    if (ext === "rtf") return { text: (await file.text()).replace(/\\par[d]?/g, "\n").replace(/\{\\\*[^{}]*\}|\\[a-z]+-?\d* ?|[{}]/g, ""), how: "RTF text" };
     if (["xlsx", "xls"].includes(ext)) {
         await loadLib(LIBS.xlsx);
         const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
         return { text: wb.SheetNames.map(n => XLSX.utils.sheet_to_csv(wb.Sheets[n])).join("\n\n"), how: "Excel sheet" };
     }
+    if (ext === "doc") return { text: await docText(file), how: "old Word document (.doc)" };
     if (ext === "docx") {
         await loadLib(LIBS.mammoth);
         const { value } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
@@ -2080,7 +2164,7 @@ async function readListFile(file) {
         doc.querySelectorAll("p,li,h1,h2,h3").forEach(el => el.append("\n"));
         return { text: doc.body.textContent, how: "Word document" };
     }
-    if (ext === "pdf" || file.type === "application/pdf") {
+    if (ext === "pdf") {
         await loadLib(LIBS.pdf);
         pdfjsLib.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
         const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
@@ -2099,7 +2183,7 @@ async function readListFile(file) {
         if (file.size > 6000000) throw new Error("This scanned PDF is too big (over 6 MB). Take photos of the pages instead.");
         return { file: await fileToBase64(file), mime: "application/pdf", how: "scanned PDF (vision AI)" };
     }
-    throw new Error("This file type is not supported. Use PDF, DOCX, TXT, CSV, XLSX, JPG or PNG.");
+    throw new Error(`"${file.name}" is not a file we can read. Use Word (DOC/DOCX), PDF, Excel (XLSX/XLS), CSV, TXT or a photo.`);
 }
 
 async function callAi(payload) {

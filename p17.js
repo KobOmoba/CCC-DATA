@@ -195,7 +195,8 @@ async function lessonsFor(m) {
     });
     return map;
 }
-const newRow = (date, lessons) => ({ date, service: DAY_NAMES[parseYmd(date).getDay()], lesson1: lessons[date]?.lesson1 || "", lesson2: lessons[date]?.lesson2 || "", duties: [] });
+// Row label = the timetable services held that day (1st-Thursday rule applied), else the day name.
+const newRow = (date, lessons) => ({ date, service: (servicesOn(date).map(x => x.name).join(" / ") || DAY_NAMES[parseYmd(date).getDay()]).slice(0, 80), lesson1: lessons[date]?.lesson1 || "", lesson2: lessons[date]?.lesson2 || "", duties: [] });
 async function addRosterRow() {
     const date = $("ro_addDate").value;
     if (!date || date.slice(0, 7) !== roState.month) return alert("Pick a date in this month.");
@@ -318,14 +319,14 @@ async function renderPersonDuties(no) {
 // ================================================================= 3. PUBLIC CHURCH INFO (website, no login)
 async function openPublicInfo() {
     const d = await db.collection("publicInfo").doc(localState.currentParishId).get(), p = d.exists ? d.data() : {}, par = localState.parish || {};
-    $("pi_services").value = (p.services || []).join("\n") || (SCHEDULE || []).filter(s => s.kind !== "activity").slice(0, 6)
-        .map(s => `${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][s.dow]} ${s.time} ${s.name}`).join("\n");
+    $("pi_services").value = (p.services || []).join("\n") || timetableLines().join("\n"); // every timetable service, not just the first 6
     $("pi_address").value = p.address ?? par.address ?? "";
     $("pi_phone").value = p.phone || "";
     $("pi_maps").value = p.mapsUrl ?? par.mapsUrl ?? "";
     $("pi_about").value = p.about || "";
     $("pi_saved").textContent = d.exists ? "Last saved " + String(p.updatedAt || "").slice(0, 10) : "Not published yet.";
 }
+function piFromTimetable() { $("pi_services").value = timetableLines().join("\n"); }
 async function savePublicInfo() {
     const maps = val("pi_maps");
     if (maps && !/^https:\/\/\S+$/.test(maps)) return alert("The map link must start with https://");

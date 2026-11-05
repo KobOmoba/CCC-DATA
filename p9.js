@@ -542,7 +542,7 @@ async function saveTimetable() {
         .catch(e => alert("Not saved: " + e.message));
 }
 async function resetTimetable() {
-    if (!confirm("Go back to the standard CCC timetable?")) return;
+    if (!confirm("Use the standard CCC timetable?\nSun 10:00 Sunday Service · Mon 17:00 Bible Class · Mon 23:59 Sidemen/Sidewomen Vigil · Tue 09:00 Wakati Adura · Wed 09:00 Seekers · Wed 18:00 Evening · Thu 22:00 New Moon (1st Thu) / 23:59 Prophets Vigil (other Thu) · Fri 18:00 Evening · Sat cleaning")) return;
     await parishRef().collection("settings").doc("timetable").delete().catch(e => alert("Not reset: " + e.message));
     setTimetable(null); openTimetable();
 }

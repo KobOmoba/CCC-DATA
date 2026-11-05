@@ -427,13 +427,14 @@
                         <p class="font-bold">Weekly services &amp; activities</p><p id="tt_note" class="text-gray-500"></p>
                         <div id="tt_rows" class="space-y-2"></div>
                         <div class="grid grid-cols-3 gap-2"><button id="tt_add" onclick="addTimetableRow()" class="py-2 border rounded font-bold">+ Add row</button>
-                            <button onclick="resetTimetable()" class="py-2 border rounded">Standard</button>
+                            <button id="tt_std" onclick="resetTimetable()" class="py-2 border rounded">Use standard CCC timetable</button>
                             <button id="tt_save" onclick="saveTimetable()" class="py-2 bg-blue-700 text-white rounded font-bold">Save</button></div>
                     </div>
                     <div class="bg-white border rounded-xl p-4 space-y-2 text-xs">
                         <p class="font-bold"><i class="fa-solid fa-globe text-emerald-700"></i> Public church info (website) <span class="ml-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">PUBLIC</span></p>
                         <p class="text-gray-500">Anyone can see these on the church website, without signing in. Nothing else about your parish is shown.</p>
-                        <label class="block">Service days &amp; times (one per line)<textarea id="pi_services" rows="4" class="w-full border p-2 rounded mt-1" placeholder="Sunday 10:00 Sunday Service"></textarea></label>
+                        <label class="block">Service days &amp; times (one per line)<textarea id="pi_services" rows="8" class="w-full border p-2 rounded mt-1" placeholder="Sunday 10:00 Sunday Service"></textarea></label>
+                        <button id="pi_fromTt" onclick="piFromTimetable()" class="w-full py-2 border rounded font-semibold">Fill from our weekly timetable</button>
                         <label class="block">Address<input id="pi_address" class="w-full border p-2.5 rounded mt-1" maxlength="200"></label>
                         <label class="block">Phone<input id="pi_phone" class="w-full border p-2.5 rounded mt-1" maxlength="40"></label>
                         <label class="block">Map link<input id="pi_maps" class="w-full border p-2.5 rounded mt-1" placeholder="https://maps.app.goo.gl/..."></label>
@@ -574,10 +575,10 @@
                 <section id="section-intake" class="space-y-3 hidden text-xs">
                     <div class="pb-2 border-b"><h2 class="text-lg font-bold"><i class="fa-solid fa-inbox text-violet-600"></i> Data Intake</h2>
                         <p class="text-gray-500">Upload many files at once. The AI finds every person and where they belong (member or clergy, rank, departments, committees). Nothing is saved until you check and tap Save all.</p></div>
-                    <p id="in_superNote" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-2">Super Admin: member records are private to each parish, so here you can read files and download the result as a CSV for the parish admin to import. Saving is done by the parish admin.</p>
+                    <p id="in_superNote" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-2">Super Admin: parish member records are private to each parish, so you cannot save into a parish (download a CSV for its admin instead). You <b>can</b> save the people into <b>HQ's own records</b> (numbers CCC-HQ-MBR-001...).</p>
                     <div class="bg-white border rounded-xl p-3 space-y-2">
-                        <label class="block font-semibold">Files: photos, screenshots, handwritten registers, PDF, Word (DOCX), Excel (XLSX), CSV, TXT / WhatsApp export</label>
-                        <input type="file" id="in_files" multiple accept="image/*,.heic,.heif,.pdf,.docx,.xlsx,.xls,.csv,.txt,application/pdf" class="w-full border p-2 rounded bg-gray-50">
+                        <label class="block font-semibold">Files: photos, screenshots, handwritten registers, PDF, Word (DOC / DOCX), Excel (XLSX / XLS), CSV, TXT / WhatsApp export</label>
+                        <input type="file" id="in_files" multiple accept="image/*,.heic,.heif,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain,application/rtf,*/*" class="w-full border p-2 rounded bg-gray-50">
                         <details><summary class="font-semibold text-blue-800 py-1">Or paste text (WhatsApp chat, list)</summary><textarea id="in_text" rows="5" class="w-full border p-2 rounded mt-1" placeholder="Paste here..."></textarea></details>
                         <button id="in_readBtn" onclick="intakeRun()" class="w-full py-3 bg-violet-700 text-white rounded font-bold"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Read and place people</button>
                         <p class="text-[10px] text-gray-500">Word and Excel are read on this phone. Photos and PDFs are sent to the church's AI reader (needs internet). Max 6 MB per photo/PDF.</p>
@@ -586,6 +587,7 @@
                     <p id="in_status" class="text-gray-700"></p>
                     <div id="in_result" class="hidden space-y-2">
                         <button id="in_previewBtn" onclick="intakePreview()" class="admin-parish w-full py-3 bg-emerald-600 text-white rounded font-bold"><i class="fa-solid fa-table mr-1"></i> Check and save (preview)</button>
+                        <button id="in_hqBtn" onclick="intakePreview()" class="hidden w-full py-3 bg-blue-900 text-white rounded font-bold"><i class="fa-solid fa-building-columns mr-1"></i> Check and save into HQ records</button>
                         <button id="in_csvBtn" onclick="intakeCsv()" class="w-full py-2.5 bg-white border rounded font-semibold"><i class="fa-solid fa-download mr-1"></i> Download as CSV</button>
                         <div id="in_people" class="space-y-1"></div>
                     </div>
@@ -890,13 +892,13 @@
     <div id="importModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-1 overflow-y-auto">
         <div class="bg-white w-full max-w-3xl rounded-lg shadow-xl my-1 text-sm">
             <div class="bg-emerald-700 text-white px-4 py-3 rounded-t-lg flex justify-between items-center font-bold">
-                <span><i class="fa-solid fa-file-import mr-1"></i> IMPORT MEMBERS</span>
+                <span><i class="fa-solid fa-file-import mr-1"></i> <span id="imp_title">IMPORT MEMBERS</span></span>
                 <button onclick="closeModal('importModal')" class="text-white text-lg px-2" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="p-3 space-y-3">
                 <div id="imp_tabs" class="grid grid-cols-2 gap-2">
                     <button id="imp_tab_whatsapp" onclick="impTab('whatsapp')" class="py-2.5 border rounded font-semibold"><i class="fa-brands fa-whatsapp mr-1"></i> Paste WhatsApp</button>
-                    <button id="imp_tab_csv" onclick="impTab('csv')" class="py-2.5 border rounded font-semibold"><i class="fa-solid fa-table mr-1"></i> CSV / Excel</button>
+                    <button id="imp_tab_csv" onclick="impTab('csv')" class="py-2.5 border rounded font-semibold"><i class="fa-solid fa-file-word mr-1"></i> Word / Excel / PDF / CSV</button>
                 </div>
                 <div id="imp_pane_whatsapp" class="space-y-2">
                     <p class="text-xs text-gray-600">Copy the forms from WhatsApp (long-press, Copy) and paste them all here. Each person starts with <b>Name:</b>. Nothing is saved until you tap Save all.</p>
@@ -904,9 +906,9 @@
                     <button id="imp_parseBtn" onclick="impParsePaste()" class="w-full bg-blue-600 text-white py-3 rounded font-semibold">Read the messages</button>
                 </div>
                 <div id="imp_pane_csv" class="hidden space-y-2">
-                    <p class="text-xs text-gray-600">In Excel or Google Sheets use the template columns, then Save as / Download as <b>CSV</b>.</p>
+                    <p class="text-xs text-gray-600">Upload a member list: <b>Word (DOC/DOCX), Excel (XLSX/XLS), PDF, photos</b> or a <b>CSV</b> made from the template. Word, Excel, PDF and photos are read by the AI; you check every person before anything is saved.</p>
                     <button onclick="downloadImportTemplate()" class="w-full bg-white border py-2.5 rounded font-semibold"><i class="fa-solid fa-download mr-1"></i> Download template</button>
-                    <input type="file" id="imp_file" accept=".csv,text/csv" class="w-full border p-2 rounded bg-gray-50 text-xs">
+                    <input type="file" id="imp_file" multiple accept="image/*,.heic,.heif,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain,application/rtf,*/*" class="w-full border p-2 rounded bg-gray-50 text-xs">
                     <button id="imp_csvBtn" onclick="impParseCsv()" class="w-full bg-blue-600 text-white py-3 rounded font-semibold">Read the file</button>
                 </div>
                 <p id="imp_status" class="text-xs text-gray-700"></p>
@@ -935,7 +937,7 @@
             </div>
             <div class="p-4 space-y-3">
                 <p class="text-xs text-gray-600">Upload a member list: PDF, Word (DOCX), TXT, CSV, Excel (XLSX) or a photo / scan (JPG, PNG). The AI reads it; you check every person before anything is saved.</p>
-                <input type="file" id="aiFile" accept=".pdf,.docx,.txt,.csv,.xlsx,.xls,image/*,application/pdf" class="w-full border p-2 rounded bg-gray-50">
+                <input type="file" id="aiFile" accept="image/*,.heic,.heif,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain,application/rtf,*/*" class="w-full border p-2 rounded bg-gray-50">
                 <button id="aiReadBtn" onclick="runAiExtract()" class="w-full bg-violet-600 text-white py-2.5 rounded font-semibold">Read the file</button>
                 <p id="aiStatus" class="text-xs text-gray-600"></p>
                 <div id="aiResults" class="space-y-3"></div>
@@ -1325,8 +1327,8 @@
             </header>
             <div class="p-4 space-y-3">
                 <div class="grid grid-cols-2 gap-2">
-                    <select id="svc_key" class="border p-2.5 rounded col-span-2"></select>
-                    <input type="date" id="svc_date" class="border p-2.5 rounded">
+                    <select id="svc_key" onchange="const x=SCHEDULE.find(s=>s.key===this.value);if(x)$('svc_time').value=x.time" class="border p-2.5 rounded col-span-2"></select>
+                    <input type="date" id="svc_date" onchange="svcPreselect()" class="border p-2.5 rounded">
                     <input type="time" id="svc_time" class="border p-2.5 rounded">
                 </div>
                 <div class="grid grid-cols-2 gap-2">
