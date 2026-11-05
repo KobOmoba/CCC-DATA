@@ -264,6 +264,7 @@ function showSection(id) {
     if (id === "settings" && localState.role === "parish_admin") openPublicInfo().catch(e => console.error("public info", e.message)); // Batch 17
     if (id === "intake") openIntake(); // Batch 18
     if (id === "archive") openArchive().catch(e => alert("Could not load the archive: " + e.message));
+    if (id === "clergyhistory") openClergyHistory().catch(e => alert("Could not load clergy history: " + e.message)); // Batch 21
     if (id === "attendance") openAttendance().catch(e => alert("Could not load attendance: " + e.message));
 }
 
@@ -536,6 +537,7 @@ async function savePerson() {
             if (form.editingId) {
                 const o = form.old;
                 const merged = { ...o, ...p, memberNo: o.memberNo, consentDate: o.consentDate, createdAt: o.createdAt, status: o.status };
+                if (form.kind === "clergy" && p.rank && p.rank !== o.rank) merged.serviceRecord = rankChangeRecord(o, p.rank); // Batch 21: timeline
                 const batch = db.batch();
                 batch.set(parishRef().collection(form.kind).doc(o.memberNo), merged);
                 if (form.kind === "clergy") batch.set(db.collection("clergyIndex").doc(p.email), { parishId: localState.currentParishId, clergyId: o.memberNo });
@@ -595,7 +597,8 @@ async function openRecord(kind, id) {
         service = `<div class="bg-amber-50 border border-amber-200 rounded p-2 space-y-1"><p class="font-bold">Service record</p>
             ${row("Joined", esc(p.joinedDate || ""))}${row("Left", esc(p.leftDate || ""))}${row("Reason", esc(p.leaveReason || ""))}${row("Transferred to", esc(p.transferredTo || ""))}
             ${ranks ? `<ul class="list-disc pl-5">${ranks}</ul>` : ""}
-            ${p.letterId ? `<button onclick="showLetter('${esc(p.letterId)}')" class="underline text-amber-800">View transfer letter</button><img id="letterImg" alt="Transfer letter" class="hidden w-full mt-2 border rounded">` : ""}</div>`;
+            ${p.letterId ? `<button onclick="showLetter('${esc(p.letterId)}')" class="underline text-amber-800">View transfer letter</button><div id="letterView" class="hidden space-y-2 mt-2"></div>` : ""}
+            ${servicePeriodsHtml(p)}</div>${clergyTimelineHtml(p)}`; // Batch 21
     }
     $("recordBody").innerHTML = `
         <div class="flex gap-3 items-center">${p.photo ? `<img src="${esc(p.photo)}" alt="Photo" class="w-24 h-28 object-cover rounded border">` : ""}
@@ -612,6 +615,9 @@ async function openRecord(kind, id) {
     if (p.status === "Active") actions += btn("Edit", "editCurrent()", "bg-blue-600 text-white");
     if (kind === "members" && p.status === "Active" && p.gender !== "Female") actions += btn("Ordain as clergy", "ordainCurrent()", "bg-amber-600 text-white");
     if (kind === "clergy" && p.status === "Active") actions += btn("Transfer / move to Former", "openTransfer()", "bg-amber-700 text-white");
+    if (kind === "clergy" && canRestore(p)) actions += btn('<i class="fa-solid fa-rotate-left"></i> Restored to service', "openRestore()", "bg-emerald-700 text-white"); // Batch 21
+    if (kind === "clergy" && p.status === "Former" && p.leaveReason === "Transfer") actions += btn(`<i class="fa-solid fa-file-arrow-up"></i> ${p.letterId ? "Replace" : "Upload"} transfer letter`, "openLetterUpload()", "bg-amber-100 text-amber-900");
+    if (kind === "clergy") actions += btn('<i class="fa-solid fa-print"></i> Print timeline', "printClergyTimeline()", "border");
     if (kind === "members") actions += btn('<i class="fa-solid fa-oil-can"></i> Rank history', "openRankHistory()", "bg-amber-100 text-amber-900") // Batch 16
         + btn('<i class="fa-solid fa-print"></i> Print profile', "printProfile()", "border");
     if (kind === "members" && p.status === "Active") actions += btn("Moved abroad", "openAbroad()", "bg-cyan-700 text-white");
@@ -626,9 +632,15 @@ async function openRecord(kind, id) {
     openModal("recordModal");
 }
 function editCurrent() { openPersonForm(current.kind, current.rec); }
+// Old letters are one photo (image); Batch 21 letters are page pictures in chunks (photo or PDF), like the Archive.
 async function showLetter(id) {
     const l = await parishRef().collection("letters").doc(id).get();
-    if (l.exists) { $("letterImg").src = l.data().image; $("letterImg").classList.remove("hidden"); }
+    if (!l.exists) return;
+    const box = $("letterView"), d = l.data();
+    const urls = d.image ? [d.image] : await letterPageUrls(id);
+    box.innerHTML = urls.map((u, i) => `<img src="${u}" alt="Transfer letter page ${i + 1}" class="letter-page w-full border rounded bg-white">`).join("")
+        + (d.mime === "application/pdf" ? `<p class="text-gray-500">PDF kept as ${urls.length} page picture${urls.length === 1 ? "" : "s"}.</p>` : "");
+    box.classList.remove("hidden");
 }
 
 // Ordination: new CCC-CLG number; the CCC-MBR number is retired (never reused) and linked both ways.
@@ -656,7 +668,7 @@ async function ordainCurrent() {
 }
 
 function openTransfer() {
-    $("t_reason").value = "Transfer"; $("t_date").value = today(); $("t_to").value = ""; $("t_letter").value = "";
+    $("t_reason").value = "Transfer"; $("t_date").value = today(); $("t_to").value = ""; $("t_letter").value = ""; transferReasonChanged();
     closeModal("recordModal");
     openModal("transferModal");
 }
@@ -668,12 +680,7 @@ async function saveTransfer() {
         try {
             const batch = db.batch();
             let letterId = "";
-            if ($("t_letter").files[0]) {
-                const image = await compressImage($("t_letter").files[0], 250000, 1400);
-                const ref = parishRef().collection("letters").doc();
-                letterId = ref.id;
-                batch.set(ref, { clergyId: c.memberNo, image, createdAt: nowIso() });
-            }
+            if (reason === "Transfer" && $("t_letter").files[0]) letterId = await addLetterToBatch(batch, $("t_letter").files[0], c.memberNo); // Batch 21
             const record = (c.serviceRecord || []).map(r => r.to ? r : { ...r, to: leftDate });
             batch.update(parishRef().collection("clergy").doc(c.memberNo), {
                 status: "Former", leftDate, leaveReason: reason, transferredTo: to, letterId, serviceRecord: record, updatedAt: nowIso() });
@@ -1308,6 +1315,7 @@ function renderReports() {
     for (const d of r.depts) { const t = byDept[d.dept] ||= { s: 0, p: 0 }; t.s++; t.p += d.present.length; }
     $("rpDepts").innerHTML = Object.keys(byDept).length ? tbl(["Department", "Sessions", "Avg present"], Object.entries(byDept).map(([k, t]) =>
         `<tr><td class="p-1.5">${esc(deptName(k))}</td><td class="p-1.5">${t.s}</td><td class="p-1.5 font-bold">${Math.round(t.p / t.s)}</td></tr>`)) : `<p class="text-gray-400 italic">No department sessions in this period.</p>`;
+    r.view = { type, recs, bs, byType, byDept }; // Batch 21: reused by the Excel / PDF downloads
 }
 function exportCsv(which) {
     const r = att.reports;

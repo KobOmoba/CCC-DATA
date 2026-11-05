@@ -164,7 +164,8 @@ service cloud.firestore {
     }
     function validClergy(d, id) {
       return d.keys().hasOnly(personKeys().concat(['formerMemberNo', 'joinedDate', 'leftDate', 'leaveReason',
-          'transferredTo', 'letterId', 'serviceRecord', 'deathId', 'postingId', 'postedFrom', 'postedFromParishId']))
+          'transferredTo', 'letterId', 'serviceRecord', 'deathId', 'postingId', 'postedFrom', 'postedFromParishId',
+          'servicePeriods', 'restoreCount', 'restoredDate', 'version']))
         && validPerson(d, id) && d.status in ['Active', 'Former']
         // Clergy must carry an email so the clergy-not-admin rule can be enforced.
         && d.email != '' && !isAdminEmail(d.email)
@@ -174,6 +175,31 @@ service cloud.firestore {
         && d.get('leaveReason', '') in ['', 'Transfer', 'Posting', 'Retired', 'Called to glory', 'Other', 'Converted to member']
         && d.get('serviceRecord', []) is list && d.get('serviceRecord', []).size() <= 40
         && (d.status == 'Active' || isDate(d.get('leftDate', '')));
+    }
+    // Batch 21: a Former clergy can be "Restored to service" with the SAME number. Previous service periods are kept
+    // (append-only) and each return is audit-logged in the same write (never deleted). Women cannot be
+    // clergy; called-to-glory, posted-out and converted records cannot come back. Every other update keeps the periods.
+    function clergyHistoryOk(p, id) {
+      return (resource.data.status == 'Former' && request.resource.data.status == 'Active') ? restoresOk(p, id)
+        : (request.resource.data.get('restoreCount', 0) == resource.data.get('restoreCount', 0)
+           && request.resource.data.get('servicePeriods', []) == resource.data.get('servicePeriods', [])
+           && request.resource.data.get('restoredDate', '') == resource.data.get('restoredDate', '')
+           && request.resource.data.get('version', 0) == resource.data.get('version', 0));
+    }
+    // Kept small (validClergy is near the 1000-expression budget). The audit entry targets the clergy doc itself:
+    // version == restoreCount, so auditLog/parishes_{p}_clergy_{no}_v{n} records each return (never deleted).
+    function restoresOk(p, id) {
+      let o = resource.data;
+      let d = request.resource.data;
+      let k = o.get('servicePeriods', []).size();
+      return d.gender == 'Male' && o.get('deathId', '') == '' && d.servicePeriods is list && k < 20
+        && !(o.get('leaveReason', '') in ['Called to glory', 'Posting', 'Converted to member'])
+        && d.get('restoreCount', 0) == o.get('restoreCount', 0) + 1 && d.get('version', 0) == d.restoreCount
+        && d.servicePeriods.size() == k + 1 && d.servicePeriods.hasAll(o.get('servicePeriods', []))
+        && d.servicePeriods[k].to == o.leftDate && d.email == o.email
+        && isDate(d.get('restoredDate', '')) && d.restoredDate >= o.leftDate && d.leftDate == '' && d.leaveReason == ''
+        && getAfter(docAt('clergyIndex/' + d.email)).data.clergyId == id
+        && auditedAfter('parishes/' + p + '/clergy/' + id, d.restoreCount);
     }
     // Number, identity and consent date never change after creation.
     function keepsIdentity() {
@@ -663,17 +689,41 @@ service cloud.firestore {
           && request.resource.data.status == 'Active'
           && takesNextNumber(parishId, 'clg', 'CLG-', clergyId)
           && (!('postingId' in request.resource.data) || postingArrives(parishId, request.resource.data, clergyId));
-        allow update: if (isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId) && keepsIdentity())
+        allow update: if (isParishAdminOf(parishId) && validClergy(request.resource.data, clergyId) && keepsIdentity()
+            && clergyHistoryOk(parishId, clergyId))
           || (isNamedSuper() && validClergy(request.resource.data, clergyId) && keepsIdentity() && postingDeparts(parishId, clergyId));
         allow delete: if false;
       }
-      // Transfer letters (photo of the letter), kept apart from the clergy doc.
+      // Transfer letters, kept apart from the clergy doc. Old: one photo (image). Batch 21: photo or PDF stored the
+      // free-plan way the Archive uses: compressed JPEG page pictures in <= 700 KB chunks (letters/{id}/chunks/{n}).
       match /letters/{id} {
         allow read: if isParishAdminOf(parishId);
         allow create: if isParishAdminOf(parishId)
-          && request.resource.data.keys().hasOnly(['clergyId', 'image', 'createdAt'])
-          && str(request.resource.data.clergyId, 30) && optImage(request.resource.data, 'image', 400000);
+          && ((request.resource.data.keys().hasOnly(['clergyId', 'image', 'createdAt'])
+               && str(request.resource.data.clergyId, 30) && optImage(request.resource.data, 'image', 400000))
+            || (request.resource.data.keys().hasOnly(['clergyId', 'storage', 'mime', 'fileName', 'size', 'pages', 'chunks', 'createdAt', 'createdBy'])
+               && isNo(request.resource.data.clergyId, 'CLG') && exists(docAt('parishes/' + parishId + '/clergy/' + request.resource.data.clergyId))
+               && request.resource.data.storage == 'firestore' && request.resource.data.mime in ['image/jpeg', 'application/pdf']
+               && s(request.resource.data.fileName, 120) && request.resource.data.createdBy == request.auth.uid
+               && request.resource.data.size is int && request.resource.data.size > 0 && request.resource.data.size <= 5242880
+               && request.resource.data.pages is int && request.resource.data.pages >= 1 && request.resource.data.pages <= 10
+               && request.resource.data.chunks is int && request.resource.data.chunks >= 1 && request.resource.data.chunks <= 20
+               && existsAfter(docAt('parishes/' + parishId + '/letters/' + id + '/chunks/' + string(request.resource.data.chunks - 1)))));
         allow update, delete: if false;
+        // File bytes: written once, in the letter's own create batch; never changed, never deleted.
+        match /chunks/{n} {
+          allow read: if isParishAdminOf(parishId);
+          allow create: if isParishAdminOf(parishId) && n.matches('^[0-9]{1,2}$')
+            && !exists(docAt('parishes/' + parishId + '/letters/' + id))
+            && getAfter(docAt('parishes/' + parishId + '/letters/' + id)).data.get('storage', '') == 'firestore'
+            && getAfter(docAt('parishes/' + parishId + '/letters/' + id)).data.createdBy == request.auth.uid
+            && int(n) < getAfter(docAt('parishes/' + parishId + '/letters/' + id)).data.chunks
+            && request.resource.data.keys().hasOnly(['page', 'data'])
+            && request.resource.data.page is int && request.resource.data.page >= 0
+            && request.resource.data.page < getAfter(docAt('parishes/' + parishId + '/letters/' + id)).data.pages
+            && request.resource.data.data is bytes && request.resource.data.data.size() > 0 && request.resource.data.data.size() <= 716800;
+          allow update, delete: if false;
+        }
       }
       // Departments: term dates per department, and one membership doc per (department, member).
       match /departments/{dept} {
@@ -1565,7 +1615,7 @@ service cloud.firestore {
         || (d.target.matches('^(hqSettings|alerts|rollupRuns|hqStaff|hqStaffFiles|hqMembers|hqLeave|committees|committeeMembers|leaders|adminHandovers|bibleReadings)/.+') && isNamedSuper() && d.parishId == '')
         || (d.target.matches('^parishes/[A-Za-z0-9]+/letters/CCC-[A-Z0-9-]+$') && d.action == 'issue-letter'
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
-        || (d.target.matches('^parishes/[A-Za-z0-9]+/(pcommittees|celebrations|anointings|rankHistory|rosters|rosterConfig|importLog)/[A-Za-z0-9_-]+$')
+        || (d.target.matches('^parishes/[A-Za-z0-9]+/(pcommittees|celebrations|anointings|rankHistory|rosters|rosterConfig|importLog|clergy)/[A-Za-z0-9_-]+$')
             && d.parishId == d.target.split('/')[1] && isParishAdminOf(d.parishId))
         || (d.target.matches('^archive/[A-Za-z0-9_-]+$') && d.parishId == getAfter(docAt(d.target)).data.parishId
             && (isParishAdminOf(d.parishId) || isNamedSuper()))
